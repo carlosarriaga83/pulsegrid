@@ -14,13 +14,6 @@ let schemaReady;
 
 app.disable('x-powered-by');
 app.use(express.json({ limit: '32kb' }));
-app.use(session({
-  name: 'pulsegrid.sid',
-  secret: process.env.SESSION_SECRET || 'replace-this-in-hostinger',
-  resave: false,
-  saveUninitialized: false,
-  cookie: { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', maxAge: 1000 * 60 * 60 * 24 * 7 }
-}));
 
 function fail(response, status, error) {
   return response.status(status).json({ error });
@@ -33,6 +26,49 @@ function database() {
   pool = mysql.createPool({ host: DB_HOST, port: Number(DB_PORT || 3306), database: DB_NAME, user: DB_USER, password: DB_PASSWORD, waitForConnections: true, connectionLimit: 5, charset: 'utf8mb4' });
   return pool;
 }
+
+let sessionTableReady;
+
+function ensureSessionTable() {
+  if (!sessionTableReady) sessionTableReady = database().execute("CREATE TABLE IF NOT EXISTS sessions (session_id VARCHAR(128) PRIMARY KEY, data JSON NOT NULL, expires DATETIME NOT NULL, INDEX sessions_expires (expires)) ENGINE=InnoDB");
+  return sessionTableReady;
+}
+
+class MySqlSessionStore extends session.Store {
+  async get(sessionId, callback) {
+    try {
+      await ensureSessionTable();
+      const [rows] = await database().execute('SELECT data FROM sessions WHERE session_id = ? AND expires > NOW()', [sessionId]);
+      callback(null, rows[0] ? JSON.parse(rows[0].data) : null);
+    } catch (error) { callback(error); }
+  }
+
+  async set(sessionId, sessionData, callback) {
+    try {
+      await ensureSessionTable();
+      const expires = sessionData.cookie?.expires ? new Date(sessionData.cookie.expires) : new Date(Date.now() + 1000 * 60 * 60 * 24 * 7);
+      await database().execute('INSERT INTO sessions (session_id, data, expires) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE data = VALUES(data), expires = VALUES(expires)', [sessionId, JSON.stringify(sessionData), expires]);
+      callback?.(null);
+    } catch (error) { callback?.(error); }
+  }
+
+  async destroy(sessionId, callback) {
+    try {
+      await ensureSessionTable();
+      await database().execute('DELETE FROM sessions WHERE session_id = ?', [sessionId]);
+      callback?.(null);
+    } catch (error) { callback?.(error); }
+  }
+}
+
+app.use(session({
+  name: 'pulsegrid.sid',
+  secret: process.env.SESSION_SECRET || 'replace-this-in-hostinger',
+  store: new MySqlSessionStore(),
+  resave: false,
+  saveUninitialized: false,
+  cookie: { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', maxAge: 1000 * 60 * 60 * 24 * 7 }
+}));
 
 async function ensureSchema() {
   if (schemaReady) return schemaReady;
