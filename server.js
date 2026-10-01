@@ -9,6 +9,7 @@ require('dotenv').config({ path: path.join(__dirname, '.env', 'local.env') });
 const app = express();
 const port = Number(process.env.PORT || 3000);
 const root = __dirname;
+const publicRoot = path.join(root, 'public');
 let pool;
 let schemaReady;
 
@@ -141,8 +142,8 @@ app.post('/api/devices', apiReady, async (request, response) => {
   } catch (error) { fail(response, error.code === 'ER_DUP_ENTRY' ? 409 : 500, error.code === 'ER_DUP_ENTRY' ? 'El Device ID ya existe en este workspace' : 'No fue posible crear el dispositivo'); }
 });
 
-app.get('/', (request, response) => response.sendFile(path.join(root, 'index.html')));
-app.get(['/index.html', '/styles.css', '/app.js'], (request, response) => response.sendFile(path.join(root, request.path)));
+app.use(express.static(publicRoot));
+app.get('/', (request, response) => response.sendFile(path.join(publicRoot, 'index.html')));
 app.all('/api/*splat', (request, response) => fail(response, 404, 'Unknown action'));
 app.use((request, response) => response.status(404).send('Not found'));
 
