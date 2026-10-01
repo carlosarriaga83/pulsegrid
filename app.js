@@ -188,10 +188,32 @@ function clearUser() {
   $('.user-profile .avatar').textContent = 'PG';
 }
 
+function parseTelemetry(telemetry) {
+  if (!telemetry) return {};
+  if (typeof telemetry === 'object') return telemetry;
+  try { return JSON.parse(telemetry); } catch { return {}; }
+}
+
+function curtainMeta(telemetry) {
+  const servos = Object.entries(telemetry.servos || {});
+  const percentages = servos.map(([, servo]) => Number(servo.blind_percent)).filter(Number.isFinite);
+  const opening = percentages.length ? `${Math.round(percentages.reduce((total, percent) => total + percent, 0) / percentages.length)}% abierta` : 'Posicion sin calibrar';
+  const moving = servos.some(([, servo]) => servo.multiturn_active);
+  const recoveryNeeded = servos.some(([, servo]) => servo.position_recovery_required);
+  const servoState = recoveryNeeded ? 'Recalibracion requerida' : moving ? 'En movimiento' : servos.length ? `Servos ${servos.map(([id, servo]) => `${id}: ${Math.round(Number(servo.blind_percent) || 0)}%`).join(' · ')}` : 'Sin servos detectados';
+  return { icon: 'blinds', meta: [{ icon: 'blinds', text: opening }, { icon: recoveryNeeded ? 'triangle-alert' : moving ? 'move-horizontal' : 'circle-pause', text: servoState }] };
+}
+
+function devicePresentation(device) {
+  const telemetry = parseTelemetry(device.telemetry);
+  if (telemetry.kind === 'curtain') return curtainMeta(telemetry);
+  return { icon: 'cpu', meta: [{ icon: 'radio', text: device.status === 'online' ? 'Telemetria activa' : 'Sin conexion' }, { icon: 'circle-dot', text: device.report ? 'Ultimo estado recibido' : 'Sin telemetria' }] };
+}
+
 async function loadDevices() {
   try {
     const result = await apiRequest('devices');
-    devices.splice(0, devices.length, ...result.devices.map((device) => ({ ...device, report: device.report ? new Date(device.report).toLocaleString('es-MX') : 'sin reporte', signal: device.status === 'online' ? 'good' : 'mid', icon: 'cpu', temp: '--', battery: '--' })));
+    devices.splice(0, devices.length, ...result.devices.map((device) => ({ ...device, ...devicePresentation(device), report: device.report ? new Date(device.report).toLocaleString('es-MX') : 'sin reporte', signal: device.status === 'online' ? 'good' : 'mid' })));
   } catch {
     devices.splice(0, devices.length);
   }
@@ -241,7 +263,7 @@ function renderDeviceCards(filter = '', status = 'all') {
     const matchesStatus = status === 'all' || device.status === status;
     return matchesSearch && matchesStatus;
   });
-  grid.innerHTML = filtered.length ? filtered.map((device) => `<article class="device-card"><div class="device-card-top"><span class="device-icon"><i data-lucide="${device.icon}"></i></span>${deviceStatus(device)}</div><h3>${device.name}</h3><span class="device-card-id">${device.id} · ${device.type}</span><div class="device-status ${device.status}"><i data-lucide="clock-3"></i> Ultimo reporte: ${device.report}</div><div class="device-meta"><span><i data-lucide="thermometer"></i> ${device.temp}</span><span><i data-lucide="battery-medium"></i> ${device.battery}</span></div></article>`).join('') : '<div class="panel" style="padding:30px;color:var(--muted)">No encontramos dispositivos con ese criterio.</div>';
+  grid.innerHTML = filtered.length ? filtered.map((device) => `<article class="device-card"><div class="device-card-top"><span class="device-icon"><i data-lucide="${device.icon}"></i></span>${deviceStatus(device)}</div><h3>${device.name}</h3><span class="device-card-id">${device.id} · ${device.type}</span><div class="device-status ${device.status}"><i data-lucide="clock-3"></i> Ultimo reporte: ${device.report}</div><div class="device-meta">${device.meta.map((item) => `<span><i data-lucide="${item.icon}"></i> ${item.text}</span>`).join('')}</div></article>`).join('') : '<div class="panel" style="padding:30px;color:var(--muted)">No encontramos dispositivos con ese criterio.</div>';
   renderIcons();
 }
 

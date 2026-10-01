@@ -154,7 +154,7 @@ app.post('/api/api-key', requireSession, apiReady, async (request, response) => 
 
 app.get('/api/devices', apiReady, async (request, response) => {
   if (!request.session.user) return fail(response, 401, 'Authentication required');
-  const [rows] = await database().execute("SELECT device_id AS id, name, type, CASE WHEN last_seen IS NOT NULL AND last_seen >= DATE_SUB(NOW(), INTERVAL 90 SECOND) THEN 'online' ELSE 'offline' END AS status, last_seen AS report FROM devices WHERE user_id = (SELECT id FROM users WHERE email = ?) ORDER BY created_at DESC", [request.session.user.email]);
+  const [rows] = await database().execute("SELECT devices.device_id AS id, devices.name, devices.type, CASE WHEN devices.last_seen IS NOT NULL AND devices.last_seen >= DATE_SUB(NOW(), INTERVAL 90 SECOND) THEN 'online' ELSE 'offline' END AS status, devices.last_seen AS report, (SELECT telemetry.payload FROM telemetry WHERE telemetry.device_id = devices.id ORDER BY telemetry.id DESC LIMIT 1) AS telemetry FROM devices WHERE devices.user_id = (SELECT id FROM users WHERE email = ?) ORDER BY devices.created_at DESC", [request.session.user.email]);
   response.json({ devices: rows });
 });
 
