@@ -317,10 +317,29 @@ function configureCurtainCommands() {
   const commandSelect = $('#command-name') || $$('.command-compose select')[1];
   const payload = $('#command-payload') || $('.command-compose textarea');
   if (!commandSelect || !payload) return;
+  const commands = {
+    'curtain.open': { payload: {}, help: 'No requiere payload. Abre ambos servos de la cortina.' },
+    'curtain.close': { payload: {}, help: 'No requiere payload. Cierra ambos servos de la cortina.' },
+    'curtain.stop': { payload: {}, help: 'No requiere payload. Detiene el movimiento actual de ambos servos.' },
+    'curtain.move': { payload: { servoId: 1, percent: 50, speed: 800, acceleration: 50 }, help: 'servoId: 1 o 2. percent: 0-100. speed: 0-3073. acceleration: 0-150.' }
+  };
   commandSelect.id = 'command-name';
   commandSelect.innerHTML = '<option value="curtain.open">Abrir cortina</option><option value="curtain.close">Cerrar cortina</option><option value="curtain.stop">Detener cortina</option><option value="curtain.move">Mover cortina</option>';
   payload.id = 'command-payload';
-  payload.value = '{}';
+  let help = $('#command-payload-help');
+  if (!help) {
+    help = document.createElement('small');
+    help.id = 'command-payload-help';
+    help.className = 'command-payload-help';
+    payload.insertAdjacentElement('afterend', help);
+  }
+  const applyCommandTemplate = () => {
+    const definition = commands[commandSelect.value];
+    payload.value = JSON.stringify(definition.payload, null, 2);
+    help.textContent = definition.help;
+  };
+  commandSelect.addEventListener('change', applyCommandTemplate);
+  applyCommandTemplate();
 }
 
 configureCurtainCommands();
@@ -336,7 +355,12 @@ $('#execute-command').addEventListener('click', async () => {
     showToast(error instanceof SyntaxError ? 'El payload debe ser JSON valido' : error.message);
   }
 });
-$('#send-command').addEventListener('click', () => navigate('commands'));
+$('#send-command').addEventListener('click', () => {
+  navigate('commands');
+  const composer = $('.command-compose');
+  composer.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  window.setTimeout(() => $('#command-name').focus(), 250);
+});
 
 ensureSettingsViewInMain();
 setupWikiNavigation();
