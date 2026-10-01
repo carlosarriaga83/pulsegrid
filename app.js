@@ -31,19 +31,16 @@ function introGuideMarkup() {
 }
 
 function languageExamplesMarkup() {
-  return `<div class="docs-section"><span class="step-number">04</span><div class="wiki-guide"><h2>Prueba la API antes del sensor</h2><p>Antes de conectar un sensor, practica una peticion HTTP. Reemplaza <code>ESP32_ID</code> por el ID del dispositivo y modifica el JSON para tus propias lecturas.</p><h3>JavaScript con fetch</h3><div class="code-block wiki-code"><pre><code>await fetch('/api/telemetry', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ deviceId: 'ESP32_ID', temperature: 24.8 })
-});</code></pre></div><h3>Python con requests</h3><div class="code-block wiki-code"><pre><code>import requests
-
-response = requests.post(
-    'https://pulsegrid.2api2.com/api/telemetry',
-    json={ 'deviceId': 'ESP32_ID', 'temperature': 24.8 }
-)
-print(response.status_code)</code></pre></div><h3>Terminal con curl</h3><div class="code-block wiki-code"><pre><code>curl -X POST https://pulsegrid.2api2.com/api/telemetry \
-  -H "Content-Type: application/json" \
-  -d "{\\"deviceId\\":\\"ESP32_ID\\",\\"temperature\\":24.8}"</code></pre></div><div class="wiki-callout"><strong>Siguiente paso</strong><p>Cuando la prueba responda correctamente, sustituye el valor fijo por una lectura real. Puedes usar un DHT para temperatura y humedad o <code>analogRead()</code> para un sensor analogico.</p></div></div></div>`;
+  const baseUrl = window.location.origin;
+  const examples = {
+    arduino: `#include <WiFi.h>\n#include <HTTPClient.h>\n\nconst char* API_KEY = "pg_live_TU_API_KEY";\nconst char* DEVICE_ID = "ESP32_ID";\n\nHTTPClient http;\nhttp.begin("${baseUrl}/api/telemetry");\nhttp.addHeader("Content-Type", "application/json");\nhttp.addHeader("X-API-Key", API_KEY);\nhttp.POST("{\\"deviceId\\":\\"" + String(DEVICE_ID) + "\\",\\"temperature\\":24.8}");\nhttp.end();`,
+    micropython: `import urequests\n\nAPI_KEY = "pg_live_TU_API_KEY"\nDEVICE_ID = "ESP32_ID"\n\nresponse = urequests.post(\n    "${baseUrl}/api/telemetry",\n    headers={"X-API-Key": API_KEY, "Content-Type": "application/json"},\n    json={"deviceId": DEVICE_ID, "temperature": 24.8, "humidity": 58}\n)\nprint(response.status_code)\nresponse.close()`,
+    python: `import requests\n\nresponse = requests.post(\n    "${baseUrl}/api/telemetry",\n    headers={"X-API-Key": "pg_live_TU_API_KEY"},\n    json={"deviceId": "ESP32_ID", "temperature": 24.8, "humidity": 58}\n)\nresponse.raise_for_status()`,
+    javascript: `await fetch("${baseUrl}/api/telemetry", {\n  method: "POST",\n  headers: {\n    "Content-Type": "application/json",\n    "X-API-Key": "pg_live_TU_API_KEY"\n  },\n  body: JSON.stringify({ deviceId: "ESP32_ID", temperature: 24.8 })\n});`,
+    curl: `curl -X POST "${baseUrl}/api/telemetry" \\\n+  -H "Content-Type: application/json" \\\n+  -H "X-API-Key: pg_live_TU_API_KEY" \\\n+  -d '{"deviceId":"ESP32_ID","temperature":24.8,"humidity":58}'`
+  };
+  const tabs = [['arduino', 'Arduino C++'], ['micropython', 'MicroPython'], ['python', 'Python'], ['javascript', 'JavaScript'], ['curl', 'cURL']];
+  return `<div class="docs-section"><span class="step-number">04</span><div class="wiki-guide"><h2>Clave de API y ejemplos</h2><p>Genera una clave para tu cuenta y guárdala en el firmware o en variables de entorno. La clave se muestra completa solo al crearla o rotarla.</p><div class="api-key-panel" id="wiki-api-key"><div><strong>Clave de API</strong><p id="api-key-status">Inicia sesion para crear una clave.</p></div><button class="secondary-button" id="api-key-action"><i data-lucide="key-round"></i> Crear clave</button></div><div class="api-key-secret" id="api-key-secret" hidden><code></code><button class="copy-button" title="Copiar clave"><i data-lucide="copy"></i> Copiar</button></div><p>Incluye la cabecera <code>X-API-Key</code> en cada envio. Sustituye <code>ESP32_ID</code> por el identificador que registraste en Dispositivos.</p><div class="code-tabs" role="tablist">${tabs.map(([key, label], index) => `<button class="code-tab${index === 0 ? ' active' : ''}" data-code-tab="${key}" role="tab">${label}</button>`).join('')}</div><div class="code-block wiki-code"><div class="code-toolbar"><span id="code-language">Arduino C++</span><button class="copy-button" id="copy-code-example"><i data-lucide="copy"></i> Copiar</button></div><pre><code id="language-code-example"></code></pre></div><script type="application/json" id="language-examples">${JSON.stringify(examples).replace(/</g, '\\u003c')}</script><div class="wiki-callout"><strong>Rotacion</strong><p>Al rotar la clave, la anterior deja de funcionar de inmediato. Actualiza todos tus dispositivos antes de eliminar una clave en uso.</p></div></div></div>`;
 }
 
 function renderWikiPage(key) {
@@ -54,6 +51,7 @@ function renderWikiPage(key) {
 fetch(endpoint, { method: '${page[2] === 'MQTT' ? 'SUBSCRIBE' : 'POST'}' });</code></pre></div></div></div>`;
   $$('.wiki-link').forEach((item) => item.classList.toggle('active', item.dataset.wiki === key));
   bindCopyButtons();
+  bindWikiApiControls();
   renderIcons();
 }
 
@@ -66,6 +64,57 @@ function bindCopyButtons() {
       showToast('Copiado al portapapeles');
     });
   });
+}
+
+function bindWikiApiControls() {
+  const examplesNode = $('#language-examples');
+  if (!examplesNode) return;
+  const examples = JSON.parse(examplesNode.textContent);
+  const code = $('#language-code-example');
+  const language = $('#code-language');
+  const tabs = $$('.code-tab');
+  const showExample = (key) => {
+    code.textContent = examples[key];
+    language.textContent = tabs.find((tab) => tab.dataset.codeTab === key).textContent;
+    tabs.forEach((tab) => tab.classList.toggle('active', tab.dataset.codeTab === key));
+  };
+  tabs.forEach((tab) => tab.addEventListener('click', () => showExample(tab.dataset.codeTab)));
+  $('#copy-code-example').addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(code.textContent); } catch { /* clipboard unavailable */ }
+    showToast('Ejemplo copiado');
+  });
+  const action = $('#api-key-action');
+  const status = $('#api-key-status');
+  const secret = $('#api-key-secret');
+  const secretValue = $('code', secret);
+  const secretCopy = $('.copy-button', secret);
+  const displayKey = (apiKey) => {
+    secretValue.textContent = apiKey;
+    secret.hidden = false;
+    secretCopy.onclick = async () => {
+      try { await navigator.clipboard.writeText(apiKey); } catch { /* clipboard unavailable */ }
+      showToast('Clave copiada');
+    };
+  };
+  apiRequest('api-key').then((result) => {
+    if (result.apiKey) {
+      status.textContent = `Activa: ${result.apiKey.hint}`;
+      action.innerHTML = '<i data-lucide="refresh-cw"></i> Rotar clave';
+    } else status.textContent = 'Aun no tienes una clave de API.';
+    renderIcons();
+  }).catch(() => { action.textContent = 'Inicia sesion'; });
+  action.addEventListener('click', async () => {
+    try {
+      const result = await apiRequest('api-key', { method: 'POST' });
+      status.textContent = `Activa: ${result.hint}`;
+      action.innerHTML = '<i data-lucide="refresh-cw"></i> Rotar clave';
+      displayKey(result.apiKey);
+      renderIcons();
+    } catch (error) {
+      if (error.message === 'Authentication required') showAuthModal('login'); else showToast(error.message);
+    }
+  });
+  showExample('arduino');
 }
 
 function setupWikiNavigation() {

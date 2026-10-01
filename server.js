@@ -3,6 +3,7 @@ const express = require('express');
 const cookieSession = require('cookie-session');
 const mysql = require('mysql2/promise');
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 
 require('dotenv').config({ path: path.join(__dirname, '.env', 'local.env') });
 
@@ -19,6 +20,14 @@ app.use(express.json({ limit: '32kb' }));
 
 function fail(response, status, error) {
   return response.status(status).json({ error });
+}
+
+function hashApiKey(apiKey) {
+  return crypto.createHash('sha256').update(apiKey).digest('hex');
+}
+
+function createApiKey() {
+  return `pg_live_${crypto.randomBytes(24).toString('base64url')}`;
 }
 
 function database() {
@@ -43,6 +52,7 @@ async function ensureSchema() {
   schemaReady = (async () => {
     const db = database();
     await db.execute("CREATE TABLE IF NOT EXISTS users (id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY, name VARCHAR(120) NOT NULL, email VARCHAR(190) NOT NULL UNIQUE, password_hash VARCHAR(255) NOT NULL, role ENUM('admin','operator','viewer') NOT NULL DEFAULT 'viewer', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP) ENGINE=InnoDB");
+    await db.execute("CREATE TABLE IF NOT EXISTS api_keys (id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY, user_id INT UNSIGNED NOT NULL UNIQUE, key_hash CHAR(64) NOT NULL UNIQUE, key_hint VARCHAR(16) NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, last_used_at TIMESTAMP NULL, CONSTRAINT api_keys_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE) ENGINE=InnoDB");
     await db.execute("CREATE TABLE IF NOT EXISTS devices (id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY, user_id INT UNSIGNED NOT NULL, device_id VARCHAR(80) NOT NULL, name VARCHAR(120) NOT NULL, type VARCHAR(60) NOT NULL, status ENUM('online','offline') NOT NULL DEFAULT 'offline', last_seen TIMESTAMP NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, UNIQUE KEY user_device (user_id, device_id), CONSTRAINT devices_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE) ENGINE=InnoDB");
     await db.execute("CREATE TABLE IF NOT EXISTS telemetry (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, device_id INT UNSIGNED NOT NULL, payload JSON NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, INDEX telemetry_device (device_id), CONSTRAINT telemetry_device_fk FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE) ENGINE=InnoDB");
     await db.execute("CREATE TABLE IF NOT EXISTS commands (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, device_id INT UNSIGNED NOT NULL, command_name VARCHAR(80) NOT NULL, payload JSON NOT NULL, status VARCHAR(30) NOT NULL DEFAULT 'queued', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, CONSTRAINT commands_device_fk FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE) ENGINE=InnoDB");
@@ -96,6 +106,23 @@ app.post('/api/logout', (request, response) => {
   response.json({ ok: true });
 });
 
+function requireSession(request, response, next) {
+  if (!request.session.user) return fail(response, 401, 'Authentication required');
+  next();
+}
+
+app.get('/api/api-key', requireSession, apiReady, async (request, response) => {
+  const [rows] = await database().execute('SELECT key_hint AS hint, created_at AS createdAt, last_used_at AS lastUsedAt FROM api_keys WHERE user_id = (SELECT id FROM users WHERE email = ?) LIMIT 1', [request.session.user.email]);
+  response.json({ apiKey: rows[0] || null });
+});
+
+app.post('/api/api-key', requireSession, apiReady, async (request, response) => {
+  const apiKey = createApiKey();
+  const keyHint = `${apiKey.slice(0, 11)}...${apiKey.slice(-4)}`;
+  await database().execute('INSERT INTO api_keys (user_id, key_hash, key_hint) VALUES ((SELECT id FROM users WHERE email = ?), ?, ?) ON DUPLICATE KEY UPDATE key_hash = VALUES(key_hash), key_hint = VALUES(key_hint), created_at = CURRENT_TIMESTAMP, last_used_at = NULL', [request.session.user.email, hashApiKey(apiKey), keyHint]);
+  response.status(201).json({ apiKey, hint: keyHint });
+});
+
 app.get('/api/devices', apiReady, async (request, response) => {
   if (!request.session.user) return fail(response, 401, 'Authentication required');
   const [rows] = await database().execute('SELECT device_id AS id, name, type, status, last_seen AS report FROM devices WHERE user_id = (SELECT id FROM users WHERE email = ?) ORDER BY created_at DESC', [request.session.user.email]);
@@ -110,6 +137,21 @@ app.post('/api/devices', apiReady, async (request, response) => {
     const [result] = await database().execute("INSERT INTO devices (user_id, device_id, name, type, status, last_seen) VALUES ((SELECT id FROM users WHERE email = ?), ?, ?, ?, 'online', NOW())", [request.session.user.email, String(id).trim(), String(name).trim(), String(type).trim()]);
     response.status(201).json({ ok: true, id: result.insertId });
   } catch (error) { fail(response, error.code === 'ER_DUP_ENTRY' ? 409 : 500, error.code === 'ER_DUP_ENTRY' ? 'El Device ID ya existe en este workspace' : 'No fue posible crear el dispositivo'); }
+});
+
+app.post('/api/telemetry', apiReady, async (request, response) => {
+  const apiKey = request.get('x-api-key');
+  const { deviceId, ...payload } = request.body || {};
+  if (!apiKey || !deviceId || Object.keys(payload).length === 0) return fail(response, 422, 'X-API-Key, deviceId y al menos una lectura son obligatorios');
+  const db = database();
+  const [keys] = await db.execute('SELECT user_id FROM api_keys WHERE key_hash = ? LIMIT 1', [hashApiKey(apiKey)]);
+  if (!keys[0]) return fail(response, 401, 'Invalid API key');
+  const [devices] = await db.execute('SELECT id FROM devices WHERE user_id = ? AND device_id = ? LIMIT 1', [keys[0].user_id, String(deviceId).trim()]);
+  if (!devices[0]) return fail(response, 404, 'Device not found for this API key');
+  await db.execute('INSERT INTO telemetry (device_id, payload) VALUES (?, ?)', [devices[0].id, JSON.stringify(payload)]);
+  await db.execute("UPDATE devices SET status = 'online', last_seen = NOW() WHERE id = ?", [devices[0].id]);
+  await db.execute('UPDATE api_keys SET last_used_at = NOW() WHERE key_hash = ?', [hashApiKey(apiKey)]);
+  response.status(201).json({ ok: true });
 });
 
 app.use(express.static(publicRoot));

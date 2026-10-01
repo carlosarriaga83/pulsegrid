@@ -46,6 +46,33 @@ print(response.status_code)</code></pre></div><h3>Terminal con curl</h3><div cla
   -d "{\\"deviceId\\":\\"ESP32_ID\\",\\"temperature\\":24.8}"</code></pre></div><div class="wiki-callout"><strong>Siguiente paso</strong><p>Cuando la prueba responda correctamente, sustituye el valor fijo por una lectura real. Puedes usar un DHT para temperatura y humedad o <code>analogRead()</code> para un sensor analogico.</p></div></div></div>`;
 }
 
+function languageExamplesMarkup() {
+  const base = window.location.origin;
+  const examples = {
+    arduino: `#include <HTTPClient.h>\nconst char* API_KEY = "pg_live_TU_API_KEY";\n\nHTTPClient http;\nhttp.begin("${base}/api/telemetry");\nhttp.addHeader("Content-Type", "application/json");\nhttp.addHeader("X-API-Key", API_KEY);\nhttp.POST("{\\"deviceId\\":\\"ESP32_ID\\",\\"temperature\\":24.8}");\nhttp.end();`,
+    micropython: `import urequests\n\nresponse = urequests.post(\n    "${base}/api/telemetry",\n    headers={"X-API-Key": "pg_live_TU_API_KEY"},\n    json={"deviceId": "ESP32_ID", "temperature": 24.8}\n)\nresponse.close()`,
+    python: `import requests\n\nrequests.post(\n    "${base}/api/telemetry",\n    headers={"X-API-Key": "pg_live_TU_API_KEY"},\n    json={"deviceId": "ESP32_ID", "temperature": 24.8}\n).raise_for_status()`,
+    javascript: `await fetch("${base}/api/telemetry", {\n  method: "POST",\n  headers: {"Content-Type":"application/json", "X-API-Key":"pg_live_TU_API_KEY"},\n  body: JSON.stringify({deviceId:"ESP32_ID", temperature:24.8})\n});`,
+    curl: `curl -X POST "${base}/api/telemetry" \\\n+  -H "Content-Type: application/json" \\\n+  -H "X-API-Key: pg_live_TU_API_KEY" \\\n+  -d '{"deviceId":"ESP32_ID","temperature":24.8}'`
+  };
+  const tabs = [['arduino', 'Arduino C++'], ['micropython', 'MicroPython'], ['python', 'Python'], ['javascript', 'JavaScript'], ['curl', 'cURL']];
+  queueMicrotask(() => bindWikiApiControls(examples));
+  return `<div class="docs-section"><span class="step-number">04</span><div class="wiki-guide"><h2>Clave de API y ejemplos</h2><p>Crea una clave para tu cuenta. Se muestra completa solo al crearla o rotarla; guardala en tu firmware o en variables de entorno.</p><div class="api-key-panel"><div><strong>Clave de API</strong><p id="api-key-status">Inicia sesion para crear una clave.</p></div><button class="secondary-button" id="api-key-action">Crear clave</button></div><div class="api-key-secret" id="api-key-secret" hidden><code></code><button class="copy-button" id="copy-api-key">Copiar</button></div><p>Envia siempre la cabecera <code>X-API-Key</code> y reemplaza <code>ESP32_ID</code> por tu identificador registrado.</p><div class="code-tabs">${tabs.map(([id, label], index) => `<button class="code-tab${index ? '' : ' active'}" data-code-tab="${id}">${label}</button>`).join('')}</div><div class="code-block wiki-code"><div class="code-toolbar"><span id="code-language">Arduino C++</span><button class="copy-button" id="copy-code-example">Copiar</button></div><pre><code id="language-code-example"></code></pre></div><div class="wiki-callout"><strong>Rotacion</strong><p>Rotar una clave revoca la anterior de inmediato. Actualiza primero todos los dispositivos que la usan.</p></div></div></div>`;
+}
+
+function bindWikiApiControls(examples) {
+  const code = $('#language-code-example');
+  if (!code) return;
+  const tabs = $$('.code-tab');
+  const displayExample = (key) => { code.textContent = examples[key]; $('#code-language').textContent = tabs.find((tab) => tab.dataset.codeTab === key).textContent; tabs.forEach((tab) => tab.classList.toggle('active', tab.dataset.codeTab === key)); };
+  tabs.forEach((tab) => tab.addEventListener('click', () => displayExample(tab.dataset.codeTab)));
+  $('#copy-code-example').addEventListener('click', async () => { try { await navigator.clipboard.writeText(code.textContent); } catch { /* clipboard unavailable */ } showToast('Ejemplo copiado'); });
+  const action = $('#api-key-action'); const status = $('#api-key-status'); const secret = $('#api-key-secret');
+  apiRequest('api-key').then(({ apiKey }) => { if (apiKey) { status.textContent = `Activa: ${apiKey.hint}`; action.textContent = 'Rotar clave'; } else status.textContent = 'Aun no tienes una clave de API.'; }).catch(() => { action.textContent = 'Inicia sesion'; });
+  action.addEventListener('click', async () => { try { const result = await apiRequest('api-key', { method: 'POST' }); status.textContent = `Activa: ${result.hint}`; action.textContent = 'Rotar clave'; $('code', secret).textContent = result.apiKey; secret.hidden = false; $('#copy-api-key').onclick = async () => { try { await navigator.clipboard.writeText(result.apiKey); } catch { /* clipboard unavailable */ } showToast('Clave copiada'); }; } catch (error) { if (error.message === 'Authentication required') showAuthModal('login'); else showToast(error.message); } });
+  displayExample('arduino');
+}
+
 function renderWikiPage(key) {
   const page = wikiPages[key];
   const content = $('#wiki-content');
