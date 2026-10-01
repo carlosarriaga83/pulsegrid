@@ -119,6 +119,23 @@ function bindWikiApiControls() {
   showExample('arduino');
 }
 
+function bindFirmwareReleaseControls() {
+  const form = $('#firmware-release-form');
+  if (!form || form.dataset.bound) return;
+  form.dataset.bound = 'true';
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const files = Array.from($('#firmware-release-files').files || []);
+    if (!files.length) return showToast('Selecciona al menos un archivo .py');
+    try {
+      const payload = { version: $('#firmware-release-version').value.trim(), files: await Promise.all(files.map(async (file) => ({ name: file.name, content: await file.text() }))) };
+      const result = await apiRequest('firmware/releases', { method: 'POST', body: JSON.stringify(payload) });
+      $('#firmware-release-status').textContent = `Publicado ${result.release.version} con ${result.release.files.length} archivos.`;
+      showToast('Firmware publicado');
+    } catch (error) { $('#firmware-release-status').textContent = error.message; }
+  });
+}
+
 function setupWikiNavigation() {
   const keys = Object.keys(wikiPages);
   const article = $('.wiki-article');
@@ -137,9 +154,10 @@ function setupWikiNavigation() {
     const apiView = document.createElement('section');
     apiView.className = 'view';
     apiView.id = 'view-api';
-    apiView.innerHTML = `<div class="page-heading"><div><p class="eyebrow">INTEGRACION</p><h1>API<span class="accent-dot">.</span></h1><p class="heading-copy">Credenciales, ejemplos y referencia para conectar tus dispositivos.</p></div></div><article class="wiki-article">${languageExamplesMarkup()}</article>`;
+    apiView.innerHTML = `<div class="page-heading"><div><p class="eyebrow">INTEGRACION</p><h1>API<span class="accent-dot">.</span></h1><p class="heading-copy">Credenciales, ejemplos y referencia para conectar tus dispositivos.</p></div></div><article class="wiki-article">${languageExamplesMarkup()}<div class="docs-section"><span class="step-number">05</span><div class="wiki-guide"><h2>Publicar firmware MicroPython</h2><p>Selecciona los archivos .py del dispositivo para crear una version OTA. El dispositivo verificara cada archivo antes de reiniciar.</p><form id="firmware-release-form" class="api-key-panel"><label>Version<input id="firmware-release-version" required placeholder="2026.10.1"></label><label>Archivos .py<input id="firmware-release-files" type="file" accept=".py,text/x-python" multiple required></label><button class="secondary-button" type="submit"><i data-lucide="upload-cloud"></i> Publicar version</button><p id="firmware-release-status">Ninguna version publicada desde esta sesion.</p></form></div></div></article>`;
     $('.view-container').append(apiView);
     bindWikiApiControls();
+    bindFirmwareReleaseControls();
   }
   renderWikiPage('intro');
 }
@@ -283,6 +301,15 @@ function renderDeviceCards(filter = '', status = 'all') {
 
 function closeDeviceMenu() { $('#device-actions-menu')?.remove(); }
 
+async function queueFirmwareUpdate(device) {
+  const result = await apiRequest('firmware/releases');
+  if (!result.release) throw new Error('No hay una version de firmware publicada');
+  if (!window.confirm(`Actualizar ${device.name} a ${result.release.version}? El dispositivo se reiniciara.`)) return;
+  await apiRequest('commands', { method: 'POST', body: JSON.stringify({ deviceId: device.id, command: 'firmware.update', payload: { version: result.release.version } }) });
+  await loadCommandHistory();
+  showToast(`Actualizacion ${result.release.version} enviada`);
+}
+
 function openDeviceMenu(button, device) {
   if (!device) return;
   closeDeviceMenu();
@@ -291,7 +318,7 @@ function openDeviceMenu(button, device) {
   menu.id = 'device-actions-menu';
   menu.className = 'panel';
   menu.style.cssText = `position:fixed;z-index:30;top:${bounds.bottom + 6}px;left:${Math.max(12, bounds.right - 180)}px;padding:6px;min-width:180px;box-shadow:var(--shadow)`;
-  menu.innerHTML = '<button class="secondary-button" data-device-action="command" style="width:100%;border:0;justify-content:flex-start"><i data-lucide="send"></i> Enviar comando</button><button class="secondary-button" data-device-action="refresh" style="width:100%;border:0;justify-content:flex-start"><i data-lucide="refresh-cw"></i> Actualizar estado</button><button class="secondary-button" data-device-action="delete" style="width:100%;border:0;justify-content:flex-start;color:var(--red)"><i data-lucide="trash-2"></i> Eliminar dispositivo</button>';
+  menu.innerHTML = '<button class="secondary-button" data-device-action="command" style="width:100%;border:0;justify-content:flex-start"><i data-lucide="send"></i> Enviar comando</button><button class="secondary-button" data-device-action="firmware" style="width:100%;border:0;justify-content:flex-start"><i data-lucide="download-cloud"></i> Actualizar firmware</button><button class="secondary-button" data-device-action="refresh" style="width:100%;border:0;justify-content:flex-start"><i data-lucide="refresh-cw"></i> Actualizar estado</button><button class="secondary-button" data-device-action="delete" style="width:100%;border:0;justify-content:flex-start;color:var(--red)"><i data-lucide="trash-2"></i> Eliminar dispositivo</button>';
   document.body.append(menu);
   menu.addEventListener('click', async (event) => {
     const action = event.target.closest('[data-device-action]')?.dataset.deviceAction;
@@ -302,6 +329,9 @@ function openDeviceMenu(button, device) {
       $('#command-device').value = device.id;
       renderCommandDeviceState();
       $('#command-name').focus();
+    } else if (action === 'firmware') {
+      try { await queueFirmwareUpdate(device); }
+      catch (error) { showToast(error.message); }
     } else if (action === 'refresh') {
       await loadDevices();
       showToast('Estado actualizado');

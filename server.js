@@ -4,6 +4,8 @@ const cookieSession = require('cookie-session');
 const mysql = require('mysql2/promise');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
+const fs = require('fs');
+const fsp = fs.promises;
 const https = require('https');
 
 require('dotenv').config({ path: path.join(__dirname, '.env', 'local.env') });
@@ -17,7 +19,7 @@ let schemaReady;
 
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
-app.use(express.json({ limit: '32kb' }));
+app.use(express.json({ limit: '2mb' }));
 
 function fail(response, status, error) {
   return response.status(status).json({ error });
@@ -35,6 +37,25 @@ async function apiKeyOwner(apiKey) {
 
 function createApiKey() {
   return `pg_live_${crypto.randomBytes(24).toString('base64url')}`;
+}
+
+const firmwareRoot = path.join(root, 'firmware', 'releases');
+const firmwareActivePath = path.join(root, 'firmware', 'active.json');
+
+function firmwareVersion(version) {
+  if (!/^[A-Za-z0-9._-]{1,40}$/.test(String(version || ''))) throw new Error('Invalid firmware version');
+  return String(version);
+}
+
+function firmwareFileName(fileName) {
+  if (!/^[A-Za-z0-9._-]{1,80}\.py$/.test(String(fileName || ''))) throw new Error('Invalid firmware file');
+  return String(fileName);
+}
+
+async function readFirmwareManifest(version) {
+  const selectedVersion = version ? firmwareVersion(version) : JSON.parse(await fsp.readFile(firmwareActivePath, 'utf8')).version;
+  const manifestPath = path.join(firmwareRoot, selectedVersion, 'manifest.json');
+  return JSON.parse(await fsp.readFile(manifestPath, 'utf8'));
 }
 
 function relayCloud(request, response, method, cloudPath) {
@@ -227,6 +248,66 @@ app.post('/api/commands', requireSession, apiReady, async (request, response) =>
 app.get('/api/commands', requireSession, apiReady, async (request, response) => {
   const [rows] = await database().execute('SELECT commands.id, commands.command_name AS command, commands.status, commands.created_at AS createdAt, devices.device_id AS deviceId, devices.name AS deviceName FROM commands JOIN devices ON devices.id = commands.device_id WHERE devices.user_id = (SELECT id FROM users WHERE email = ?) ORDER BY commands.created_at DESC LIMIT 20', [request.session.user.email]);
   response.json({ commands: rows });
+});
+
+app.get('/api/firmware/releases', requireSession, apiReady, async (request, response) => {
+  try {
+    const manifest = await readFirmwareManifest();
+    response.json({ release: manifest });
+  } catch (error) {
+    if (error.code === 'ENOENT') return response.json({ release: null });
+    fail(response, 500, error.message);
+  }
+});
+
+app.post('/api/firmware/releases', requireSession, apiReady, async (request, response) => {
+  try {
+    const { version, files } = request.body || {};
+    const safeVersion = firmwareVersion(version);
+    if (!Array.isArray(files) || files.length === 0 || files.length > 20) return fail(response, 422, 'files debe contener entre 1 y 20 archivos');
+    const releaseRoot = path.join(firmwareRoot, safeVersion);
+    await fsp.mkdir(releaseRoot, { recursive: true });
+    const manifestFiles = [];
+    for (const file of files) {
+      const name = firmwareFileName(file.name);
+      if (typeof file.content !== 'string' || file.content.length > 500000) return fail(response, 422, 'Contenido de firmware invalido');
+      const content = Buffer.from(file.content, 'utf8');
+      await fsp.writeFile(path.join(releaseRoot, name), content);
+      manifestFiles.push({ name, size: content.length, sha256: crypto.createHash('sha256').update(content).digest('hex') });
+    }
+    const manifest = { version: safeVersion, createdAt: new Date().toISOString(), files: manifestFiles };
+    await fsp.writeFile(path.join(releaseRoot, 'manifest.json'), JSON.stringify(manifest, null, 2));
+    await fsp.writeFile(firmwareActivePath, JSON.stringify({ version: safeVersion }));
+    response.status(201).json({ release: manifest });
+  } catch (error) {
+    fail(response, 422, error.message);
+  }
+});
+
+app.get('/api/firmware/manifest', apiReady, async (request, response) => {
+  const keyOwner = await apiKeyOwner(request.get('x-api-key'));
+  if (!keyOwner) return fail(response, 401, 'Invalid API key');
+  try {
+    response.json(await readFirmwareManifest(request.query.version));
+  } catch (error) {
+    if (error.code === 'ENOENT') return fail(response, 404, 'Firmware release not found');
+    fail(response, 422, error.message);
+  }
+});
+
+app.get('/api/firmware/files/:version/:file', apiReady, async (request, response) => {
+  const keyOwner = await apiKeyOwner(request.get('x-api-key'));
+  if (!keyOwner) return fail(response, 401, 'Invalid API key');
+  try {
+    const version = firmwareVersion(request.params.version);
+    const fileName = firmwareFileName(request.params.file);
+    const manifest = await readFirmwareManifest(version);
+    if (!manifest.files.some((file) => file.name === fileName)) return fail(response, 404, 'Firmware file not found');
+    response.type('text/plain').sendFile(path.join(firmwareRoot, version, fileName));
+  } catch (error) {
+    if (error.code === 'ENOENT') return fail(response, 404, 'Firmware release not found');
+    fail(response, 422, error.message);
+  }
 });
 
 app.get('/api/device-commands', apiReady, async (request, response) => {

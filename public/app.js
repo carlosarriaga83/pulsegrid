@@ -119,6 +119,23 @@ function bindWikiApiControls() {
   showExample('arduino');
 }
 
+function bindFirmwareReleaseControls() {
+  const form = $('#firmware-release-form');
+  if (!form || form.dataset.bound) return;
+  form.dataset.bound = 'true';
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const files = Array.from($('#firmware-release-files').files || []);
+    if (!files.length) return showToast('Selecciona al menos un archivo .py');
+    try {
+      const payload = { version: $('#firmware-release-version').value.trim(), files: await Promise.all(files.map(async (file) => ({ name: file.name, content: await file.text() }))) };
+      const result = await apiRequest('firmware/releases', { method: 'POST', body: JSON.stringify(payload) });
+      $('#firmware-release-status').textContent = `Publicado ${result.release.version} con ${result.release.files.length} archivos.`;
+      showToast('Firmware publicado');
+    } catch (error) { $('#firmware-release-status').textContent = error.message; }
+  });
+}
+
 function setupWikiNavigation() {
   const keys = Object.keys(wikiPages);
   const article = $('.wiki-article');
@@ -137,9 +154,10 @@ function setupWikiNavigation() {
     const apiView = document.createElement('section');
     apiView.className = 'view';
     apiView.id = 'view-api';
-    apiView.innerHTML = `<div class="page-heading"><div><p class="eyebrow">INTEGRACION</p><h1>API<span class="accent-dot">.</span></h1><p class="heading-copy">Credenciales, ejemplos y referencia para conectar tus dispositivos.</p></div></div><article class="wiki-article">${languageExamplesMarkup()}</article>`;
+    apiView.innerHTML = `<div class="page-heading"><div><p class="eyebrow">INTEGRACION</p><h1>API<span class="accent-dot">.</span></h1><p class="heading-copy">Credenciales, ejemplos y referencia para conectar tus dispositivos.</p></div></div><article class="wiki-article">${languageExamplesMarkup()}<div class="docs-section"><span class="step-number">05</span><div class="wiki-guide"><h2>Publicar firmware MicroPython</h2><p>Selecciona los archivos .py del dispositivo para crear una version OTA. El dispositivo verificara cada archivo antes de reiniciar.</p><form id="firmware-release-form" class="api-key-panel"><label>Version<input id="firmware-release-version" required placeholder="2026.10.1"></label><label>Archivos .py<input id="firmware-release-files" type="file" accept=".py,text/x-python" multiple required></label><button class="secondary-button" type="submit"><i data-lucide="upload-cloud"></i> Publicar version</button><p id="firmware-release-status">Ninguna version publicada desde esta sesion.</p></form></div></div></article>`;
     $('.view-container').append(apiView);
     bindWikiApiControls();
+    bindFirmwareReleaseControls();
   }
   renderWikiPage('intro');
 }
@@ -283,6 +301,15 @@ function renderDeviceCards(filter = '', status = 'all') {
 
 function closeDeviceMenu() { $('#device-actions-menu')?.remove(); }
 
+async function queueFirmwareUpdate(device) {
+  const result = await apiRequest('firmware/releases');
+  if (!result.release) throw new Error('No hay una version de firmware publicada');
+  if (!window.confirm(`Actualizar ${device.name} a ${result.release.version}? El dispositivo se reiniciara.`)) return;
+  await apiRequest('commands', { method: 'POST', body: JSON.stringify({ deviceId: device.id, command: 'firmware.update', payload: { version: result.release.version } }) });
+  await loadCommandHistory();
+  showToast(`Actualizacion ${result.release.version} enviada`);
+}
+
 function openDeviceMenu(button, device) {
   if (!device) return;
   closeDeviceMenu();
@@ -291,7 +318,7 @@ function openDeviceMenu(button, device) {
   menu.id = 'device-actions-menu';
   menu.className = 'panel';
   menu.style.cssText = `position:fixed;z-index:30;top:${bounds.bottom + 6}px;left:${Math.max(12, bounds.right - 180)}px;padding:6px;min-width:180px;box-shadow:var(--shadow)`;
-  menu.innerHTML = '<button class="secondary-button" data-device-action="command" style="width:100%;border:0;justify-content:flex-start"><i data-lucide="send"></i> Enviar comando</button><button class="secondary-button" data-device-action="refresh" style="width:100%;border:0;justify-content:flex-start"><i data-lucide="refresh-cw"></i> Actualizar estado</button><button class="secondary-button" data-device-action="delete" style="width:100%;border:0;justify-content:flex-start;color:var(--red)"><i data-lucide="trash-2"></i> Eliminar dispositivo</button>';
+  menu.innerHTML = '<button class="secondary-button" data-device-action="command" style="width:100%;border:0;justify-content:flex-start"><i data-lucide="send"></i> Enviar comando</button><button class="secondary-button" data-device-action="firmware" style="width:100%;border:0;justify-content:flex-start"><i data-lucide="download-cloud"></i> Actualizar firmware</button><button class="secondary-button" data-device-action="refresh" style="width:100%;border:0;justify-content:flex-start"><i data-lucide="refresh-cw"></i> Actualizar estado</button><button class="secondary-button" data-device-action="delete" style="width:100%;border:0;justify-content:flex-start;color:var(--red)"><i data-lucide="trash-2"></i> Eliminar dispositivo</button>';
   document.body.append(menu);
   menu.addEventListener('click', async (event) => {
     const action = event.target.closest('[data-device-action]')?.dataset.deviceAction;
@@ -302,6 +329,9 @@ function openDeviceMenu(button, device) {
       $('#command-device').value = device.id;
       renderCommandDeviceState();
       $('#command-name').focus();
+    } else if (action === 'firmware') {
+      try { await queueFirmwareUpdate(device); }
+      catch (error) { showToast(error.message); }
     } else if (action === 'refresh') {
       await loadDevices();
       showToast('Estado actualizado');
@@ -351,7 +381,7 @@ async function loadTelemetry(deviceId = $('#telemetry-device')?.value || devices
     const samples = result.telemetry;
     const latest = samples[0];
     const device = devices.find((item) => item.id === deviceId);
-    view.innerHTML = `<div class="page-heading"><div><p class="eyebrow">DATOS EN TIEMPO REAL</p><h1>Telemetria<span class="accent-dot">.</span></h1><p class="heading-copy">Lecturas almacenadas por tus dispositivos.</p></div><button class="secondary-button" id="telemetry-refresh"><i data-lucide="refresh-cw"></i> Actualizar</button></div><div class="panel" style="padding:18px;margin-bottom:14px"><label class="metric-label">Dispositivo<select id="telemetry-device" style="margin-left:10px">${devices.map((item) => `<option value="${item.id}"${item.id === deviceId ? ' selected' : ''}>${item.name} · ${item.id}</option>`).join('')}</select></label></div><div class="telemetry-overview"><article class="metric-card"><span class="metric-label"><i data-lucide="database"></i> Muestras recientes</span><strong>${samples.length}</strong><span class="trend stable">Ultimas 30 lecturas</span></article><article class="metric-card"><span class="metric-label"><i data-lucide="clock-3"></i> Ultima lectura</span><strong style="font-size:18px">${latest ? new Date(latest.createdAt).toLocaleTimeString('es-MX') : '--'}</strong><span class="trend stable">${device?.status === 'online' ? 'Dispositivo en linea' : 'Sin conexion reciente'}</span></article><article class="metric-card"><span class="metric-label"><i data-lucide="activity"></i> Estado reportado</span><strong style="font-size:18px">${latest ? telemetrySummary(latest.payload) : 'Sin muestras'}</strong></article></div><article class="panel" style="padding:21px"><div class="panel-heading"><div><h2>Historial de lecturas</h2><p>${device ? `${device.name} · ${device.id}` : deviceId}</p></div></div><div class="activity-list">${samples.length ? samples.map((sample) => `<div class="activity-item"><span class="activity-icon lime"><i data-lucide="radio"></i></span><div><strong>${telemetrySummary(sample.payload)}</strong><p>${JSON.stringify(sample.payload)}</p></div><time>${new Date(sample.createdAt).toLocaleString('es-MX')}</time></div>`).join('') : '<p class="empty-state">Aun no hay telemetria para este dispositivo.</p>'}</div></article>`;
+    view.innerHTML = `<div class="page-heading"><div><p class="eyebrow">DATOS EN TIEMPO REAL</p><h1>Telemetria<span class="accent-dot">.</span></h1><p class="heading-copy">Lecturas almacenadas por tus dispositivos.</p></div><button class="secondary-button" id="telemetry-refresh"><i data-lucide="refresh-cw"></i> Actualizar</button></div><div class="panel" style="padding:18px;margin-bottom:14px"><label class="metric-label">Dispositivo<select id="telemetry-device" style="margin-left:10px">${devices.map((item) => `<option value="${item.id}"${item.id === deviceId ? ' selected' : ''}>${item.name} · ${item.id}</option>`).join('')}</select></label></div><div class="telemetry-overview"><article class="metric-card"><span class="metric-label"><i data-lucide="database"></i> Muestras recientes</span><strong>${samples.length}</strong><span class="trend stable">Ultimas 30 lecturas</span></article><article class="metric-card"><span class="metric-label"><i data-lucide="clock-3"></i> Ultima lectura</span><strong style="font-size:18px">${latest ? new Date(latest.createdAt).toLocaleTimeString('es-MX') : '--'}</strong><span class="trend stable">${device?.status === 'online' ? 'Dispositivo en linea' : 'Sin conexion reciente'}</span></article><article class="metric-card"><span class="metric-label"><i data-lucide="activity"></i> Estado reportado</span><strong style="font-size:18px">${latest ? telemetrySummary(latest.payload) : 'Sin muestras'}</strong></article></div><article class="panel" style="padding:21px"><div class="panel-heading"><div><h2>Historial de lecturas</h2><p>${device ? `${device.name} · ${device.id}` : deviceId}</p></div></div><div class="activity-list">${samples.length ? samples.map((sample) => `<div class="activity-item" style="align-items:flex-start"><span class="activity-icon lime"><i data-lucide="radio"></i></span><div style="min-width:0;flex:1"><strong>${telemetrySummary(sample.payload)}</strong><details style="margin-top:8px"><summary style="cursor:pointer;color:var(--muted);font-size:12px">Ver JSON formateado</summary><pre style="margin:8px 0 0;padding:12px;overflow:auto;max-height:280px;background:var(--surface-2);border:1px solid var(--line);border-radius:6px;font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap">${prettyTelemetryJson(sample.payload)}</pre></details></div><time>${new Date(sample.createdAt).toLocaleString('es-MX')}</time></div>`).join('') : '<p class="empty-state">Aun no hay telemetria para este dispositivo.</p>'}</div></article>`;
     $('#telemetry-device').addEventListener('change', (event) => loadTelemetry(event.target.value));
     $('#telemetry-refresh').addEventListener('click', () => loadTelemetry(deviceId));
     renderIcons();
