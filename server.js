@@ -1,6 +1,6 @@
 const path = require('path');
 const express = require('express');
-const session = require('express-session');
+const cookieSession = require('cookie-session');
 const mysql = require('mysql2/promise');
 const bcrypt = require('bcryptjs');
 
@@ -29,47 +29,13 @@ function database() {
   return pool;
 }
 
-let sessionTableReady;
-
-function ensureSessionTable() {
-  if (!sessionTableReady) sessionTableReady = database().execute("CREATE TABLE IF NOT EXISTS sessions (session_id VARCHAR(128) PRIMARY KEY, data JSON NOT NULL, expires DATETIME NOT NULL, INDEX sessions_expires (expires)) ENGINE=InnoDB");
-  return sessionTableReady;
-}
-
-class MySqlSessionStore extends session.Store {
-  async get(sessionId, callback) {
-    try {
-      await ensureSessionTable();
-      const [rows] = await database().execute('SELECT data FROM sessions WHERE session_id = ? AND expires > NOW()', [sessionId]);
-      callback(null, rows[0] ? JSON.parse(rows[0].data) : null);
-    } catch (error) { callback(error); }
-  }
-
-  async set(sessionId, sessionData, callback) {
-    try {
-      await ensureSessionTable();
-      const expires = sessionData.cookie?.expires ? new Date(sessionData.cookie.expires) : new Date(Date.now() + 1000 * 60 * 60 * 24 * 7);
-      await database().execute('INSERT INTO sessions (session_id, data, expires) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE data = VALUES(data), expires = VALUES(expires)', [sessionId, JSON.stringify(sessionData), expires]);
-      callback?.(null);
-    } catch (error) { callback?.(error); }
-  }
-
-  async destroy(sessionId, callback) {
-    try {
-      await ensureSessionTable();
-      await database().execute('DELETE FROM sessions WHERE session_id = ?', [sessionId]);
-      callback?.(null);
-    } catch (error) { callback?.(error); }
-  }
-}
-
-app.use(session({
+app.use(cookieSession({
   name: 'pulsegrid.sid',
-  secret: process.env.SESSION_SECRET || 'replace-this-in-hostinger',
-  store: new MySqlSessionStore(),
-  resave: false,
-  saveUninitialized: false,
-  cookie: { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', maxAge: 1000 * 60 * 60 * 24 * 7 }
+  keys: [process.env.SESSION_SECRET || 'replace-this-in-hostinger'],
+  httpOnly: true,
+  sameSite: 'lax',
+  secure: process.env.NODE_ENV === 'production',
+  maxAge: 1000 * 60 * 60 * 24 * 7
 }));
 
 async function ensureSchema() {
@@ -125,7 +91,10 @@ app.post('/api/login', apiReady, async (request, response) => {
   response.json({ user: request.session.user });
 });
 
-app.post('/api/logout', (request, response) => request.session.destroy(() => response.json({ ok: true })));
+app.post('/api/logout', (request, response) => {
+  request.session = null;
+  response.json({ ok: true });
+});
 
 app.get('/api/devices', apiReady, async (request, response) => {
   if (!request.session.user) return fail(response, 401, 'Authentication required');
