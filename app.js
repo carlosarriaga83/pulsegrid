@@ -1,9 +1,4 @@
-const devices = [
-  { name: 'Living room hub', id: 'esp32-01', type: 'Controlador', status: 'online', report: 'hace 2 min', signal: 'good', icon: 'home', temp: '24.8 C', battery: '92%' },
-  { name: 'Invernadero norte', id: 'esp32-02', type: 'Sensor ambiental', status: 'online', report: 'hace 7 min', signal: 'good', icon: 'sprout', temp: '27.1 C', battery: '78%' },
-  { name: 'Sensor garaje', id: 'esp32-03', type: 'Sensor ambiental', status: 'offline', report: 'hace 42 min', signal: 'mid', icon: 'warehouse', temp: '19.4 C', battery: '18%' },
-  { name: 'Desk light', id: 'esp32-04', type: 'Actuador', status: 'online', report: 'hace 31 min', signal: 'good', icon: 'lamp-desk', temp: '22.6 C', battery: '65%' }
-];
+const devices = [];
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -147,11 +142,13 @@ function clearUser() {
 async function loadDevices() {
   try {
     const result = await apiRequest('devices');
-    if (!result.devices.length) return;
     devices.splice(0, devices.length, ...result.devices.map((device) => ({ ...device, report: device.report ? new Date(device.report).toLocaleString('es-MX') : 'sin reporte', signal: device.status === 'online' ? 'good' : 'mid', icon: 'cpu', temp: '--', battery: '--' })));
-    renderDeviceRows();
-    renderDeviceCards();
-  } catch { /* An anonymous dashboard can still show sample data. */ }
+  } catch {
+    devices.splice(0, devices.length);
+  }
+  renderDeviceRows();
+  renderDeviceCards();
+  updateDeviceSummary();
 }
 
 function renderIcons() {
@@ -192,8 +189,36 @@ function showToast(message) {
   window.setTimeout(() => toast.classList.remove('show'), 2800);
 }
 
-function openModal() { $('#device-modal').classList.add('open'); }
+async function openModal() {
+  try {
+    const result = await apiRequest('me');
+    if (!result.user) return showAuthModal('login');
+    applyUser(result.user);
+    $('#device-modal').classList.add('open');
+  } catch {
+    showAuthModal('login');
+  }
+}
 function closeModal() { $('#device-modal').classList.remove('open'); }
+
+function updateDeviceSummary() {
+  const online = devices.filter((device) => device.status === 'online').length;
+  const offline = devices.length - online;
+  $('#active-count').textContent = online;
+  const overviewBadge = $('.nav-item[data-view="overview"] b');
+  if (overviewBadge) overviewBadge.textContent = devices.length;
+  const counts = $$('.filter-button b');
+  if (counts.length === 3) [devices.length, online, offline].forEach((count, index) => { counts[index].textContent = count; });
+  const commandDevice = $('#command-device');
+  if (commandDevice) {
+    commandDevice.disabled = devices.length === 0;
+    commandDevice.innerHTML = devices.length
+      ? devices.map((device) => `<option value="${device.id}">${device.name} · ${device.id}</option>`).join('')
+      : '<option value="">Agrega un dispositivo para enviar comandos</option>';
+  }
+  const activity = $('.activity-list');
+  if (activity) activity.innerHTML = '<p class="empty-state">Los eventos de tus dispositivos apareceran aqui.</p>';
+}
 
 function navigate(viewName) {
   $$('.view').forEach((view) => view.classList.toggle('active', view.id === `view-${viewName}`));
@@ -220,7 +245,7 @@ $('#device-form').addEventListener('submit', async (event) => {
   devices.unshift(newDevice);
   renderDeviceRows();
   renderDeviceCards();
-  $('#active-count').textContent = devices.filter((device) => device.status === 'online').length;
+  updateDeviceSummary();
   event.currentTarget.reset();
   closeModal();
   showToast('Dispositivo creado correctamente');
@@ -273,4 +298,5 @@ apiRequest('me').then((result) => {
 document.documentElement.dataset.theme = localStorage.getItem('pulsegrid-theme') || 'dark';
 renderDeviceRows();
 renderDeviceCards();
+updateDeviceSummary();
 renderIcons();
