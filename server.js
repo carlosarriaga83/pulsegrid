@@ -4,8 +4,6 @@ const cookieSession = require('cookie-session');
 const mysql = require('mysql2/promise');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
-const fs = require('fs');
-const fsp = fs.promises;
 const https = require('https');
 
 require('dotenv').config({ path: path.join(__dirname, '.env', 'local.env') });
@@ -39,8 +37,6 @@ function createApiKey() {
   return `pg_live_${crypto.randomBytes(24).toString('base64url')}`;
 }
 
-const firmwareRoot = path.join(root, 'firmware', 'releases');
-const firmwareActivePath = path.join(root, 'firmware', 'active.json');
 const firmwareFiles = new Set(['main.py', 'pulsegrid.py', 'webserver.py', 'cortina.py', 'stservo.py', 'ssd1306.py']);
 
 function firmwareVersion(version) {
@@ -53,13 +49,18 @@ function firmwareFileName(fileName) {
   return String(fileName);
 }
 
-async function readFirmwareManifest(version) {
-  const selectedVersion = version ? firmwareVersion(version) : JSON.parse(await fsp.readFile(firmwareActivePath, 'utf8')).version;
-  const manifestPath = path.join(firmwareRoot, selectedVersion, 'manifest.json');
-  const manifest = JSON.parse(await fsp.readFile(manifestPath, 'utf8'));
-  if (!manifest.files?.length) throw new Error('El manifiesto no contiene archivos');
-  manifest.files.forEach((file) => firmwareFileName(file.name));
-  return manifest;
+async function readFirmwareManifest(userId, version) {
+  const [releases] = await database().execute(`SELECT id, version, created_at AS createdAt FROM firmware_releases WHERE user_id = ? ${version ? 'AND version = ?' : 'AND is_active = 1'} ORDER BY created_at DESC LIMIT 1`, version ? [userId, firmwareVersion(version)] : [userId]);
+  if (!releases[0]) return null;
+  const [files] = await database().execute('SELECT name, OCTET_LENGTH(content) AS size, sha256 FROM firmware_files WHERE release_id = ? ORDER BY name', [releases[0].id]);
+  if (!files.length) throw new Error('El manifiesto no contiene archivos');
+  files.forEach((file) => firmwareFileName(file.name));
+  return { ...releases[0], files };
+}
+
+async function sessionUserId(email) {
+  const [users] = await database().execute('SELECT id FROM users WHERE email = ? LIMIT 1', [email]);
+  return users[0]?.id;
 }
 
 function relayCloud(request, response, method, cloudPath) {
@@ -111,6 +112,8 @@ async function ensureSchema() {
     await db.execute("CREATE TABLE IF NOT EXISTS telemetry (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, device_id INT UNSIGNED NOT NULL, payload JSON NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, INDEX telemetry_device (device_id), CONSTRAINT telemetry_device_fk FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE) ENGINE=InnoDB");
     await db.execute("CREATE TABLE IF NOT EXISTS commands (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, device_id INT UNSIGNED NOT NULL, command_name VARCHAR(80) NOT NULL, payload JSON NOT NULL, status VARCHAR(30) NOT NULL DEFAULT 'queued', error_message VARCHAR(500) NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, CONSTRAINT commands_device_fk FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE) ENGINE=InnoDB");
     try { await db.execute('ALTER TABLE commands ADD COLUMN error_message VARCHAR(500) NULL'); } catch (error) { if (error.code !== 'ER_DUP_FIELDNAME') throw error; }
+    await db.execute("CREATE TABLE IF NOT EXISTS firmware_releases (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, user_id INT UNSIGNED NOT NULL, version VARCHAR(40) NOT NULL, is_active TINYINT(1) NOT NULL DEFAULT 0, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, UNIQUE KEY firmware_user_version (user_id, version), INDEX firmware_active (user_id, is_active), CONSTRAINT firmware_releases_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE) ENGINE=InnoDB");
+    await db.execute("CREATE TABLE IF NOT EXISTS firmware_files (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, release_id BIGINT UNSIGNED NOT NULL, name VARCHAR(80) NOT NULL, content MEDIUMBLOB NOT NULL, sha256 CHAR(64) NOT NULL, UNIQUE KEY firmware_release_file (release_id, name), CONSTRAINT firmware_files_release_fk FOREIGN KEY (release_id) REFERENCES firmware_releases(id) ON DELETE CASCADE) ENGINE=InnoDB");
   })();
   return schemaReady;
 }
@@ -257,10 +260,8 @@ app.get('/api/commands', requireSession, apiReady, async (request, response) => 
 
 app.get('/api/firmware/releases', requireSession, apiReady, async (request, response) => {
   try {
-    const manifest = await readFirmwareManifest();
-    response.json({ release: manifest });
+    response.json({ release: await readFirmwareManifest(await sessionUserId(request.session.user.email)) });
   } catch (error) {
-    if (error.code === 'ENOENT') return response.json({ release: null });
     fail(response, 500, error.message);
   }
 });
@@ -270,20 +271,31 @@ app.post('/api/firmware/releases', requireSession, apiReady, async (request, res
     const { version, files } = request.body || {};
     const safeVersion = firmwareVersion(version);
     if (!Array.isArray(files) || files.length === 0 || files.length > 20) return fail(response, 422, 'files debe contener entre 1 y 20 archivos');
-    const releaseRoot = path.join(firmwareRoot, safeVersion);
-    await fsp.mkdir(releaseRoot, { recursive: true });
-    const manifestFiles = [];
-    for (const file of files) {
+    const userId = await sessionUserId(request.session.user.email);
+    const preparedFiles = files.map((file) => {
       const name = firmwareFileName(file.name);
-      if (typeof file.content !== 'string' || file.content.length > 500000) return fail(response, 422, 'Contenido de firmware invalido');
+      if (typeof file.content !== 'string' || file.content.length > 500000) throw new Error('Contenido de firmware invalido');
       const content = Buffer.from(file.content, 'utf8');
-      await fsp.writeFile(path.join(releaseRoot, name), content);
-      manifestFiles.push({ name, size: content.length, sha256: crypto.createHash('sha256').update(content).digest('hex') });
+      return { name, content, size: content.length, sha256: crypto.createHash('sha256').update(content).digest('hex') };
+    });
+    if (new Set(preparedFiles.map((file) => file.name)).size !== preparedFiles.length) return fail(response, 422, 'No repitas archivos en una version');
+    const connection = await database().getConnection();
+    try {
+      await connection.beginTransaction();
+      await connection.execute('DELETE FROM firmware_releases WHERE user_id = ? AND version = ?', [userId, safeVersion]);
+      await connection.execute('UPDATE firmware_releases SET is_active = 0 WHERE user_id = ?', [userId]);
+      const [release] = await connection.execute('INSERT INTO firmware_releases (user_id, version, is_active) VALUES (?, ?, 1)', [userId, safeVersion]);
+      for (const file of preparedFiles) {
+        await connection.execute('INSERT INTO firmware_files (release_id, name, content, sha256) VALUES (?, ?, ?, ?)', [release.insertId, file.name, file.content, file.sha256]);
+      }
+      await connection.commit();
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
     }
-    const manifest = { version: safeVersion, createdAt: new Date().toISOString(), files: manifestFiles };
-    await fsp.writeFile(path.join(releaseRoot, 'manifest.json'), JSON.stringify(manifest, null, 2));
-    await fsp.writeFile(firmwareActivePath, JSON.stringify({ version: safeVersion }));
-    response.status(201).json({ release: manifest });
+    response.status(201).json({ release: await readFirmwareManifest(userId, safeVersion) });
   } catch (error) {
     fail(response, 422, error.message);
   }
@@ -293,9 +305,10 @@ app.get('/api/firmware/manifest', apiReady, async (request, response) => {
   const keyOwner = await apiKeyOwner(request.get('x-api-key'));
   if (!keyOwner) return fail(response, 401, 'Invalid API key');
   try {
-    response.json(await readFirmwareManifest(request.query.version));
+    const manifest = await readFirmwareManifest(keyOwner.user_id, request.query.version);
+    if (!manifest) return fail(response, 404, 'Firmware release not found');
+    response.json(manifest);
   } catch (error) {
-    if (error.code === 'ENOENT') return fail(response, 404, 'Firmware release not found');
     fail(response, 422, error.message);
   }
 });
@@ -306,11 +319,12 @@ app.get('/api/firmware/files/:version/:file', apiReady, async (request, response
   try {
     const version = firmwareVersion(request.params.version);
     const fileName = firmwareFileName(request.params.file);
-    const manifest = await readFirmwareManifest(version);
+    const manifest = await readFirmwareManifest(keyOwner.user_id, version);
+    if (!manifest) return fail(response, 404, 'Firmware release not found');
     if (!manifest.files.some((file) => file.name === fileName)) return fail(response, 404, 'Firmware file not found');
-    response.type('text/plain').sendFile(path.join(firmwareRoot, version, fileName));
+    const [files] = await database().execute('SELECT content FROM firmware_files WHERE release_id = ? AND name = ? LIMIT 1', [manifest.id, fileName]);
+    response.type('text/plain').send(files[0].content);
   } catch (error) {
-    if (error.code === 'ENOENT') return fail(response, 404, 'Firmware release not found');
     fail(response, 422, error.message);
   }
 });
