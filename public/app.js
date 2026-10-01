@@ -322,6 +322,26 @@ function telemetrySummary(payload) {
   return Object.entries(payload).filter(([key]) => key !== 'online').slice(0, 4).map(([key, value]) => `${key}: ${typeof value === 'object' ? JSON.stringify(value) : value}`).join(' · ') || 'Sin valores legibles';
 }
 
+function escapeTelemetryHtml(value) {
+  return String(value).replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
+}
+
+function prettyTelemetryJson(payload) {
+  return escapeTelemetryHtml(JSON.stringify(payload, null, 2));
+}
+
+function formatTelemetryPayloadBlocks() {
+  $$('#view-telemetry .activity-item p').forEach((payloadNode) => {
+    try {
+      const payload = JSON.parse(payloadNode.textContent);
+      const details = document.createElement('details');
+      details.style.marginTop = '8px';
+      details.innerHTML = `<summary style="cursor:pointer;color:var(--muted);font-size:12px">Ver JSON formateado</summary><pre style="margin:8px 0 0;padding:12px;overflow:auto;max-height:280px;background:var(--surface-2);border:1px solid var(--line);border-radius:6px;font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap">${prettyTelemetryJson(payload)}</pre>`;
+      payloadNode.replaceWith(details);
+    } catch {}
+  });
+}
+
 async function loadTelemetry(deviceId = $('#telemetry-device')?.value || devices[0]?.id) {
   const view = $('#view-telemetry');
   if (!view) return;
@@ -335,6 +355,7 @@ async function loadTelemetry(deviceId = $('#telemetry-device')?.value || devices
     $('#telemetry-device').addEventListener('change', (event) => loadTelemetry(event.target.value));
     $('#telemetry-refresh').addEventListener('click', () => loadTelemetry(deviceId));
     renderIcons();
+    formatTelemetryPayloadBlocks();
   } catch (error) { view.innerHTML = `<div class="panel" style="padding:30px;color:var(--muted)">${error.message}</div>`; }
 }
 

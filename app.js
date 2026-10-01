@@ -322,6 +322,26 @@ function telemetrySummary(payload) {
   return Object.entries(payload).filter(([key]) => key !== 'online').slice(0, 4).map(([key, value]) => `${key}: ${typeof value === 'object' ? JSON.stringify(value) : value}`).join(' · ') || 'Sin valores legibles';
 }
 
+function escapeTelemetryHtml(value) {
+  return String(value).replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
+}
+
+function prettyTelemetryJson(payload) {
+  return escapeTelemetryHtml(JSON.stringify(payload, null, 2));
+}
+
+function formatTelemetryPayloadBlocks() {
+  $$('#view-telemetry .activity-item p').forEach((payloadNode) => {
+    try {
+      const payload = JSON.parse(payloadNode.textContent);
+      const details = document.createElement('details');
+      details.style.marginTop = '8px';
+      details.innerHTML = `<summary style="cursor:pointer;color:var(--muted);font-size:12px">Ver JSON formateado</summary><pre style="margin:8px 0 0;padding:12px;overflow:auto;max-height:280px;background:var(--surface-2);border:1px solid var(--line);border-radius:6px;font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap">${prettyTelemetryJson(payload)}</pre>`;
+      payloadNode.replaceWith(details);
+    } catch {}
+  });
+}
+
 async function loadTelemetry(deviceId = $('#telemetry-device')?.value || devices[0]?.id) {
   const view = $('#view-telemetry');
   if (!view) return;
@@ -331,10 +351,11 @@ async function loadTelemetry(deviceId = $('#telemetry-device')?.value || devices
     const samples = result.telemetry;
     const latest = samples[0];
     const device = devices.find((item) => item.id === deviceId);
-    view.innerHTML = `<div class="page-heading"><div><p class="eyebrow">DATOS EN TIEMPO REAL</p><h1>Telemetria<span class="accent-dot">.</span></h1><p class="heading-copy">Lecturas almacenadas por tus dispositivos.</p></div><button class="secondary-button" id="telemetry-refresh"><i data-lucide="refresh-cw"></i> Actualizar</button></div><div class="panel" style="padding:18px;margin-bottom:14px"><label class="metric-label">Dispositivo<select id="telemetry-device" style="margin-left:10px">${devices.map((item) => `<option value="${item.id}"${item.id === deviceId ? ' selected' : ''}>${item.name} · ${item.id}</option>`).join('')}</select></label></div><div class="telemetry-overview"><article class="metric-card"><span class="metric-label"><i data-lucide="database"></i> Muestras recientes</span><strong>${samples.length}</strong><span class="trend stable">Ultimas 30 lecturas</span></article><article class="metric-card"><span class="metric-label"><i data-lucide="clock-3"></i> Ultima lectura</span><strong style="font-size:18px">${latest ? new Date(latest.createdAt).toLocaleTimeString('es-MX') : '--'}</strong><span class="trend stable">${device?.status === 'online' ? 'Dispositivo en linea' : 'Sin conexion reciente'}</span></article><article class="metric-card"><span class="metric-label"><i data-lucide="activity"></i> Estado reportado</span><strong style="font-size:18px">${latest ? telemetrySummary(latest.payload) : 'Sin muestras'}</strong></article></div><article class="panel" style="padding:21px"><div class="panel-heading"><div><h2>Historial de lecturas</h2><p>${device ? `${device.name} · ${device.id}` : deviceId}</p></div></div><div class="activity-list">${samples.length ? samples.map((sample) => `<div class="activity-item"><span class="activity-icon lime"><i data-lucide="radio"></i></span><div><strong>${telemetrySummary(sample.payload)}</strong><p>${JSON.stringify(sample.payload)}</p></div><time>${new Date(sample.createdAt).toLocaleString('es-MX')}</time></div>`).join('') : '<p class="empty-state">Aun no hay telemetria para este dispositivo.</p>'}</div></article>`;
+    view.innerHTML = `<div class="page-heading"><div><p class="eyebrow">DATOS EN TIEMPO REAL</p><h1>Telemetria<span class="accent-dot">.</span></h1><p class="heading-copy">Lecturas almacenadas por tus dispositivos.</p></div><button class="secondary-button" id="telemetry-refresh"><i data-lucide="refresh-cw"></i> Actualizar</button></div><div class="panel" style="padding:18px;margin-bottom:14px"><label class="metric-label">Dispositivo<select id="telemetry-device" style="margin-left:10px">${devices.map((item) => `<option value="${item.id}"${item.id === deviceId ? ' selected' : ''}>${item.name} · ${item.id}</option>`).join('')}</select></label></div><div class="telemetry-overview"><article class="metric-card"><span class="metric-label"><i data-lucide="database"></i> Muestras recientes</span><strong>${samples.length}</strong><span class="trend stable">Ultimas 30 lecturas</span></article><article class="metric-card"><span class="metric-label"><i data-lucide="clock-3"></i> Ultima lectura</span><strong style="font-size:18px">${latest ? new Date(latest.createdAt).toLocaleTimeString('es-MX') : '--'}</strong><span class="trend stable">${device?.status === 'online' ? 'Dispositivo en linea' : 'Sin conexion reciente'}</span></article><article class="metric-card"><span class="metric-label"><i data-lucide="activity"></i> Estado reportado</span><strong style="font-size:18px">${latest ? telemetrySummary(latest.payload) : 'Sin muestras'}</strong></article></div><article class="panel" style="padding:21px"><div class="panel-heading"><div><h2>Historial de lecturas</h2><p>${device ? `${device.name} · ${device.id}` : deviceId}</p></div></div><div class="activity-list">${samples.length ? samples.map((sample) => `<div class="activity-item" style="align-items:flex-start"><span class="activity-icon lime"><i data-lucide="radio"></i></span><div style="min-width:0;flex:1"><strong>${telemetrySummary(sample.payload)}</strong><details style="margin-top:8px"><summary style="cursor:pointer;color:var(--muted);font-size:12px">Ver JSON formateado</summary><pre style="margin:8px 0 0;padding:12px;overflow:auto;max-height:280px;background:var(--surface-2);border:1px solid var(--line);border-radius:6px;font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap">${prettyTelemetryJson(sample.payload)}</pre></details></div><time>${new Date(sample.createdAt).toLocaleString('es-MX')}</time></div>`).join('') : '<p class="empty-state">Aun no hay telemetria para este dispositivo.</p>'}</div></article>`;
     $('#telemetry-device').addEventListener('change', (event) => loadTelemetry(event.target.value));
     $('#telemetry-refresh').addEventListener('click', () => loadTelemetry(deviceId));
     renderIcons();
+    formatTelemetryPayloadBlocks();
   } catch (error) { view.innerHTML = `<div class="panel" style="padding:30px;color:var(--muted)">${error.message}</div>`; }
 }
 
