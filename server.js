@@ -224,7 +224,7 @@ app.get('/api/device-commands', apiReady, async (request, response) => {
   const db = database();
   const [devices] = await db.execute('SELECT id FROM devices WHERE user_id = ? AND device_id = ? LIMIT 1', [keyOwner.user_id, deviceId]);
   if (!devices[0]) return fail(response, 404, 'Device not found for this API key');
-  const [commands] = await db.execute("SELECT id, command_name AS name, payload FROM commands WHERE device_id = ? AND status = 'queued' ORDER BY created_at ASC LIMIT 1", [devices[0].id]);
+  const [commands] = await db.execute("SELECT id, command_name AS name, payload FROM commands WHERE device_id = ? AND status IN ('queued', 'delivered') ORDER BY created_at ASC LIMIT 1", [devices[0].id]);
   if (!commands[0]) return response.json({ command: null });
   await db.execute("UPDATE commands SET status = 'delivered' WHERE id = ? AND status = 'queued'", [commands[0].id]);
   response.json({ command: { id: commands[0].id, name: commands[0].name, payload: typeof commands[0].payload === 'string' ? JSON.parse(commands[0].payload) : commands[0].payload } });
