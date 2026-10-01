@@ -35,11 +35,27 @@ function introGuideMarkup() {
   return '<div class="docs-section"><span class="step-number">01</span><div class="wiki-guide"><h2>Tu primer ESP32 en Pulsegrid</h2><p>El ESP32 es una placa con Wi-Fi integrado. Puede leer sensores, controlar luces o relevadores y enviar datos a este dashboard. Para empezar necesitas una placa ESP32, cable USB, Arduino IDE y una red Wi-Fi de 2.4 GHz.</p><div class="wiki-callout"><strong>Prepara Arduino IDE</strong><p>Instala el paquete <strong>esp32 by Espressif Systems</strong> desde el Gestor de placas. Después selecciona tu placa y el puerto USB en el menu Herramientas.</p></div><h3>1. Comprueba Wi-Fi</h3><p>Cambia las credenciales y sube el programa. El Monitor serie a 115200 baudios mostrara una IP al conectarse.</p><div class="code-block wiki-code"><pre><code>#include &lt;WiFi.h&gt;\nconst char* WIFI_SSID = "TU_RED";\nconst char* WIFI_PASSWORD = "TU_CONTRASENA";\nvoid setup() {\n  Serial.begin(115200);\n  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);\n  while (WiFi.status() != WL_CONNECTED) { delay(500); }\n  Serial.println(WiFi.localIP());\n}\nvoid loop() {}</code></pre></div><h3>2. Crea tu cuenta y registra el nodo</h3><p>Pulsa el usuario arriba a la derecha para crear tu cuenta. Después entra en Dispositivos y usa un ID unico como <code>esp32-terraza-01</code>.</p><div class="endpoint"><span class="method post">POST</span><code>/api/devices</code></div><h3>3. Envia datos del sensor</h3><p>La telemetria son lecturas como temperatura, humedad, voltaje o estado. Primero prueba Wi-Fi, después el sensor y por ultimo la peticion HTTP.</p><div class="code-block wiki-code"><pre><code>#include &lt;HTTPClient.h&gt;\nHTTPClient http;\nhttp.begin("https://pulsegrid.2api2.com/api/telemetry");\nhttp.addHeader("Content-Type", "application/json");\nhttp.POST("{\\"temperature\\":24.8,\\"humidity\\":58}");\nhttp.end();</code></pre></div><div class="wiki-callout"><strong>Consejo</strong><p>No publiques contraseñas Wi-Fi ni tokens. Guarda esos valores en un archivo local excluido de Git.</p></div></div></div>';
 }
 
+function languageExamplesMarkup() {
+  return `<div class="docs-section"><span class="step-number">04</span><div class="wiki-guide"><h2>Prueba la API antes del sensor</h2><p>Antes de conectar un sensor, practica una peticion HTTP. Reemplaza <code>ESP32_ID</code> por el ID del dispositivo y modifica el JSON para tus propias lecturas.</p><h3>JavaScript con fetch</h3><div class="code-block wiki-code"><pre><code>await fetch('/api/telemetry', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ deviceId: 'ESP32_ID', temperature: 24.8 })
+});</code></pre></div><h3>Python con requests</h3><div class="code-block wiki-code"><pre><code>import requests
+
+response = requests.post(
+    'https://pulsegrid.2api2.com/api/telemetry',
+    json={ 'deviceId': 'ESP32_ID', 'temperature': 24.8 }
+)
+print(response.status_code)</code></pre></div><h3>Terminal con curl</h3><div class="code-block wiki-code"><pre><code>curl -X POST https://pulsegrid.2api2.com/api/telemetry \
+  -H "Content-Type: application/json" \
+  -d "{\\"deviceId\\":\\"ESP32_ID\\",\\"temperature\\":24.8}"</code></pre></div><div class="wiki-callout"><strong>Siguiente paso</strong><p>Cuando la prueba responda correctamente, sustituye el valor fijo por una lectura real. Puedes usar un DHT para temperatura y humedad o <code>analogRead()</code> para un sensor analogico.</p></div></div></div>`;
+}
+
 function renderWikiPage(key) {
   const page = wikiPages[key];
   const content = $('#wiki-content');
   if (!page || !content) return;
-  content.innerHTML = key === 'intro' ? introGuideMarkup() : `<div class="docs-section"><span class="step-number">${String(Object.keys(wikiPages).indexOf(key) + 1).padStart(2, '0')}</span><div><h2>${page[0]}</h2><p>${page[1]}</p><div class="endpoint"><span class="method ${page[2] === 'MQTT' ? 'mqtt' : 'post'}">${page[2]}</span><code>${page[3]}</code><button class="copy-button" data-copy="${page[3]}"><i data-lucide="copy"></i> Copiar</button></div><div class="code-block wiki-code"><pre><code>const endpoint = '${page[3]}';
+  content.innerHTML = key === 'intro' ? `${introGuideMarkup()}${languageExamplesMarkup()}` : `<div class="docs-section"><span class="step-number">${String(Object.keys(wikiPages).indexOf(key) + 1).padStart(2, '0')}</span><div><h2>${page[0]}</h2><p>${page[1]}</p><div class="endpoint"><span class="method ${page[2] === 'MQTT' ? 'mqtt' : 'post'}">${page[2]}</span><code>${page[3]}</code><button class="copy-button" data-copy="${page[3]}"><i data-lucide="copy"></i> Copiar</button></div><div class="code-block wiki-code"><pre><code>const endpoint = '${page[3]}';
 fetch(endpoint, { method: '${page[2] === 'MQTT' ? 'SUBSCRIBE' : 'POST'}' });</code></pre></div></div></div>`;
   $$('.wiki-link').forEach((item) => item.classList.toggle('active', item.dataset.wiki === key));
   bindCopyButtons();
