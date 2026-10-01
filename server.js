@@ -210,6 +210,11 @@ app.post('/api/commands', requireSession, apiReady, async (request, response) =>
   response.status(201).json({ ok: true, commandId: result.insertId, status: 'queued' });
 });
 
+app.get('/api/commands', requireSession, apiReady, async (request, response) => {
+  const [rows] = await database().execute('SELECT commands.id, commands.command_name AS command, commands.status, commands.created_at AS createdAt, devices.device_id AS deviceId, devices.name AS deviceName FROM commands JOIN devices ON devices.id = commands.device_id WHERE devices.user_id = (SELECT id FROM users WHERE email = ?) ORDER BY commands.created_at DESC LIMIT 20', [request.session.user.email]);
+  response.json({ commands: rows });
+});
+
 app.get('/api/device-commands', apiReady, async (request, response) => {
   const apiKey = request.get('x-api-key');
   const deviceId = String(request.query.deviceId || '').trim();

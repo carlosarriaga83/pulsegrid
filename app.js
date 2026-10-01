@@ -198,6 +198,20 @@ async function loadDevices() {
   renderDeviceRows();
   renderDeviceCards();
   updateDeviceSummary();
+  loadCommandHistory();
+}
+
+async function loadCommandHistory() {
+  const history = $('.command-history');
+  if (!history) return;
+  try {
+    const result = await apiRequest('commands');
+    $$('.history-row, .empty-state', history).forEach((row) => row.remove());
+    history.insertAdjacentHTML('beforeend', result.commands.length
+      ? result.commands.map((command) => `<div class="history-row"><span class="history-status ${command.status === 'succeeded' ? 'success' : command.status === 'failed' ? 'failed' : 'pending'}"><i data-lucide="${command.status === 'succeeded' ? 'check' : command.status === 'failed' ? 'x' : 'clock-3'}"></i></span><div><strong>${command.command}</strong><small>${command.deviceName} · ${command.deviceId}</small></div><code>${command.status}</code><time>${new Date(command.createdAt).toLocaleString('es-MX')}</time></div>`).join('')
+      : '<p class="empty-state">Aun no hay comandos enviados.</p>');
+    renderIcons();
+  } catch { /* The history remains unavailable until the user signs in. */ }
 }
 
 function renderIcons() {
@@ -338,6 +352,7 @@ $('#execute-command').addEventListener('click', async () => {
   try {
     const payload = JSON.parse($('#command-payload').value || '{}');
     await apiRequest('commands', { method: 'POST', body: JSON.stringify({ deviceId, command, payload }) });
+    loadCommandHistory();
     showToast('Comando en cola para el dispositivo');
   } catch (error) {
     showToast(error instanceof SyntaxError ? 'El payload debe ser JSON valido' : error.message);
