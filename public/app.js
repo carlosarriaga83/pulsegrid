@@ -299,7 +299,28 @@ $$('.copy-button').forEach((button) => button.addEventListener('click', async ()
   showToast('Copiado al portapapeles');
 }));
 
-$('#execute-command').addEventListener('click', () => showToast('Comando enviado al dispositivo'));
+function configureCurtainCommands() {
+  const commandSelect = $('#command-name') || $$('.command-compose select')[1];
+  const payload = $('#command-payload') || $('.command-compose textarea');
+  if (!commandSelect || !payload) return;
+  commandSelect.id = 'command-name';
+  commandSelect.innerHTML = '<option value="curtain.open">Abrir cortina</option><option value="curtain.close">Cerrar cortina</option><option value="curtain.stop">Detener cortina</option><option value="curtain.move">Mover cortina</option>';
+  payload.id = 'command-payload';
+  payload.value = '{}';
+}
+
+configureCurtainCommands();
+$('#execute-command').addEventListener('click', async () => {
+  const deviceId = $('#command-device').value;
+  const command = $('#command-name').value;
+  try {
+    const payload = JSON.parse($('#command-payload').value || '{}');
+    await apiRequest('commands', { method: 'POST', body: JSON.stringify({ deviceId, command, payload }) });
+    showToast('Comando en cola para el dispositivo');
+  } catch (error) {
+    showToast(error instanceof SyntaxError ? 'El payload debe ser JSON valido' : error.message);
+  }
+});
 $('#send-command').addEventListener('click', () => navigate('commands'));
 
 ensureSettingsViewInMain();
