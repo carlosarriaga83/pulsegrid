@@ -1,4 +1,6 @@
 const devices = [];
+const CLOUD_REFRESH_MS = 5000;
+let cloudRefreshInFlight = false;
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -47,7 +49,7 @@ function renderWikiPage(key) {
   const page = wikiPages[key];
   const content = $('#wiki-content');
   if (!page || !content) return;
-  content.innerHTML = key === 'intro' ? `${introGuideMarkup()}${languageExamplesMarkup()}` : `<div class="docs-section"><span class="step-number">${String(Object.keys(wikiPages).indexOf(key) + 1).padStart(2, '0')}</span><div><h2>${page[0]}</h2><p>${page[1]}</p><div class="endpoint"><span class="method ${page[2] === 'MQTT' ? 'mqtt' : 'post'}">${page[2]}</span><code>${page[3]}</code><button class="copy-button" data-copy="${page[3]}"><i data-lucide="copy"></i> Copiar</button></div><div class="code-block wiki-code"><pre><code>const endpoint = '${page[3]}';
+  content.innerHTML = key === 'intro' ? introGuideMarkup() : `<div class="docs-section"><span class="step-number">${String(Object.keys(wikiPages).indexOf(key) + 1).padStart(2, '0')}</span><div><h2>${page[0]}</h2><p>${page[1]}</p><div class="endpoint"><span class="method ${page[2] === 'MQTT' ? 'mqtt' : 'post'}">${page[2]}</span><code>${page[3]}</code><button class="copy-button" data-copy="${page[3]}"><i data-lucide="copy"></i> Copiar</button></div><div class="code-block wiki-code"><pre><code>const endpoint = '${page[3]}';
 fetch(endpoint, { method: '${page[2] === 'MQTT' ? 'SUBSCRIBE' : 'POST'}' });</code></pre></div></div></div>`;
   $$('.wiki-link').forEach((item) => item.classList.toggle('active', item.dataset.wiki === key));
   bindCopyButtons();
@@ -131,6 +133,14 @@ function setupWikiNavigation() {
     button.dataset.wiki = key;
     button.addEventListener('click', () => renderWikiPage(key));
   });
+  if (!$('#view-api')) {
+    const apiView = document.createElement('section');
+    apiView.className = 'view';
+    apiView.id = 'view-api';
+    apiView.innerHTML = `<div class="page-heading"><div><p class="eyebrow">INTEGRACION</p><h1>API<span class="accent-dot">.</span></h1><p class="heading-copy">Credenciales, ejemplos y referencia para conectar tus dispositivos.</p></div></div><article class="wiki-article">${languageExamplesMarkup()}</article>`;
+    $('.view-container').append(apiView);
+    bindWikiApiControls();
+  }
   renderWikiPage('intro');
 }
 
@@ -211,16 +221,20 @@ function devicePresentation(device) {
 }
 
 async function loadDevices() {
+  if (cloudRefreshInFlight) return;
+  cloudRefreshInFlight = true;
   try {
     const result = await apiRequest('devices');
     devices.splice(0, devices.length, ...result.devices.map((device) => ({ ...device, ...devicePresentation(device), report: device.report ? new Date(device.report).toLocaleString('es-MX') : 'sin reporte', signal: device.status === 'online' ? 'good' : 'mid' })));
   } catch {
     devices.splice(0, devices.length);
+  } finally {
+    cloudRefreshInFlight = false;
   }
   renderDeviceRows();
   renderDeviceCards();
   updateDeviceSummary();
-  loadCommandHistory();
+  await loadCommandHistory();
 }
 
 async function loadCommandHistory() {
@@ -251,7 +265,7 @@ function signalMarkup(signal) {
 function renderDeviceRows() {
   const rows = $('#device-rows');
   if (!rows) return;
-  rows.innerHTML = devices.map((device) => `<div class="device-row"><div class="device-name"><span class="device-icon"><i data-lucide="${device.icon}"></i></span><span><strong>${device.name}</strong><small>${device.id} · ${device.type}</small></span></div>${deviceStatus(device)}<span>${device.report}</span>${signalMarkup(device.signal)}<button class="row-menu" title="Opciones"><i data-lucide="more-horizontal"></i></button></div>`).join('');
+  rows.innerHTML = devices.map((device) => `<div class="device-row"><div class="device-name"><span class="device-icon"><i data-lucide="${device.icon}"></i></span><span><strong>${device.name}</strong><small>${device.id} · ${device.type}</small></span></div>${deviceStatus(device)}<span>${device.report}</span>${signalMarkup(device.signal)}<button class="row-menu" data-device-menu="${device.id}" title="Gestionar ${device.name}" aria-label="Gestionar ${device.name}"><i data-lucide="more-vertical"></i></button></div>`).join('');
   renderIcons();
 }
 
@@ -263,8 +277,65 @@ function renderDeviceCards(filter = '', status = 'all') {
     const matchesStatus = status === 'all' || device.status === status;
     return matchesSearch && matchesStatus;
   });
-  grid.innerHTML = filtered.length ? filtered.map((device) => `<article class="device-card"><div class="device-card-top"><span class="device-icon"><i data-lucide="${device.icon}"></i></span>${deviceStatus(device)}</div><h3>${device.name}</h3><span class="device-card-id">${device.id} · ${device.type}</span><div class="device-status ${device.status}"><i data-lucide="clock-3"></i> Ultimo reporte: ${device.report}</div><div class="device-meta">${device.meta.map((item) => `<span><i data-lucide="${item.icon}"></i> ${item.text}</span>`).join('')}</div></article>`).join('') : '<div class="panel" style="padding:30px;color:var(--muted)">No encontramos dispositivos con ese criterio.</div>';
+  grid.innerHTML = filtered.length ? filtered.map((device) => `<article class="device-card"><div class="device-card-top"><span class="device-icon"><i data-lucide="${device.icon}"></i></span><div style="display:flex;align-items:center;gap:8px">${deviceStatus(device)}<button class="row-menu" data-device-menu="${device.id}" title="Gestionar ${device.name}" aria-label="Gestionar ${device.name}"><i data-lucide="more-vertical"></i></button></div></div><h3>${device.name}</h3><span class="device-card-id">${device.id} · ${device.type}</span><div class="device-status ${device.status}"><i data-lucide="clock-3"></i> Ultimo reporte: ${device.report}</div><div class="device-meta">${device.meta.map((item) => `<span><i data-lucide="${item.icon}"></i> ${item.text}</span>`).join('')}</div></article>`).join('') : '<div class="panel" style="padding:30px;color:var(--muted)">No encontramos dispositivos con ese criterio.</div>';
   renderIcons();
+}
+
+function closeDeviceMenu() { $('#device-actions-menu')?.remove(); }
+
+function openDeviceMenu(button, device) {
+  if (!device) return;
+  closeDeviceMenu();
+  const bounds = button.getBoundingClientRect();
+  const menu = document.createElement('div');
+  menu.id = 'device-actions-menu';
+  menu.className = 'panel';
+  menu.style.cssText = `position:fixed;z-index:30;top:${bounds.bottom + 6}px;left:${Math.max(12, bounds.right - 180)}px;padding:6px;min-width:180px;box-shadow:var(--shadow)`;
+  menu.innerHTML = '<button class="secondary-button" data-device-action="command" style="width:100%;border:0;justify-content:flex-start"><i data-lucide="send"></i> Enviar comando</button><button class="secondary-button" data-device-action="refresh" style="width:100%;border:0;justify-content:flex-start"><i data-lucide="refresh-cw"></i> Actualizar estado</button><button class="secondary-button" data-device-action="delete" style="width:100%;border:0;justify-content:flex-start;color:var(--red)"><i data-lucide="trash-2"></i> Eliminar dispositivo</button>';
+  document.body.append(menu);
+  menu.addEventListener('click', async (event) => {
+    const action = event.target.closest('[data-device-action]')?.dataset.deviceAction;
+    if (!action) return;
+    closeDeviceMenu();
+    if (action === 'command') {
+      navigate('commands');
+      $('#command-device').value = device.id;
+      renderCommandDeviceState();
+      $('#command-name').focus();
+    } else if (action === 'refresh') {
+      await loadDevices();
+      showToast('Estado actualizado');
+    } else if (action === 'delete' && window.confirm(`Eliminar ${device.name}? Esta accion eliminara su historial.`)) {
+      try { await apiRequest(`devices/${encodeURIComponent(device.id)}`, { method: 'DELETE' }); await loadDevices(); showToast('Dispositivo eliminado'); }
+      catch (error) { showToast(error.message); }
+    }
+  });
+  renderIcons();
+}
+
+function telemetrySummary(payload) {
+  if (payload.kind === 'curtain') {
+    const servos = Object.entries(payload.servos || {});
+    const values = servos.map(([, servo]) => Number(servo.blind_percent)).filter(Number.isFinite);
+    return values.length ? `Apertura ${Math.round(values.reduce((sum, value) => sum + value, 0) / values.length)}% · ${servos.map(([id, servo]) => `S${id}: ${Math.round(Number(servo.blind_percent) || 0)}%`).join(' · ')}` : 'Cortina sin posicion calibrada';
+  }
+  return Object.entries(payload).filter(([key]) => key !== 'online').slice(0, 4).map(([key, value]) => `${key}: ${typeof value === 'object' ? JSON.stringify(value) : value}`).join(' · ') || 'Sin valores legibles';
+}
+
+async function loadTelemetry(deviceId = $('#telemetry-device')?.value || devices[0]?.id) {
+  const view = $('#view-telemetry');
+  if (!view) return;
+  if (!deviceId) { view.innerHTML = '<div class="panel" style="padding:30px;color:var(--muted)">Agrega un dispositivo para consultar telemetria.</div>'; return; }
+  try {
+    const result = await apiRequest(`telemetry?deviceId=${encodeURIComponent(deviceId)}&limit=30`);
+    const samples = result.telemetry;
+    const latest = samples[0];
+    const device = devices.find((item) => item.id === deviceId);
+    view.innerHTML = `<div class="page-heading"><div><p class="eyebrow">DATOS EN TIEMPO REAL</p><h1>Telemetria<span class="accent-dot">.</span></h1><p class="heading-copy">Lecturas almacenadas por tus dispositivos.</p></div><button class="secondary-button" id="telemetry-refresh"><i data-lucide="refresh-cw"></i> Actualizar</button></div><div class="panel" style="padding:18px;margin-bottom:14px"><label class="metric-label">Dispositivo<select id="telemetry-device" style="margin-left:10px">${devices.map((item) => `<option value="${item.id}"${item.id === deviceId ? ' selected' : ''}>${item.name} · ${item.id}</option>`).join('')}</select></label></div><div class="telemetry-overview"><article class="metric-card"><span class="metric-label"><i data-lucide="database"></i> Muestras recientes</span><strong>${samples.length}</strong><span class="trend stable">Ultimas 30 lecturas</span></article><article class="metric-card"><span class="metric-label"><i data-lucide="clock-3"></i> Ultima lectura</span><strong style="font-size:18px">${latest ? new Date(latest.createdAt).toLocaleTimeString('es-MX') : '--'}</strong><span class="trend stable">${device?.status === 'online' ? 'Dispositivo en linea' : 'Sin conexion reciente'}</span></article><article class="metric-card"><span class="metric-label"><i data-lucide="activity"></i> Estado reportado</span><strong style="font-size:18px">${latest ? telemetrySummary(latest.payload) : 'Sin muestras'}</strong></article></div><article class="panel" style="padding:21px"><div class="panel-heading"><div><h2>Historial de lecturas</h2><p>${device ? `${device.name} · ${device.id}` : deviceId}</p></div></div><div class="activity-list">${samples.length ? samples.map((sample) => `<div class="activity-item"><span class="activity-icon lime"><i data-lucide="radio"></i></span><div><strong>${telemetrySummary(sample.payload)}</strong><p>${JSON.stringify(sample.payload)}</p></div><time>${new Date(sample.createdAt).toLocaleString('es-MX')}</time></div>`).join('') : '<p class="empty-state">Aun no hay telemetria para este dispositivo.</p>'}</div></article>`;
+    $('#telemetry-device').addEventListener('change', (event) => loadTelemetry(event.target.value));
+    $('#telemetry-refresh').addEventListener('click', () => loadTelemetry(deviceId));
+    renderIcons();
+  } catch (error) { view.innerHTML = `<div class="panel" style="padding:30px;color:var(--muted)">${error.message}</div>`; }
 }
 
 function showToast(message) {
@@ -296,13 +367,33 @@ function updateDeviceSummary() {
   if (counts.length === 3) [devices.length, online, offline].forEach((count, index) => { counts[index].textContent = count; });
   const commandDevice = $('#command-device');
   if (commandDevice) {
+    const selectedDeviceId = commandDevice.value;
     commandDevice.disabled = devices.length === 0;
     commandDevice.innerHTML = devices.length
       ? devices.map((device) => `<option value="${device.id}">${device.name} · ${device.id}</option>`).join('')
       : '<option value="">Agrega un dispositivo para enviar comandos</option>';
+    commandDevice.value = devices.some((device) => device.id === selectedDeviceId) ? selectedDeviceId : devices[0]?.id || '';
+    renderCommandDeviceState();
   }
   const activity = $('.activity-list');
   if (activity) activity.innerHTML = '<p class="empty-state">Los eventos de tus dispositivos apareceran aqui.</p>';
+}
+
+function renderCommandDeviceState() {
+  const commandDevice = $('#command-device');
+  if (!commandDevice) return;
+  const device = devices.find((item) => item.id === commandDevice.value);
+  let reference = $('#command-device-state');
+  if (!reference) {
+    reference = document.createElement('div');
+    reference.id = 'command-device-state';
+    reference.className = 'device-meta';
+    commandDevice.closest('label').insertAdjacentElement('afterend', reference);
+  }
+  reference.innerHTML = device
+    ? `<span><i data-lucide="${device.icon}"></i> Estado actual: ${device.status === 'online' ? 'En linea' : 'Fuera de linea'}</span>${device.meta.map((item) => `<span><i data-lucide="${item.icon}"></i> ${item.text}</span>`).join('')}`
+    : '<span><i data-lucide="circle-off"></i> Sin estado disponible</span>';
+  renderIcons();
 }
 
 function navigate(viewName) {
@@ -314,7 +405,7 @@ function navigate(viewName) {
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-$$('.nav-item[data-view]').forEach((item) => item.addEventListener('click', () => navigate(item.dataset.view)));
+$$('.nav-item[data-view]').forEach((item) => item.addEventListener('click', () => { navigate(item.dataset.view); if (item.dataset.view === 'telemetry') loadTelemetry(); }));
 $$('[data-view-target]').forEach((button) => button.addEventListener('click', () => navigate(button.dataset.viewTarget)));
 $$('[data-open-modal="add-device"], #add-device').forEach((button) => button.addEventListener('click', openModal));
 $('.modal-close').addEventListener('click', closeModal);
@@ -337,6 +428,11 @@ $('#device-form').addEventListener('submit', async (event) => {
 });
 
 $('#device-search').addEventListener('input', (event) => renderDeviceCards(event.target.value));
+document.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-device-menu]');
+  if (button) return openDeviceMenu(button, devices.find((device) => device.id === button.dataset.deviceMenu));
+  if (!event.target.closest('#device-actions-menu')) closeDeviceMenu();
+});
 $$('.filter-button').forEach((button) => button.addEventListener('click', () => {
   $$('.filter-button').forEach((item) => item.classList.remove('active'));
   button.classList.add('active');
@@ -393,12 +489,13 @@ $('#execute-command').addEventListener('click', async () => {
   try {
     const payload = JSON.parse($('#command-payload').value || '{}');
     await apiRequest('commands', { method: 'POST', body: JSON.stringify({ deviceId, command, payload }) });
-    loadCommandHistory();
+    loadDevices();
     showToast('Comando en cola para el dispositivo');
   } catch (error) {
     showToast(error instanceof SyntaxError ? 'El payload debe ser JSON valido' : error.message);
   }
 });
+$('#command-device').addEventListener('change', renderCommandDeviceState);
 $('#send-command').addEventListener('click', () => {
   navigate('commands');
   const composer = $('.command-compose');
@@ -425,6 +522,10 @@ if (savedUser) applyUser(JSON.parse(savedUser));
 apiRequest('me').then((result) => {
   if (result.user) { applyUser(result.user); loadDevices(); } else clearUser();
 }).catch(() => clearUser());
+
+window.setInterval(() => {
+  if (!document.hidden && localStorage.getItem('pulsegrid-user')) loadDevices();
+}, CLOUD_REFRESH_MS);
 
 document.documentElement.dataset.theme = localStorage.getItem('pulsegrid-theme') || 'dark';
 renderDeviceRows();

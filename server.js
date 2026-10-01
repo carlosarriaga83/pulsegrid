@@ -168,6 +168,20 @@ app.post('/api/devices', apiReady, async (request, response) => {
   } catch (error) { fail(response, error.code === 'ER_DUP_ENTRY' ? 409 : 500, error.code === 'ER_DUP_ENTRY' ? 'El Device ID ya existe en este workspace' : 'No fue posible crear el dispositivo'); }
 });
 
+app.delete('/api/devices/:deviceId', requireSession, apiReady, async (request, response) => {
+  const [result] = await database().execute('DELETE FROM devices WHERE user_id = (SELECT id FROM users WHERE email = ?) AND device_id = ?', [request.session.user.email, String(request.params.deviceId).trim()]);
+  if (!result.affectedRows) return fail(response, 404, 'Dispositivo no encontrado');
+  response.json({ ok: true });
+});
+
+app.get('/api/telemetry', requireSession, apiReady, async (request, response) => {
+  const deviceId = String(request.query.deviceId || '').trim();
+  const limit = Math.min(Math.max(Number.parseInt(request.query.limit, 10) || 30, 1), 100);
+  if (!deviceId) return fail(response, 422, 'deviceId es obligatorio');
+  const [rows] = await database().execute('SELECT telemetry.payload, telemetry.created_at AS createdAt FROM telemetry JOIN devices ON devices.id = telemetry.device_id WHERE devices.user_id = (SELECT id FROM users WHERE email = ?) AND devices.device_id = ? ORDER BY telemetry.id DESC LIMIT ?', [request.session.user.email, deviceId, limit]);
+  response.json({ telemetry: rows.map((row) => ({ ...row, payload: typeof row.payload === 'string' ? JSON.parse(row.payload) : row.payload })) });
+});
+
 app.post('/api/relay/telemetry', (request, response) => {
   if (!request.get('x-api-key')) return fail(response, 401, 'X-API-Key is required');
   relayCloud(request, response, 'POST', '/api/telemetry');
