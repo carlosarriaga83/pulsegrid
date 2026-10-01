@@ -41,6 +41,7 @@ function createApiKey() {
 
 const firmwareRoot = path.join(root, 'firmware', 'releases');
 const firmwareActivePath = path.join(root, 'firmware', 'active.json');
+const firmwareFiles = new Set(['main.py', 'pulsegrid.py', 'webserver.py', 'cortina.py', 'stservo.py', 'ssd1306.py']);
 
 function firmwareVersion(version) {
   if (!/^[A-Za-z0-9._-]{1,40}$/.test(String(version || ''))) throw new Error('Invalid firmware version');
@@ -48,14 +49,17 @@ function firmwareVersion(version) {
 }
 
 function firmwareFileName(fileName) {
-  if (!/^[A-Za-z0-9._-]{1,80}\.py$/.test(String(fileName || ''))) throw new Error('Invalid firmware file');
+  if (!firmwareFiles.has(String(fileName || ''))) throw new Error('Archivo de firmware no permitido');
   return String(fileName);
 }
 
 async function readFirmwareManifest(version) {
   const selectedVersion = version ? firmwareVersion(version) : JSON.parse(await fsp.readFile(firmwareActivePath, 'utf8')).version;
   const manifestPath = path.join(firmwareRoot, selectedVersion, 'manifest.json');
-  return JSON.parse(await fsp.readFile(manifestPath, 'utf8'));
+  const manifest = JSON.parse(await fsp.readFile(manifestPath, 'utf8'));
+  if (!manifest.files?.length) throw new Error('El manifiesto no contiene archivos');
+  manifest.files.forEach((file) => firmwareFileName(file.name));
+  return manifest;
 }
 
 function relayCloud(request, response, method, cloudPath) {
@@ -105,7 +109,8 @@ async function ensureSchema() {
     await db.execute("CREATE TABLE IF NOT EXISTS api_keys (id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY, user_id INT UNSIGNED NOT NULL UNIQUE, key_hash CHAR(64) NOT NULL UNIQUE, key_hint VARCHAR(16) NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, last_used_at TIMESTAMP NULL, CONSTRAINT api_keys_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE) ENGINE=InnoDB");
     await db.execute("CREATE TABLE IF NOT EXISTS devices (id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY, user_id INT UNSIGNED NOT NULL, device_id VARCHAR(80) NOT NULL, name VARCHAR(120) NOT NULL, type VARCHAR(60) NOT NULL, status ENUM('online','offline') NOT NULL DEFAULT 'offline', last_seen TIMESTAMP NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, UNIQUE KEY user_device (user_id, device_id), CONSTRAINT devices_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE) ENGINE=InnoDB");
     await db.execute("CREATE TABLE IF NOT EXISTS telemetry (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, device_id INT UNSIGNED NOT NULL, payload JSON NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, INDEX telemetry_device (device_id), CONSTRAINT telemetry_device_fk FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE) ENGINE=InnoDB");
-    await db.execute("CREATE TABLE IF NOT EXISTS commands (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, device_id INT UNSIGNED NOT NULL, command_name VARCHAR(80) NOT NULL, payload JSON NOT NULL, status VARCHAR(30) NOT NULL DEFAULT 'queued', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, CONSTRAINT commands_device_fk FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE) ENGINE=InnoDB");
+    await db.execute("CREATE TABLE IF NOT EXISTS commands (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, device_id INT UNSIGNED NOT NULL, command_name VARCHAR(80) NOT NULL, payload JSON NOT NULL, status VARCHAR(30) NOT NULL DEFAULT 'queued', error_message VARCHAR(500) NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, CONSTRAINT commands_device_fk FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE) ENGINE=InnoDB");
+    try { await db.execute('ALTER TABLE commands ADD COLUMN error_message VARCHAR(500) NULL'); } catch (error) { if (error.code !== 'ER_DUP_FIELDNAME') throw error; }
   })();
   return schemaReady;
 }
@@ -246,7 +251,7 @@ app.post('/api/commands', requireSession, apiReady, async (request, response) =>
 });
 
 app.get('/api/commands', requireSession, apiReady, async (request, response) => {
-  const [rows] = await database().execute('SELECT commands.id, commands.command_name AS command, commands.status, commands.created_at AS createdAt, devices.device_id AS deviceId, devices.name AS deviceName FROM commands JOIN devices ON devices.id = commands.device_id WHERE devices.user_id = (SELECT id FROM users WHERE email = ?) ORDER BY commands.created_at DESC LIMIT 20', [request.session.user.email]);
+  const [rows] = await database().execute('SELECT commands.id, commands.command_name AS command, commands.status, commands.error_message AS errorMessage, commands.created_at AS createdAt, devices.device_id AS deviceId, devices.name AS deviceName FROM commands JOIN devices ON devices.id = commands.device_id WHERE devices.user_id = (SELECT id FROM users WHERE email = ?) ORDER BY commands.created_at DESC LIMIT 20', [request.session.user.email]);
   response.json({ commands: rows });
 });
 
@@ -329,10 +334,11 @@ app.post('/api/device-commands/:commandId/ack', apiReady, async (request, respon
   const apiKey = request.get('x-api-key');
   const deviceId = String((request.body || {}).deviceId || '').trim();
   const status = (request.body || {}).status;
+  const errorMessage = String((request.body || {}).error || '').slice(0, 500) || null;
   const keyOwner = await apiKeyOwner(apiKey);
   if (!keyOwner) return fail(response, 401, 'Invalid API key');
   if (!deviceId || !['succeeded', 'failed'].includes(status)) return fail(response, 422, 'deviceId y estado valido son obligatorios');
-  const [result] = await database().execute('UPDATE commands SET status = ? WHERE id = ? AND device_id = (SELECT id FROM devices WHERE user_id = ? AND device_id = ? LIMIT 1)', [status, request.params.commandId, keyOwner.user_id, deviceId]);
+  const [result] = await database().execute('UPDATE commands SET status = ?, error_message = ? WHERE id = ? AND device_id = (SELECT id FROM devices WHERE user_id = ? AND device_id = ? LIMIT 1)', [status, status === 'failed' ? errorMessage : null, request.params.commandId, keyOwner.user_id, deviceId]);
   if (!result.affectedRows) return fail(response, 404, 'Comando no encontrado');
   response.json({ ok: true });
 });
