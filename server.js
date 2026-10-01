@@ -14,6 +14,7 @@ let pool;
 let schemaReady;
 
 app.disable('x-powered-by');
+app.set('trust proxy', 1);
 app.use(express.json({ limit: '32kb' }));
 
 function fail(response, status, error) {
