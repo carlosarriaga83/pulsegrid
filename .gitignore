@@ -1,0 +1,6 @@
+.env/
+.env.local
+node_modules/
+.pulsegrid-config.php
+pulsegrid-static.zip
+pulsegrid-node.zip
