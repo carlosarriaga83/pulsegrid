@@ -228,6 +228,17 @@ app.post('/api/relay/device-commands/:commandId/ack', (request, response) => {
   relayCloud(request, response, 'POST', `/api/device-commands/${encodeURIComponent(request.params.commandId)}/ack`);
 });
 
+app.get('/api/relay/firmware/manifest', (request, response) => {
+  if (!request.get('x-api-key')) return fail(response, 401, 'X-API-Key is required');
+  const version = request.query.version ? `?version=${encodeURIComponent(request.query.version)}` : '';
+  relayCloud(request, response, 'GET', `/api/firmware/manifest${version}`);
+});
+
+app.get('/api/relay/firmware/files/:version/:file', (request, response) => {
+  if (!request.get('x-api-key')) return fail(response, 401, 'X-API-Key is required');
+  relayCloud(request, response, 'GET', `/api/firmware/files/${encodeURIComponent(request.params.version)}/${encodeURIComponent(request.params.file)}`);
+});
+
 app.post('/api/telemetry', apiReady, async (request, response) => {
   const apiKey = request.get('x-api-key');
   const { deviceId, ...payload } = request.body || {};
