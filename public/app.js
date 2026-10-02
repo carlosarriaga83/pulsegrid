@@ -1,5 +1,5 @@
 const devices = [];
-const CLOUD_REFRESH_MS = 5000;
+const CLOUD_REFRESH_MS = 2000;
 let cloudRefreshInFlight = false;
 
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -251,6 +251,7 @@ async function loadDevices() {
   }
   renderDeviceRows();
   renderDeviceCards();
+  renderCommandDeviceState();
   updateDeviceSummary();
   await loadCommandHistory();
 }
