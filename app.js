@@ -125,15 +125,97 @@ function bindFirmwareReleaseControls() {
   form.dataset.bound = 'true';
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
-    const files = Array.from($('#firmware-release-files').files || []);
+    const files = Array.from(form.querySelector('#firmware-release-files').files || []);
     if (!files.length) return showToast('Selecciona al menos un archivo .py');
     try {
-      const payload = { version: $('#firmware-release-version').value.trim(), files: await Promise.all(files.map(async (file) => ({ name: file.name, content: await file.text() }))) };
+      const payload = { version: form.querySelector('#firmware-release-version').value.trim(), files: await Promise.all(files.map(async (file) => ({ name: file.name, content: await file.text() }))) };
       const result = await apiRequest('firmware/releases', { method: 'POST', body: JSON.stringify(payload) });
-      $('#firmware-release-status').textContent = `Publicado ${result.release.version} con ${result.release.files.length} archivos.`;
+      form.querySelector('#firmware-release-status').textContent = `Publicado ${result.release.version} con ${result.release.files.length} archivos.`;
       showToast('Firmware publicado');
-    } catch (error) { $('#firmware-release-status').textContent = error.message; }
+    } catch (error) { form.querySelector('#firmware-release-status').textContent = error.message; }
   });
+}
+
+function firmwareViewMarkup() {
+  return `<section class="view" id="view-firmware"><div class="page-heading"><div><p class="eyebrow">CICLO DE VIDA</p><h1>Firmware<span class="accent-dot">.</span></h1><p class="heading-copy">Publica, inspecciona y administra las versiones MicroPython de tus dispositivos.</p></div><button class="secondary-button" id="firmware-refresh"><i data-lucide="refresh-cw"></i> Actualizar</button></div><div class="panel firmware-publish-panel"><div class="panel-heading"><div><h2>Nueva publicacion</h2><p>Los archivos permitidos se almacenan y quedan disponibles para OTA.</p></div><span class="secure-badge"><i data-lucide="shield-check"></i> Verificado</span></div><form id="firmware-release-form" class="firmware-form"><label>Version<input id="firmware-release-version" required placeholder="2026.10.3"></label><label>Archivos .py<input id="firmware-release-files" type="file" accept=".py,text/x-python" multiple required></label><button class="primary-button" type="submit"><i data-lucide="upload-cloud"></i> Publicar version</button></form><p id="firmware-release-status" class="form-status">Ninguna publicacion nueva en esta sesion.</p></div><div class="panel firmware-table-panel"><div class="panel-heading"><div><h2>Versiones publicadas</h2><p id="firmware-release-count">Consulta el historial de releases y sus archivos.</p></div></div><div class="firmware-table-wrap"><div class="firmware-table-head"><span>Version</span><span>Contenido</span><span>Fecha</span><span>Estado</span><span></span></div><div id="firmware-release-rows"><div class="empty-state">Cargando versiones...</div></div></div></div></section>`;
+}
+
+function renderFirmwareReleases(releases) {
+  const rows = $('#firmware-release-rows');
+  const count = $('#firmware-release-count');
+  if (!rows || !count) return;
+  count.textContent = `${releases.length} version${releases.length === 1 ? '' : 'es'} publicada${releases.length === 1 ? '' : 's'}.`;
+  if (!releases.length) { rows.innerHTML = '<div class="empty-state">Todavia no hay versiones publicadas.</div>'; return; }
+  rows.innerHTML = releases.map((release) => `<div class="firmware-release-row"><div class="firmware-version"><strong>${escapeTelemetryHtml(release.version)}</strong>${release.isActive ? '<span class="release-badge">Activa</span>' : ''}</div><details class="firmware-files"><summary>${release.files.length} archivo${release.files.length === 1 ? '' : 's'}</summary><div>${release.files.map((file) => `<span><code>${escapeTelemetryHtml(file.name)}</code><small>${Number(file.size || 0).toLocaleString('es-MX')} B</small></span>`).join('')}</div></details><time>${new Date(release.createdAt).toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' })}</time><span class="firmware-status ${release.isActive ? 'active' : ''}">${release.isActive ? 'Disponible para OTA' : 'Archivada'}</span><div class="firmware-release-actions"><button class="icon-button firmware-kebab" data-firmware-menu="${escapeTelemetryHtml(release.version)}" aria-label="Gestionar ${escapeTelemetryHtml(release.version)}" title="Gestionar version"><i data-lucide="more-vertical"></i></button><div class="firmware-menu" data-firmware-actions="${escapeTelemetryHtml(release.version)}" hidden><button data-firmware-action="content" data-firmware-version="${escapeTelemetryHtml(release.version)}"><i data-lucide="file-code-2"></i> Ver contenido</button>${release.isActive ? '' : `<button data-firmware-action="activate" data-firmware-version="${escapeTelemetryHtml(release.version)}"><i data-lucide="check-circle-2"></i> Activar version</button>`}<button class="danger-action" data-firmware-action="delete" data-firmware-version="${escapeTelemetryHtml(release.version)}"${release.isActive ? ' disabled title="Activa otra version antes de eliminar"' : ''}><i data-lucide="trash-2"></i> Eliminar</button></div></div></div>`).join('');
+  renderIcons();
+}
+
+async function loadFirmwareReleases() {
+  const rows = $('#firmware-release-rows');
+  if (!rows) return;
+  try { const result = await apiRequest('firmware/releases'); renderFirmwareReleases(result.releases || []); }
+  catch (error) { rows.innerHTML = `<div class="empty-state">${escapeTelemetryHtml(error.message)}</div>`; }
+}
+
+function openFirmwareContent(version, releases) {
+  const release = releases.find((item) => item.version === version);
+  if (!release) return;
+  const modal = document.createElement('div');
+  modal.className = 'modal-backdrop open';
+  modal.innerHTML = `<div class="modal firmware-content-modal"><button class="modal-close" aria-label="Cerrar"><i data-lucide="x"></i></button><p class="eyebrow">CONTENIDO DE RELEASE</p><h2>${escapeTelemetryHtml(release.version)}</h2><p class="modal-copy">Archivos incluidos en esta publicacion OTA.</p><div class="firmware-content-list">${release.files.map((file) => `<div><i data-lucide="file-code-2"></i><span><strong>${escapeTelemetryHtml(file.name)}</strong><small>${Number(file.size || 0).toLocaleString('es-MX')} bytes · SHA-256 ${escapeTelemetryHtml(file.sha256)}</small></span></div>`).join('')}</div></div>`;
+  document.body.append(modal);
+  modal.querySelector('.modal-close').addEventListener('click', () => modal.remove());
+  modal.addEventListener('click', (event) => { if (event.target === modal) modal.remove(); });
+  renderIcons();
+}
+
+function bindFirmwareViewControls() {
+  const form = $('#view-firmware #firmware-release-form');
+  if (!form || form.dataset.bound) return;
+  form.dataset.bound = 'true';
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const files = Array.from(form.querySelector('#firmware-release-files').files || []);
+    if (!files.length) return showToast('Selecciona al menos un archivo .py');
+    try {
+      const payload = { version: form.querySelector('#firmware-release-version').value.trim(), files: await Promise.all(files.map(async (file) => ({ name: file.name, content: await file.text() }))) };
+      const result = await apiRequest('firmware/releases', { method: 'POST', body: JSON.stringify(payload) });
+      form.querySelector('#firmware-release-status').textContent = `Publicado ${result.release.version} con ${result.release.files.length} archivos.`;
+      form.reset();
+      await loadFirmwareReleases();
+      showToast('Firmware publicado');
+    } catch (error) { form.querySelector('#firmware-release-status').textContent = error.message; }
+  });
+  $('#firmware-refresh').addEventListener('click', loadFirmwareReleases);
+  document.addEventListener('click', async (event) => {
+    const menuButton = event.target.closest('[data-firmware-menu]');
+    if (menuButton) {
+      const menu = $(`[data-firmware-actions="${CSS.escape(menuButton.dataset.firmwareMenu)}"]`);
+      $$('.firmware-menu').forEach((item) => { if (item !== menu) item.hidden = true; });
+      if (menu) menu.hidden = !menu.hidden;
+      return;
+    }
+    const action = event.target.closest('[data-firmware-action]');
+    if (action) {
+      const version = action.dataset.firmwareVersion;
+      const result = await apiRequest('firmware/releases').catch((error) => ({ error }));
+      if (result.error) return showToast(result.error.message);
+      if (action.dataset.firmwareAction === 'content') return openFirmwareContent(version, result.releases || []);
+      if (action.dataset.firmwareAction === 'activate') {
+        try { await apiRequest(`firmware/releases/${encodeURIComponent(version)}/activate`, { method: 'POST' }); await loadFirmwareReleases(); showToast(`${version} ahora es la version activa`); } catch (error) { showToast(error.message); }
+      }
+      if (action.dataset.firmwareAction === 'delete' && !action.disabled && window.confirm(`Eliminar la version ${version}?`)) {
+        try { await apiRequest(`firmware/releases/${encodeURIComponent(version)}`, { method: 'DELETE' }); await loadFirmwareReleases(); showToast('Version eliminada'); } catch (error) { showToast(error.message); }
+      }
+      return;
+    }
+    if (!event.target.closest('.firmware-release-actions')) $$('.firmware-menu').forEach((item) => { item.hidden = true; });
+  });
+}
+
+function setupFirmwareView() {
+  if (!$('#view-firmware')) $('.view-container').insertAdjacentHTML('beforeend', firmwareViewMarkup());
+  bindFirmwareViewControls();
 }
 
 function setupWikiNavigation() {
@@ -159,6 +241,7 @@ function setupWikiNavigation() {
     bindWikiApiControls();
     bindFirmwareReleaseControls();
   }
+  setupFirmwareView();
   renderWikiPage('intro');
 }
 
@@ -457,7 +540,7 @@ function navigate(viewName) {
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-$$('.nav-item[data-view]').forEach((item) => item.addEventListener('click', () => { navigate(item.dataset.view); if (item.dataset.view === 'telemetry') loadTelemetry(); }));
+$$('.nav-item[data-view]').forEach((item) => item.addEventListener('click', () => { navigate(item.dataset.view); if (item.dataset.view === 'telemetry') loadTelemetry(); if (item.dataset.view === 'firmware') loadFirmwareReleases(); }));
 $$('[data-view-target]').forEach((button) => button.addEventListener('click', () => navigate(button.dataset.viewTarget)));
 $$('[data-open-modal="add-device"], #add-device').forEach((button) => button.addEventListener('click', openModal));
 $('.modal-close').addEventListener('click', closeModal);

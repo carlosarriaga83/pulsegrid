@@ -50,12 +50,19 @@ function firmwareFileName(fileName) {
 }
 
 async function readFirmwareManifest(userId, version) {
-  const [releases] = await database().execute(`SELECT id, version, created_at AS createdAt FROM firmware_releases WHERE user_id = ? ${version ? 'AND version = ?' : 'AND is_active = 1'} ORDER BY created_at DESC LIMIT 1`, version ? [userId, firmwareVersion(version)] : [userId]);
+  const [releases] = await database().execute(`SELECT id, version, is_active AS isActive, created_at AS createdAt FROM firmware_releases WHERE user_id = ? ${version ? 'AND version = ?' : 'AND is_active = 1'} ORDER BY created_at DESC LIMIT 1`, version ? [userId, firmwareVersion(version)] : [userId]);
   if (!releases[0]) return null;
   const [files] = await database().execute('SELECT name, OCTET_LENGTH(content) AS size, sha256 FROM firmware_files WHERE release_id = ? ORDER BY name', [releases[0].id]);
   if (!files.length) throw new Error('El manifiesto no contiene archivos');
   files.forEach((file) => firmwareFileName(file.name));
   return { ...releases[0], files };
+}
+
+async function readFirmwareReleases(userId) {
+  const [releases] = await database().execute('SELECT id, version, is_active AS isActive, created_at AS createdAt FROM firmware_releases WHERE user_id = ? ORDER BY created_at DESC', [userId]);
+  if (!releases.length) return [];
+  const [files] = await database().execute('SELECT release_id AS releaseId, name, OCTET_LENGTH(content) AS size, sha256 FROM firmware_files WHERE release_id IN (?) ORDER BY name', [releases.map((release) => release.id)]);
+  return releases.map((release) => ({ ...release, files: files.filter((file) => file.releaseId === release.id).map(({ releaseId, ...file }) => file) }));
 }
 
 async function sessionUserId(email) {
@@ -271,9 +278,36 @@ app.get('/api/commands', requireSession, apiReady, async (request, response) => 
 
 app.get('/api/firmware/releases', requireSession, apiReady, async (request, response) => {
   try {
-    response.json({ release: await readFirmwareManifest(await sessionUserId(request.session.user.email)) });
+    response.json({ releases: await readFirmwareReleases(await sessionUserId(request.session.user.email)) });
   } catch (error) {
     fail(response, 500, error.message);
+  }
+});
+
+app.post('/api/firmware/releases/:version/activate', requireSession, apiReady, async (request, response) => {
+  try {
+    const userId = await sessionUserId(request.session.user.email);
+    const version = firmwareVersion(request.params.version);
+    const [existing] = await database().execute('SELECT id FROM firmware_releases WHERE user_id = ? AND version = ? LIMIT 1', [userId, version]);
+    if (!existing[0]) return fail(response, 404, 'Firmware release not found');
+    await database().execute('UPDATE firmware_releases SET is_active = CASE WHEN version = ? THEN 1 ELSE 0 END WHERE user_id = ?', [version, userId]);
+    response.json({ release: await readFirmwareManifest(userId, version) });
+  } catch (error) {
+    fail(response, 422, error.message);
+  }
+});
+
+app.delete('/api/firmware/releases/:version', requireSession, apiReady, async (request, response) => {
+  try {
+    const userId = await sessionUserId(request.session.user.email);
+    const version = firmwareVersion(request.params.version);
+    const [release] = await database().execute('SELECT is_active AS isActive FROM firmware_releases WHERE user_id = ? AND version = ? LIMIT 1', [userId, version]);
+    if (!release[0]) return fail(response, 404, 'Firmware release not found');
+    if (release[0].isActive) return fail(response, 409, 'Activa otra version antes de eliminar esta release');
+    await database().execute('DELETE FROM firmware_releases WHERE user_id = ? AND version = ?', [userId, version]);
+    response.json({ ok: true });
+  } catch (error) {
+    fail(response, 422, error.message);
   }
 });
 
