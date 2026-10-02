@@ -173,6 +173,7 @@ function bindFirmwareViewControls() {
   const form = $('#view-firmware #firmware-release-form');
   if (!form || form.dataset.bound) return;
   form.dataset.bound = 'true';
+  const status = form.querySelector('#firmware-release-status') || $('#view-firmware #firmware-release-status');
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     const files = Array.from(form.querySelector('#firmware-release-files').files || []);
@@ -180,11 +181,11 @@ function bindFirmwareViewControls() {
     try {
       const payload = { version: form.querySelector('#firmware-release-version').value.trim(), files: await Promise.all(files.map(async (file) => ({ name: file.name, content: await file.text() }))) };
       const result = await apiRequest('firmware/releases', { method: 'POST', body: JSON.stringify(payload) });
-      form.querySelector('#firmware-release-status').textContent = `Publicado ${result.release.version} con ${result.release.files.length} archivos.`;
+      status.textContent = `Publicado ${result.release.version} con ${result.release.files.length} archivos.`;
       form.reset();
       await loadFirmwareReleases();
       showToast('Firmware publicado');
-    } catch (error) { form.querySelector('#firmware-release-status').textContent = error.message; }
+    } catch (error) { status.textContent = error.message; }
   });
   $('#firmware-refresh').addEventListener('click', loadFirmwareReleases);
   document.addEventListener('click', async (event) => {
