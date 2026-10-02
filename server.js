@@ -62,7 +62,7 @@ async function readFirmwareReleases(userId) {
   const [releases] = await database().execute('SELECT id, version, is_active AS isActive, created_at AS createdAt FROM firmware_releases WHERE user_id = ? ORDER BY created_at DESC', [userId]);
   if (!releases.length) return [];
   const [files] = await database().execute('SELECT release_id AS releaseId, name, OCTET_LENGTH(content) AS size, sha256 FROM firmware_files WHERE release_id IN (?) ORDER BY name', [releases.map((release) => release.id)]);
-  return releases.map((release) => ({ ...release, files: files.filter((file) => file.releaseId === release.id).map(({ releaseId, ...file }) => file) }));
+  return releases.map((release) => ({ ...release, files: files.filter((file) => String(file.releaseId) === String(release.id)).map(({ releaseId, ...file }) => file) }));
 }
 
 async function sessionUserId(email) {
