@@ -214,8 +214,19 @@ function bindFirmwareViewControls() {
 }
 
 function setupFirmwareView() {
+  const mainNav = $('.main-nav');
+  if (mainNav && !mainNav.querySelector('[data-view="firmware"]')) {
+    const wikiButton = mainNav.querySelector('[data-view="wiki"]');
+    const firmwareButton = document.createElement('button');
+    firmwareButton.className = 'nav-item';
+    firmwareButton.dataset.view = 'firmware';
+    firmwareButton.innerHTML = '<i data-lucide="hard-drive-download"></i><span>Firmware</span>';
+    mainNav.insertBefore(firmwareButton, wikiButton || null);
+    firmwareButton.addEventListener('click', () => { navigate('firmware'); loadFirmwareReleases(); });
+  }
   if (!$('#view-firmware')) $('.view-container').insertAdjacentHTML('beforeend', firmwareViewMarkup());
   bindFirmwareViewControls();
+  renderIcons();
 }
 
 function setupWikiNavigation() {
