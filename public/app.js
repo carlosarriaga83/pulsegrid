@@ -399,11 +399,12 @@ function closeDeviceMenu() { $('#device-actions-menu')?.remove(); }
 
 async function queueFirmwareUpdate(device) {
   const result = await apiRequest('firmware/releases');
-  if (!result.release) throw new Error('No hay una version de firmware publicada');
-  if (!window.confirm(`Actualizar ${device.name} a ${result.release.version}? El dispositivo se reiniciara.`)) return;
-  await apiRequest('commands', { method: 'POST', body: JSON.stringify({ deviceId: device.id, command: 'firmware.update', payload: { version: result.release.version } }) });
+  const release = result.releases?.find((item) => item.isActive) || result.releases?.[0];
+  if (!release) throw new Error('No hay una version de firmware publicada');
+  if (!window.confirm(`Actualizar ${device.name} a ${release.version}? El dispositivo se reiniciara.`)) return;
+  await apiRequest('commands', { method: 'POST', body: JSON.stringify({ deviceId: device.id, command: 'firmware.update', payload: { version: release.version } }) });
   await loadCommandHistory();
-  showToast(`Actualizacion ${result.release.version} enviada`);
+  showToast(`Actualizacion ${release.version} enviada`);
 }
 
 function openDeviceMenu(button, device) {
