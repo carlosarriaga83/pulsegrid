@@ -582,7 +582,7 @@ function renderCommandDeviceState() {
 }
 
 function calibrationWizardMarkup() {
-  return `<div class="panel calibration-wizard" id="calibration-wizard"><div class="panel-heading"><div><h2>Calibrar persiana</h2><p>Define el lado del motor, guarda cerrada/desplegada y abierta/enrollada, y verifica las posiciones.</p></div><span class="secure-badge"><i data-lucide="wand-sparkles"></i> Guiado</span></div><div class="calibration-steps"><div class="calibration-step active" data-calibration-step="1"><b>1</b><span>Motor</span></div><div class="calibration-step" data-calibration-step="2"><b>2</b><span>Extremo inicial</span></div><div class="calibration-step" data-calibration-step="3"><b>3</b><span>Recorrido</span></div><div class="calibration-step" data-calibration-step="4"><b>4</b><span>Prueba</span></div></div><div class="calibration-settings"><label>Servo<select id="calibration-servo"><option value="1">Servo 1</option><option value="2">Servo 2</option></select></label><label>Lado del motor<select id="calibration-motor-side"><option value="left">Izquierdo</option><option value="right">Derecho</option></select></label><button class="primary-button" id="calibration-start"><i data-lucide="play"></i> Iniciar calibracion</button></div><p id="calibration-status" class="form-status">Elige el lado del motor e inicia. Desplegada significa cerrada; enrollada significa abierta.</p><div class="calibration-actions"><button class="secondary-button" id="calibration-deployed" disabled><i data-lucide="flag"></i> Guardar cerrada (desplegada)</button><button class="secondary-button" id="calibration-rolled" disabled><i data-lucide="flag"></i> Guardar abierta (enrollada)</button><button class="secondary-button" id="calibration-jog-deployed" disabled><i data-lucide="arrow-down"></i> Mover hacia cerrada</button><button class="secondary-button" id="calibration-jog-rolled" disabled><i data-lucide="arrow-up"></i> Mover hacia abierta</button><button class="primary-button" id="calibration-test-open" data-percent="100" disabled><i data-lucide="arrow-up"></i> Probar abierta</button><button class="secondary-button" id="calibration-test-closed" data-percent="0" disabled><i data-lucide="arrow-down"></i> Probar cerrada</button><button class="secondary-button" id="calibration-test-half" data-percent="50" disabled><i data-lucide="circle-half"></i> Probar 50%</button></div></div>`;
+  return `<div class="panel calibration-wizard" id="calibration-wizard"><div class="panel-heading"><div><h2>Calibrar persiana</h2><p>Define el lado del motor, guarda cerrada/desplegada y abierta/enrollada, y verifica las posiciones.</p></div><span class="secure-badge"><i data-lucide="wand-sparkles"></i> Guiado</span></div><div class="calibration-steps"><div class="calibration-step active" data-calibration-step="1"><b>1</b><span>Motor</span></div><div class="calibration-step" data-calibration-step="2"><b>2</b><span>Extremo inicial</span></div><div class="calibration-step" data-calibration-step="3"><b>3</b><span>Recorrido</span></div><div class="calibration-step" data-calibration-step="4"><b>4</b><span>Prueba</span></div></div><div class="calibration-settings"><label>Servo<select id="calibration-servo"><option value="1">Servo 1</option><option value="2">Servo 2</option></select></label><label>Lado del motor<select id="calibration-motor-side"><option value="left">Izquierdo</option><option value="right">Derecho</option></select></label><button class="primary-button" id="calibration-start"><i data-lucide="play"></i> Iniciar calibracion</button></div><p id="calibration-status" class="form-status">Elige el lado del motor e inicia. Desplegada significa cerrada; enrollada significa abierta.</p><div class="calibration-actions"><button class="secondary-button" id="calibration-deployed" disabled><i data-lucide="flag"></i> Guardar cerrada (desplegada)</button><button class="secondary-button" id="calibration-rolled" disabled><i data-lucide="flag"></i> Guardar abierta (enrollada)</button><button class="secondary-button" id="calibration-jog-deployed" disabled><i data-lucide="arrow-down"></i> Mover hacia cerrada</button><button class="secondary-button" id="calibration-jog-rolled" disabled><i data-lucide="arrow-up"></i> Mover hacia abierta</button><button class="secondary-button" id="calibration-jog-clockwise" disabled><i data-lucide="rotate-cw"></i> Mover horario</button><button class="secondary-button" id="calibration-jog-counterclockwise" disabled><i data-lucide="rotate-ccw"></i> Mover antihorario</button><button class="primary-button" id="calibration-test-open" data-percent="100" disabled><i data-lucide="arrow-up"></i> Probar abierta</button><button class="secondary-button" id="calibration-test-closed" data-percent="0" disabled><i data-lucide="arrow-down"></i> Probar cerrada</button><button class="secondary-button" id="calibration-test-half" data-percent="50" disabled><i data-lucide="circle-half"></i> Probar 50%</button></div></div>`;
 }
 
 function queueCalibrationCommand(command, payload) {
@@ -627,6 +627,8 @@ function renderCalibrationWizard() {
   const deployed = $('#calibration-deployed');
   const jogDeployed = $('#calibration-jog-deployed');
   const jogRolled = $('#calibration-jog-rolled');
+  const jogClockwise = $('#calibration-jog-clockwise');
+  const jogCounterclockwise = $('#calibration-jog-counterclockwise');
   const rolled = $('#calibration-rolled');
   const testButtons = [$('#calibration-test-open'), $('#calibration-test-closed'), $('#calibration-test-half')];
   const deviceId = () => $('#command-device')?.value;
@@ -645,6 +647,8 @@ function renderCalibrationWizard() {
     setEnabled(rolled, first || (travel && firstReference !== 'rolled'));
     setEnabled(jogDeployed, travel);
     setEnabled(jogRolled, travel);
+    setEnabled(jogClockwise, travel);
+    setEnabled(jogCounterclockwise, travel);
     testButtons.forEach((button) => setEnabled(button, tests));
     setStep(phase === 'setup' ? 1 : first ? 2 : travel ? 3 : 4);
   };
@@ -689,9 +693,10 @@ function renderCalibrationWizard() {
   rolled.addEventListener('click', () => captureReference('rolled'));
   const jog = async (direction) => {
     try {
-      setEnabled(jogDeployed, false); setEnabled(jogRolled, false);
+      setEnabled(jogDeployed, false); setEnabled(jogRolled, false); setEnabled(jogClockwise, false); setEnabled(jogCounterclockwise, false);
       const selectedDeviceId = deviceId(); const selectedServoId = Number(servo.value);
-      status.textContent = `Moviendo una vuelta hacia ${direction === 'deployed' ? 'cerrada/desplegada' : 'abierta/enrollada'}...`;
+      const labels = { deployed: 'cerrada/desplegada', rolled: 'abierta/enrollada', clockwise: 'horario', counterclockwise: 'antihorario' };
+      status.textContent = `Moviendo una vuelta en sentido ${labels[direction]}...`;
       const result = await queueCalibrationCommand('blind.jog', { servoId: selectedServoId, direction });
       await waitForCalibrationCommand(result.commandId); await waitForCalibrationIdle(selectedDeviceId, selectedServoId);
       status.textContent = 'Vuelta terminada. Continua hacia el extremo opuesto o guardalo.';
@@ -700,6 +705,8 @@ function renderCalibrationWizard() {
   };
   jogDeployed.addEventListener('click', () => jog('deployed'));
   jogRolled.addEventListener('click', () => jog('rolled'));
+  jogClockwise.addEventListener('click', () => jog('clockwise'));
+  jogCounterclockwise.addEventListener('click', () => jog('counterclockwise'));
   testButtons.forEach((button) => button.addEventListener('click', async () => {
     const percent = Number(button.dataset.percent);
     try { testButtons.forEach((item) => { item.disabled = true; }); const selectedDeviceId = deviceId(); const selectedServoId = Number(servo.value); status.textContent = `Probando ${percent}%...`; const result = await queueCalibrationCommand('curtain.move', { servoId: selectedServoId, percent, speed: 800, acceleration: 50 }); await waitForCalibrationCommand(result.commandId); await waitForCalibrationIdle(selectedDeviceId, selectedServoId); status.textContent = `Prueba completada: ${percent}%.`; showToast(`Posicion ${percent}% probada`); }
