@@ -523,6 +523,7 @@ function updateDeviceSummary() {
     commandDevice.value = devices.some((device) => device.id === selectedDeviceId) ? selectedDeviceId : devices[0]?.id || '';
     renderCommandDeviceState();
   }
+  renderCalibrationWizard();
   const activity = $('.activity-list');
   if (activity) activity.innerHTML = '<p class="empty-state">Los eventos de tus dispositivos apareceran aqui.</p>';
 }
@@ -541,6 +542,34 @@ function renderCommandDeviceState() {
   reference.innerHTML = device
     ? `<span><i data-lucide="${device.icon}"></i> Estado actual: ${device.status === 'online' ? 'En linea' : 'Fuera de linea'}</span>${device.meta.map((item) => `<span><i data-lucide="${item.icon}"></i> ${item.text}</span>`).join('')}`
     : '<span><i data-lucide="circle-off"></i> Sin estado disponible</span>';
+  renderIcons();
+}
+
+function calibrationWizardMarkup() {
+  return `<div class="panel calibration-wizard" id="calibration-wizard"><div class="panel-heading"><div><h2>Calibrar persiana</h2><p>Captura el extremo desplegado y avanza de una vuelta hasta el extremo enrollado.</p></div><span class="secure-badge"><i data-lucide="wand-sparkles"></i> Guiado</span></div><div class="calibration-steps"><div class="calibration-step active" data-calibration-step="1"><b>1</b><span>Desplegada</span></div><div class="calibration-step" data-calibration-step="2"><b>2</b><span>Enrollada</span></div><div class="calibration-step" data-calibration-step="3"><b>3</b><span>Prueba</span></div></div><label>Servo<select id="calibration-servo"><option value="1">Servo 1</option><option value="2">Servo 2</option></select></label><p id="calibration-status" class="form-status">Coloca la persiana completamente desenrollada.</p><div class="calibration-actions"><button class="secondary-button" id="calibration-deployed"><i data-lucide="flag"></i> Capturar desplegada</button><button class="secondary-button" id="calibration-jog" disabled><i data-lucide="rotate-cw"></i> Avanzar 1 vuelta</button><button class="secondary-button" id="calibration-rolled" disabled><i data-lucide="flag"></i> Capturar enrollada</button><button class="primary-button" id="calibration-test" disabled><i data-lucide="play"></i> Probar limites</button></div></div>`;
+}
+
+function queueCalibrationCommand(command, payload) {
+  const deviceId = $('#command-device')?.value;
+  if (!deviceId) throw new Error('Selecciona un dispositivo');
+  return apiRequest('commands', { method: 'POST', body: JSON.stringify({ deviceId, command, payload }) });
+}
+
+function renderCalibrationWizard() {
+  const layout = $('.command-layout');
+  if (!layout || $('#calibration-wizard')) return;
+  layout.insertAdjacentHTML('beforeend', calibrationWizardMarkup());
+  const status = $('#calibration-status');
+  const servo = $('#calibration-servo');
+  const deployed = $('#calibration-deployed');
+  const jog = $('#calibration-jog');
+  const rolled = $('#calibration-rolled');
+  const test = $('#calibration-test');
+  const setStep = (step) => $$('.calibration-step').forEach((item) => item.classList.toggle('active', Number(item.dataset.calibrationStep) === step));
+  deployed.addEventListener('click', async () => { try { await queueCalibrationCommand('blind.markDeployed', { servoId: Number(servo.value) }); deployed.disabled = true; jog.disabled = false; status.textContent = 'Extremo desplegado capturado. Avanza una vuelta por clic.'; setStep(2); showToast('Extremo desplegado guardado'); } catch (error) { status.textContent = error.message; } });
+  jog.addEventListener('click', async () => { try { jog.disabled = true; await queueCalibrationCommand('blind.jog', { servoId: Number(servo.value), turns: -1 }); rolled.disabled = false; status.textContent = 'Vuelta enviada. Espera a que termine antes de avanzar otra o captura el extremo enrollado.'; window.setTimeout(() => { jog.disabled = false; }, 3500); } catch (error) { jog.disabled = false; status.textContent = error.message; } });
+  rolled.addEventListener('click', async () => { try { await queueCalibrationCommand('blind.markRolled', { servoId: Number(servo.value) }); rolled.disabled = true; jog.disabled = true; test.disabled = false; status.textContent = 'Limites guardados. Ejecuta la prueba de 0%, 50% y 100%.'; setStep(3); showToast('Extremo enrollado guardado'); } catch (error) { status.textContent = error.message; } });
+  test.addEventListener('click', async () => { try { test.disabled = true; status.textContent = 'Probando 0%...'; await queueCalibrationCommand('curtain.move', { servoId: Number(servo.value), percent: 0, speed: 800, acceleration: 50 }); await new Promise((resolve) => window.setTimeout(resolve, 4500)); status.textContent = 'Probando 50%...'; await queueCalibrationCommand('curtain.move', { servoId: Number(servo.value), percent: 50, speed: 800, acceleration: 50 }); await new Promise((resolve) => window.setTimeout(resolve, 4500)); status.textContent = 'Probando 100%...'; await queueCalibrationCommand('curtain.move', { servoId: Number(servo.value), percent: 100, speed: 800, acceleration: 50 }); status.textContent = 'Prueba enviada: 0%, 50% y 100%.'; showToast('Calibracion probada'); } catch (error) { status.textContent = error.message; } finally { test.disabled = false; } });
   renderIcons();
 }
 
@@ -614,12 +643,13 @@ function configureCurtainCommands() {
     'blind.configure': { payload: { servoId: 1, rolledTurns: 0, unrolledTurns: 10 }, help: 'servoId: 1 o 2. rolledTurns y unrolledTurns: -999.99 a 999.99; deben ser distintos.' },
     'blind.markRolled': { payload: { servoId: 1 }, help: 'Fija la posicion actual del servo como cortina completamente enrollada.' },
     'blind.markDeployed': { payload: { servoId: 1 }, help: 'Fija la posicion actual del servo como cortina completamente desplegada.' },
+    'blind.jog': { payload: { servoId: 1, turns: -1, speed: 800, acceleration: 50 }, help: 'Avanza exactamente una vuelta. Usa -1 para enrollar y 1 para desenrollar.' },
     'motion.configure': { payload: { speed: 800, acceleration: 50 }, help: 'speed: 0-3073. acceleration: 0-150.' },
     'servo.torque': { payload: { servoId: 1, enabled: true }, help: 'servoId: 1 o 2. enabled: true o false.' },
     'servo.resetTurns': { payload: { servoId: 1 }, help: 'servoId: 1 o 2. Reinicia el contador absoluto si no hay movimiento.' }
   };
   commandSelect.id = 'command-name';
-  commandSelect.innerHTML = '<option value="curtain.open">Abrir cortina</option><option value="curtain.close">Cerrar cortina</option><option value="curtain.stop">Detener cortina</option><option value="curtain.move">Mover cortina</option><option value="servo.configure">Configurar servo</option><option value="blind.configure">Configurar extremos</option><option value="blind.markRolled">Marcar completamente enrollada</option><option value="blind.markDeployed">Marcar completamente desplegada</option><option value="motion.configure">Configurar movimiento</option><option value="servo.torque">Configurar torque</option><option value="servo.resetTurns">Reiniciar vueltas</option>';
+  commandSelect.innerHTML = '<option value="curtain.open">Abrir cortina</option><option value="curtain.close">Cerrar cortina</option><option value="curtain.stop">Detener cortina</option><option value="curtain.move">Mover cortina</option><option value="servo.configure">Configurar servo</option><option value="blind.configure">Configurar extremos</option><option value="blind.markRolled">Marcar completamente enrollada</option><option value="blind.markDeployed">Marcar completamente desplegada</option><option value="blind.jog">Avanzar una vuelta</option><option value="motion.configure">Configurar movimiento</option><option value="servo.torque">Configurar torque</option><option value="servo.resetTurns">Reiniciar vueltas</option>';
   payload.id = 'command-payload';
   let help = $('#command-payload-help');
   if (!help) {
