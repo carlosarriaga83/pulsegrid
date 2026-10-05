@@ -31,7 +31,7 @@
         <button class="nav-item" data-view="api"><i data-lucide="braces"></i><span>API</span><span class="new-pill">NEW</span></button>
       </nav>
       <div class="sidebar-bottom">
-        <div class="connection-card"><span class="pulse-ring"><i data-lucide="radio"></i></span><div><strong>Broker conectado</strong><small>mqtt.pulsegrid.local</small><small id="sidebar-firmware-version">Firmware sin datos</small></div><span class="live-indicator"></span></div>
+        <div class="connection-card"><span class="pulse-ring"><i data-lucide="radio"></i></span><div><strong>Broker conectado</strong><small>mqtt.pulsegrid.local</small><small id="sidebar-cloud-version">Cloud sin datos</small><small id="sidebar-firmware-version">Firmware sin datos</small></div><span class="live-indicator"></span></div>
         <button class="nav-item" data-view="settings"><i data-lucide="settings-2"></i><span>Ajustes</span></button>
         <button class="user-profile" id="account-button"><div class="avatar">CA</div><span><strong id="account-name">Carlos Arriaga</strong><small id="account-role">Administrador</small></span><i data-lucide="more-horizontal"></i></button>
       </div>
@@ -70,6 +70,6 @@
   <div class="modal-backdrop" id="device-modal"><div class="modal"><button class="modal-close" aria-label="Cerrar"><i data-lucide="x"></i></button><div class="modal-icon"><i data-lucide="cpu"></i></div><p class="eyebrow">NUEVO NODO</p><h2>Agrega un dispositivo</h2><p class="modal-copy">Crea una identidad para tu ESP32 y empieza a recibir telemetria.</p><form id="device-form"><label>Nombre del dispositivo<input name="name" required placeholder="Ej. Sensor terraza"></label><label>Device ID<input name="id" required placeholder="esp32-05"></label><label>Tipo de dispositivo<select name="type"><option>Sensor ambiental</option><option>Controlador</option><option>Gateway</option><option>Actuador</option></select></label><div class="modal-actions"><button type="button" class="secondary-button modal-cancel">Cancelar</button><button class="primary-button" type="submit"><i data-lucide="plus"></i> Crear dispositivo</button></div></form></div></div>
   <div class="toast" id="toast"><i data-lucide="check-circle-2"></i><span>Listo</span></div>
   <script src="https://unpkg.com/lucide@latest"></script>
-  <script src="app.js?v=15"></script>
+  <script src="app.js?v=16"></script>
 </body>
 </html>

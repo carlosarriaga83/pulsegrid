@@ -5,6 +5,7 @@ const mysql = require('mysql2/promise');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const https = require('https');
+const cloudVersion = require('./package.json').version;
 
 require('dotenv').config({ path: path.join(__dirname, '.env', 'local.env') });
 
@@ -402,6 +403,8 @@ app.post('/api/device-commands/:commandId/ack', apiReady, async (request, respon
   if (!result.affectedRows) return fail(response, 404, 'Comando no encontrado');
   response.json({ ok: true });
 });
+
+app.get('/api/version', (request, response) => response.json({ version: cloudVersion }));
 
 app.use(express.static(publicRoot));
 app.get('/', (request, response) => response.sendFile(path.join(publicRoot, 'index.html')));

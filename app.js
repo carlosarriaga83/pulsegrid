@@ -1,6 +1,7 @@
 const devices = [];
 const CLOUD_REFRESH_MS = 2000;
 let cloudRefreshInFlight = false;
+let cloudVersion;
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -340,6 +341,16 @@ function updateSidebarFirmwareVersion() {
   label.textContent = firmwareDevice ? `Firmware ${firmwareDevice.firmwareVersion}` : 'Firmware sin datos';
 }
 
+async function updateSidebarCloudVersion() {
+  const label = $('#sidebar-cloud-version');
+  if (!label) return;
+  if (!cloudVersion) {
+    try { cloudVersion = (await apiRequest('version')).version; }
+    catch { label.textContent = 'Cloud sin datos'; return; }
+  }
+  label.textContent = `Cloud v${cloudVersion}`;
+}
+
 async function loadDevices() {
   if (cloudRefreshInFlight) return;
   cloudRefreshInFlight = true;
@@ -355,6 +366,7 @@ async function loadDevices() {
   renderDeviceCards();
   renderCommandDeviceState();
   updateSidebarFirmwareVersion();
+  void updateSidebarCloudVersion();
   updateDeviceSummary();
   await loadCommandHistory();
 }
@@ -554,7 +566,7 @@ function renderCommandDeviceState() {
 }
 
 function calibrationWizardMarkup() {
-  return `<div class="panel calibration-wizard" id="calibration-wizard"><div class="panel-heading"><div><h2>Calibrar persiana</h2><p>Captura el extremo desplegado y avanza de una vuelta hasta el extremo enrollado.</p></div><span class="secure-badge"><i data-lucide="wand-sparkles"></i> Guiado</span></div><div class="calibration-steps"><div class="calibration-step active" data-calibration-step="1"><b>1</b><span>Desplegada</span></div><div class="calibration-step" data-calibration-step="2"><b>2</b><span>Enrollada</span></div><div class="calibration-step" data-calibration-step="3"><b>3</b><span>Prueba</span></div></div><label>Servo<select id="calibration-servo"><option value="1">Servo 1</option><option value="2">Servo 2</option></select></label><p id="calibration-status" class="form-status">Coloca la persiana completamente desenrollada.</p><div class="calibration-actions"><button class="secondary-button" id="calibration-deployed"><i data-lucide="flag"></i> Capturar desplegada</button><button class="secondary-button" id="calibration-jog" disabled><i data-lucide="rotate-cw"></i> Avanzar 1 vuelta</button><button class="secondary-button" id="calibration-reverse-jog" disabled><i data-lucide="rotate-ccw"></i> Retroceder 1 vuelta</button><button class="secondary-button" id="calibration-rolled" disabled><i data-lucide="flag"></i> Capturar enrollada</button><button class="primary-button" id="calibration-test-open" data-percent="100" disabled><i data-lucide="arrow-up"></i> Probar abierta</button><button class="secondary-button" id="calibration-test-closed" data-percent="0" disabled><i data-lucide="arrow-down"></i> Probar cerrada</button><button class="secondary-button" id="calibration-test-half" data-percent="50" disabled><i data-lucide="circle-half"></i> Probar 50%</button></div></div>`;
+  return `<div class="panel calibration-wizard" id="calibration-wizard"><div class="panel-heading"><div><h2>Calibrar persiana</h2><p>Inicia en cualquiera de los extremos, avanza las vueltas necesarias y captura el extremo opuesto.</p></div><span class="secure-badge"><i data-lucide="wand-sparkles"></i> Guiado</span></div><div class="calibration-steps"><div class="calibration-step active" data-calibration-step="1"><b>1</b><span>Inicio</span></div><div class="calibration-step" data-calibration-step="2"><b>2</b><span>Recorrido</span></div><div class="calibration-step" data-calibration-step="3"><b>3</b><span>Prueba</span></div></div><label>Servo<select id="calibration-servo"><option value="1">Servo 1</option><option value="2">Servo 2</option></select></label><p id="calibration-status" class="form-status">Coloca la persiana en un extremo y capturalo.</p><div class="calibration-actions"><button class="secondary-button" id="calibration-deployed"><i data-lucide="flag"></i> Capturar desplegada</button><button class="secondary-button" id="calibration-rolled"><i data-lucide="flag"></i> Capturar enrollada</button><button class="secondary-button" id="calibration-jog" disabled><i data-lucide="rotate-cw"></i> Avanzar 1 vuelta</button><button class="secondary-button" id="calibration-reverse-jog" disabled><i data-lucide="rotate-ccw"></i> Retroceder 1 vuelta</button><button class="primary-button" id="calibration-test-open" data-percent="100" disabled><i data-lucide="arrow-up"></i> Probar abierta</button><button class="secondary-button" id="calibration-test-closed" data-percent="0" disabled><i data-lucide="arrow-down"></i> Probar cerrada</button><button class="secondary-button" id="calibration-test-half" data-percent="50" disabled><i data-lucide="circle-half"></i> Probar 50%</button></div></div>`;
 }
 
 function queueCalibrationCommand(command, payload) {
@@ -576,6 +588,18 @@ async function waitForCalibrationIdle(deviceId, servoId, timeout = 60000) {
   throw new Error('No se confirmo el fin del movimiento');
 }
 
+async function waitForCalibrationCommand(commandId, timeout = 30000) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeout) {
+    const result = await apiRequest('commands');
+    const command = result.commands.find((item) => Number(item.id) === Number(commandId));
+    if (command?.status === 'succeeded') return;
+    if (command?.status === 'failed') throw new Error(command.errorMessage || 'El dispositivo rechazo el comando');
+    await new Promise((resolve) => window.setTimeout(resolve, 1000));
+  }
+  throw new Error('El dispositivo no confirmo el comando');
+}
+
 function renderCalibrationWizard() {
   const layout = $('.command-layout');
   if (!layout || $('#calibration-wizard')) return;
@@ -589,25 +613,52 @@ function renderCalibrationWizard() {
   const testButtons = [$('#calibration-test-open'), $('#calibration-test-closed'), $('#calibration-test-half')];
   const deviceId = () => $('#command-device')?.value;
   const setStep = (step) => $$('.calibration-step').forEach((item) => item.classList.toggle('active', Number(item.dataset.calibrationStep) === step));
-  deployed.addEventListener('click', async () => {
-    try { servo.dataset.lockedValue = servo.value; await queueCalibrationCommand('blind.markDeployed', { servoId: Number(servo.value) }); deployed.disabled = true; servo.disabled = true; jog.disabled = false; reverseJog.disabled = false; rolled.disabled = true; status.textContent = 'Extremo desplegado capturado. Elige avanzar o retroceder una vuelta.'; setStep(2); showToast('Extremo desplegado guardado'); }
-    catch (error) { status.textContent = error.message; }
-  });
+  let firstReference = null;
+  const captureReference = async (reference) => {
+    const isFirstReference = !firstReference;
+    const selectedServoId = Number(servo.value);
+    try {
+      deployed.disabled = true;
+      rolled.disabled = true;
+      const result = await queueCalibrationCommand(reference === 'deployed' ? 'blind.markDeployed' : 'blind.markRolled', { servoId: selectedServoId });
+      await waitForCalibrationCommand(result.commandId);
+      if (isFirstReference) {
+        firstReference = reference;
+        servo.dataset.lockedValue = servo.value;
+        servo.disabled = true;
+        jog.disabled = false;
+        reverseJog.disabled = false;
+        const targetButton = reference === 'deployed' ? rolled : deployed;
+        targetButton.disabled = false;
+        status.textContent = `Extremo ${reference === 'deployed' ? 'desplegado' : 'enrollado'} capturado. Avanza las vueltas necesarias y captura el extremo opuesto.`;
+        setStep(2);
+      } else {
+        jog.disabled = true;
+        reverseJog.disabled = true;
+        testButtons.forEach((button) => { button.disabled = false; });
+        status.textContent = 'Limites guardados. Elige una prueba de posicion.';
+        setStep(3);
+      }
+      showToast(`Extremo ${reference === 'deployed' ? 'desplegado' : 'enrollado'} guardado`);
+    } catch (error) {
+      if (!firstReference) { deployed.disabled = false; rolled.disabled = false; }
+      else if (reference !== firstReference) (firstReference === 'deployed' ? rolled : deployed).disabled = false;
+      status.textContent = error.message;
+    }
+  };
+  deployed.addEventListener('click', () => captureReference('deployed'));
+  rolled.addEventListener('click', () => captureReference('rolled'));
   jog.addEventListener('click', async () => {
-    try { jog.disabled = true; reverseJog.disabled = true; rolled.disabled = true; const selectedDeviceId = deviceId(); const selectedServoId = Number(servo.value); await queueCalibrationCommand('blind.jog', { servoId: selectedServoId, turns: -1 }); status.textContent = 'Avanzando una vuelta...'; await waitForCalibrationIdle(selectedDeviceId, selectedServoId); rolled.disabled = false; jog.disabled = false; reverseJog.disabled = false; status.textContent = 'Vuelta terminada. Elige otra direccion o captura el extremo enrollado.'; }
-    catch (error) { jog.disabled = false; status.textContent = error.message; }
+    try { jog.disabled = true; reverseJog.disabled = true; const selectedDeviceId = deviceId(); const selectedServoId = Number(servo.value); const result = await queueCalibrationCommand('blind.jog', { servoId: selectedServoId, turns: -1 }); status.textContent = 'Avanzando una vuelta...'; await waitForCalibrationCommand(result.commandId); await waitForCalibrationIdle(selectedDeviceId, selectedServoId); (firstReference === 'deployed' ? rolled : deployed).disabled = false; jog.disabled = false; reverseJog.disabled = false; status.textContent = 'Vuelta terminada. Elige otra direccion o captura el extremo opuesto.'; }
+    catch (error) { jog.disabled = false; reverseJog.disabled = false; status.textContent = error.message; }
   });
   reverseJog.addEventListener('click', async () => {
-    try { jog.disabled = true; reverseJog.disabled = true; rolled.disabled = true; const selectedDeviceId = deviceId(); const selectedServoId = Number(servo.value); await queueCalibrationCommand('blind.jog', { servoId: selectedServoId, turns: 1 }); status.textContent = 'Retrocediendo una vuelta...'; await waitForCalibrationIdle(selectedDeviceId, selectedServoId); rolled.disabled = false; jog.disabled = false; reverseJog.disabled = false; status.textContent = 'Vuelta terminada. Elige otra direccion o captura el extremo enrollado.'; }
+    try { jog.disabled = true; reverseJog.disabled = true; const selectedDeviceId = deviceId(); const selectedServoId = Number(servo.value); const result = await queueCalibrationCommand('blind.jog', { servoId: selectedServoId, turns: 1 }); status.textContent = 'Retrocediendo una vuelta...'; await waitForCalibrationCommand(result.commandId); await waitForCalibrationIdle(selectedDeviceId, selectedServoId); (firstReference === 'deployed' ? rolled : deployed).disabled = false; jog.disabled = false; reverseJog.disabled = false; status.textContent = 'Vuelta terminada. Elige otra direccion o captura el extremo opuesto.'; }
     catch (error) { reverseJog.disabled = false; jog.disabled = false; status.textContent = error.message; }
-  });
-  rolled.addEventListener('click', async () => {
-    try { rolled.disabled = true; jog.disabled = true; reverseJog.disabled = true; await queueCalibrationCommand('blind.markRolled', { servoId: Number(servo.value) }); testButtons.forEach((button) => { button.disabled = false; }); status.textContent = 'Limites guardados. Elige una prueba de posicion.'; setStep(3); showToast('Extremo enrollado guardado'); }
-    catch (error) { status.textContent = error.message; }
   });
   testButtons.forEach((button) => button.addEventListener('click', async () => {
     const percent = Number(button.dataset.percent);
-    try { testButtons.forEach((item) => { item.disabled = true; }); const selectedDeviceId = deviceId(); const selectedServoId = Number(servo.value); status.textContent = `Probando ${percent}%...`; await queueCalibrationCommand('curtain.move', { servoId: selectedServoId, percent, speed: 800, acceleration: 50 }); await waitForCalibrationIdle(selectedDeviceId, selectedServoId); status.textContent = `Prueba completada: ${percent}%.`; showToast(`Posicion ${percent}% probada`); }
+    try { testButtons.forEach((item) => { item.disabled = true; }); const selectedDeviceId = deviceId(); const selectedServoId = Number(servo.value); status.textContent = `Probando ${percent}%...`; const result = await queueCalibrationCommand('curtain.move', { servoId: selectedServoId, percent, speed: 800, acceleration: 50 }); await waitForCalibrationCommand(result.commandId); await waitForCalibrationIdle(selectedDeviceId, selectedServoId); status.textContent = `Prueba completada: ${percent}%.`; showToast(`Posicion ${percent}% probada`); }
     catch (error) { status.textContent = error.message; }
     finally { testButtons.forEach((item) => { item.disabled = false; }); }
   }));
