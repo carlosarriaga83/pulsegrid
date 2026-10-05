@@ -555,6 +555,19 @@ function queueCalibrationCommand(command, payload) {
   return apiRequest('commands', { method: 'POST', body: JSON.stringify({ deviceId, command, payload }) });
 }
 
+async function waitForCalibrationIdle(deviceId, servoId, timeout = 60000) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeout) {
+    await new Promise((resolve) => window.setTimeout(resolve, 1000));
+    await loadDevices();
+    const device = devices.find((item) => item.id === deviceId);
+    const telemetry = parseTelemetry(device?.telemetry);
+    const servo = telemetry.servos?.[String(servoId)] || telemetry.servos?.[servoId];
+    if (servo && !servo.multiturn_active) return;
+  }
+  throw new Error('No se confirmo el fin del movimiento');
+}
+
 function renderCalibrationWizard() {
   const layout = $('.command-layout');
   if (!layout || $('#calibration-wizard')) return;
@@ -565,11 +578,13 @@ function renderCalibrationWizard() {
   const jog = $('#calibration-jog');
   const rolled = $('#calibration-rolled');
   const test = $('#calibration-test');
+  const deviceId = () => $('#command-device')?.value;
   const setStep = (step) => $$('.calibration-step').forEach((item) => item.classList.toggle('active', Number(item.dataset.calibrationStep) === step));
-  deployed.addEventListener('click', async () => { try { await queueCalibrationCommand('blind.markDeployed', { servoId: Number(servo.value) }); deployed.disabled = true; jog.disabled = false; status.textContent = 'Extremo desplegado capturado. Avanza una vuelta por clic.'; setStep(2); showToast('Extremo desplegado guardado'); } catch (error) { status.textContent = error.message; } });
-  jog.addEventListener('click', async () => { try { jog.disabled = true; await queueCalibrationCommand('blind.jog', { servoId: Number(servo.value), turns: -1 }); rolled.disabled = false; status.textContent = 'Vuelta enviada. Espera a que termine antes de avanzar otra o captura el extremo enrollado.'; window.setTimeout(() => { jog.disabled = false; }, 3500); } catch (error) { jog.disabled = false; status.textContent = error.message; } });
-  rolled.addEventListener('click', async () => { try { await queueCalibrationCommand('blind.markRolled', { servoId: Number(servo.value) }); rolled.disabled = true; jog.disabled = true; test.disabled = false; status.textContent = 'Limites guardados. Ejecuta la prueba de 0%, 50% y 100%.'; setStep(3); showToast('Extremo enrollado guardado'); } catch (error) { status.textContent = error.message; } });
-  test.addEventListener('click', async () => { try { test.disabled = true; status.textContent = 'Probando 0%...'; await queueCalibrationCommand('curtain.move', { servoId: Number(servo.value), percent: 0, speed: 800, acceleration: 50 }); await new Promise((resolve) => window.setTimeout(resolve, 4500)); status.textContent = 'Probando 50%...'; await queueCalibrationCommand('curtain.move', { servoId: Number(servo.value), percent: 50, speed: 800, acceleration: 50 }); await new Promise((resolve) => window.setTimeout(resolve, 4500)); status.textContent = 'Probando 100%...'; await queueCalibrationCommand('curtain.move', { servoId: Number(servo.value), percent: 100, speed: 800, acceleration: 50 }); status.textContent = 'Prueba enviada: 0%, 50% y 100%.'; showToast('Calibracion probada'); } catch (error) { status.textContent = error.message; } finally { test.disabled = false; } });
+  deployed.addEventListener('click', async () => { try { servo.dataset.lockedValue = servo.value; await queueCalibrationCommand('blind.markDeployed', { servoId: Number(servo.value) }); deployed.disabled = true; servo.disabled = true; jog.disabled = false; rolled.disabled = true; status.textContent = 'Extremo desplegado capturado. Avanza una vuelta por clic.'; setStep(2); showToast('Extremo desplegado guardado'); } catch (error) { status.textContent = error.message; } });
+  jog.addEventListener('click', async () => { try { jog.disabled = true; rolled.disabled = true; const selectedDeviceId = deviceId(); const selectedServoId = Number(servo.value); await queueCalibrationCommand('blind.jog', { servoId: selectedServoId, turns: -1 }); status.textContent = 'Avanzando una vuelta...'; await waitForCalibrationIdle(selectedDeviceId, selectedServoId); rolled.disabled = false; jog.disabled = false; status.textContent = 'Vuelta terminada. Avanza otra o captura el extremo enrollado.'; } catch (error) { jog.disabled = false; status.textContent = error.message; } });
+  rolled.addEventListener('click', async () => { try { rolled.disabled = true; jog.disabled = true; await queueCalibrationCommand('blind.markRolled', { servoId: Number(servo.value) }); test.disabled = false; status.textContent = 'Limites guardados. Ejecuta la prueba de 0%, 50% y 100%.'; setStep(3); showToast('Extremo enrollado guardado'); } catch (error) { status.textContent = error.message; } });
+  test.addEventListener('click', async () => { try { test.disabled = true; const selectedDeviceId = deviceId(); const selectedServoId = Number(servo.value); for (const percent of [0, 50, 100]) { status.textContent = `Probando ${percent}%...`; await queueCalibrationCommand('curtain.move', { servoId: selectedServoId, percent, speed: 800, acceleration: 50 }); await waitForCalibrationIdle(selectedDeviceId, selectedServoId); } status.textContent = 'Prueba completada: 0%, 50% y 100%.'; showToast('Calibracion probada'); } catch (error) { status.textContent = error.message; } finally { test.disabled = false; } });
+  servo.addEventListener('change', () => { if (deployed.disabled) servo.value = servo.dataset.lockedValue; });
   renderIcons();
 }
 
