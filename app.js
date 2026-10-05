@@ -546,7 +546,7 @@ function renderCommandDeviceState() {
 }
 
 function calibrationWizardMarkup() {
-  return `<div class="panel calibration-wizard" id="calibration-wizard"><div class="panel-heading"><div><h2>Calibrar persiana</h2><p>Captura el extremo desplegado y avanza de una vuelta hasta el extremo enrollado.</p></div><span class="secure-badge"><i data-lucide="wand-sparkles"></i> Guiado</span></div><div class="calibration-steps"><div class="calibration-step active" data-calibration-step="1"><b>1</b><span>Desplegada</span></div><div class="calibration-step" data-calibration-step="2"><b>2</b><span>Enrollada</span></div><div class="calibration-step" data-calibration-step="3"><b>3</b><span>Prueba</span></div></div><label>Servo<select id="calibration-servo"><option value="1">Servo 1</option><option value="2">Servo 2</option></select></label><p id="calibration-status" class="form-status">Coloca la persiana completamente desenrollada.</p><div class="calibration-actions"><button class="secondary-button" id="calibration-deployed"><i data-lucide="flag"></i> Capturar desplegada</button><button class="secondary-button" id="calibration-jog" disabled><i data-lucide="rotate-cw"></i> Avanzar 1 vuelta</button><button class="secondary-button" id="calibration-reverse-jog" disabled><i data-lucide="rotate-ccw"></i> Retroceder 1 vuelta</button><button class="secondary-button" id="calibration-rolled" disabled><i data-lucide="flag"></i> Capturar enrollada</button><button class="primary-button" id="calibration-test" disabled><i data-lucide="play"></i> Probar limites</button></div></div>`;
+  return `<div class="panel calibration-wizard" id="calibration-wizard"><div class="panel-heading"><div><h2>Calibrar persiana</h2><p>Captura el extremo desplegado y avanza de una vuelta hasta el extremo enrollado.</p></div><span class="secure-badge"><i data-lucide="wand-sparkles"></i> Guiado</span></div><div class="calibration-steps"><div class="calibration-step active" data-calibration-step="1"><b>1</b><span>Desplegada</span></div><div class="calibration-step" data-calibration-step="2"><b>2</b><span>Enrollada</span></div><div class="calibration-step" data-calibration-step="3"><b>3</b><span>Prueba</span></div></div><label>Servo<select id="calibration-servo"><option value="1">Servo 1</option><option value="2">Servo 2</option></select></label><p id="calibration-status" class="form-status">Coloca la persiana completamente desenrollada.</p><div class="calibration-actions"><button class="secondary-button" id="calibration-deployed"><i data-lucide="flag"></i> Capturar desplegada</button><button class="secondary-button" id="calibration-jog" disabled><i data-lucide="rotate-cw"></i> Avanzar 1 vuelta</button><button class="secondary-button" id="calibration-reverse-jog" disabled><i data-lucide="rotate-ccw"></i> Retroceder 1 vuelta</button><button class="secondary-button" id="calibration-rolled" disabled><i data-lucide="flag"></i> Capturar enrollada</button><button class="primary-button" id="calibration-test-open" disabled><i data-lucide="arrow-up"></i> Probar abierta</button><button class="secondary-button" id="calibration-test-closed" disabled><i data-lucide="arrow-down"></i> Probar cerrada</button><button class="secondary-button" id="calibration-test-half" disabled><i data-lucide="circle-half"></i> Probar 50%</button></div></div>`;
 }
 
 function queueCalibrationCommand(command, payload) {
@@ -578,7 +578,7 @@ function renderCalibrationWizard() {
   const jog = $('#calibration-jog');
   const reverseJog = $('#calibration-reverse-jog');
   const rolled = $('#calibration-rolled');
-  const test = $('#calibration-test');
+  const testButtons = [$('#calibration-test-open'), $('#calibration-test-closed'), $('#calibration-test-half')];
   const deviceId = () => $('#command-device')?.value;
   const setStep = (step) => $$('.calibration-step').forEach((item) => item.classList.toggle('active', Number(item.dataset.calibrationStep) === step));
   deployed.addEventListener('click', async () => {
@@ -594,14 +594,15 @@ function renderCalibrationWizard() {
     catch (error) { reverseJog.disabled = false; jog.disabled = false; status.textContent = error.message; }
   });
   rolled.addEventListener('click', async () => {
-    try { rolled.disabled = true; jog.disabled = true; reverseJog.disabled = true; await queueCalibrationCommand('blind.markRolled', { servoId: Number(servo.value) }); test.disabled = false; status.textContent = 'Limites guardados. Ejecuta la prueba de 0%, 50% y 100%.'; setStep(3); showToast('Extremo enrollado guardado'); }
+    try { rolled.disabled = true; jog.disabled = true; reverseJog.disabled = true; await queueCalibrationCommand('blind.markRolled', { servoId: Number(servo.value) }); testButtons.forEach((button) => { button.disabled = false; }); status.textContent = 'Limites guardados. Elige una prueba de posicion.'; setStep(3); showToast('Extremo enrollado guardado'); }
     catch (error) { status.textContent = error.message; }
   });
-  test.addEventListener('click', async () => {
-    try { test.disabled = true; const selectedDeviceId = deviceId(); const selectedServoId = Number(servo.value); for (const percent of [0, 50, 100]) { status.textContent = `Probando ${percent}%...`; await queueCalibrationCommand('curtain.move', { servoId: selectedServoId, percent, speed: 800, acceleration: 50 }); await waitForCalibrationIdle(selectedDeviceId, selectedServoId); } status.textContent = 'Prueba completada: 0%, 50% y 100%.'; showToast('Calibracion probada'); }
+  testButtons.forEach((button) => button.addEventListener('click', async () => {
+    const percent = Number(button.dataset.percent);
+    try { testButtons.forEach((item) => { item.disabled = true; }); const selectedDeviceId = deviceId(); const selectedServoId = Number(servo.value); status.textContent = `Probando ${percent}%...`; await queueCalibrationCommand('curtain.move', { servoId: selectedServoId, percent, speed: 800, acceleration: 50 }); await waitForCalibrationIdle(selectedDeviceId, selectedServoId); status.textContent = `Prueba completada: ${percent}%.`; showToast(`Posicion ${percent}% probada`); }
     catch (error) { status.textContent = error.message; }
-    finally { test.disabled = false; }
-  });
+    finally { testButtons.forEach((item) => { item.disabled = false; }); }
+  }));
   servo.addEventListener('change', () => { if (deployed.disabled) servo.value = servo.dataset.lockedValue; });
   renderIcons();
 }
