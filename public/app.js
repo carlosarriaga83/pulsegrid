@@ -649,6 +649,7 @@ function renderCalibrationWizard() {
   const layout = $('.command-layout');
   if (!layout || $('#calibration-wizard')) return;
   layout.insertAdjacentHTML('beforeend', calibrationWizardMarkup());
+  $('#calibration-test-open').insertAdjacentHTML('beforebegin', '<button class="secondary-button" id="calibration-jog-clockwise" disabled><i data-lucide="rotate-cw"></i> Mover horario</button><button class="secondary-button" id="calibration-jog-counterclockwise" disabled><i data-lucide="rotate-ccw"></i> Mover antihorario</button>');
   const status = $('#calibration-status'); const servo = $('#calibration-servo'); const motorSide = $('#calibration-motor-side'); const start = $('#calibration-start'); const deployed = $('#calibration-deployed'); const rolled = $('#calibration-rolled'); const jogDeployed = $('#calibration-jog-deployed'); const jogRolled = $('#calibration-jog-rolled'); const jogClockwise = $('#calibration-jog-clockwise'); const jogCounterclockwise = $('#calibration-jog-counterclockwise'); const testButtons = [$('#calibration-test-open'), $('#calibration-test-closed'), $('#calibration-test-half')];
   let phase = 'setup'; let firstReference = null;
   const setStep = (step) => $$('.calibration-step').forEach((item) => item.classList.toggle('active', Number(item.dataset.calibrationStep) === step));
