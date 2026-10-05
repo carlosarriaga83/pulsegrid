@@ -635,7 +635,7 @@ function renderCalibrationWizard() {
   let phase = 'setup';
   let firstReference = null;
   const setStep = (step) => $$('.calibration-step').forEach((item) => item.classList.toggle('active', Number(item.dataset.calibrationStep) === step));
-  const setEnabled = (button, enabled) => { button.disabled = !enabled; button.classList.toggle('is-ready', enabled); };
+  const setEnabled = (button, enabled) => { if (!button) return; button.disabled = !enabled; button.classList.toggle('is-ready', enabled); };
   const renderState = () => {
     const first = phase === 'first-reference';
     const travel = phase === 'travel';
