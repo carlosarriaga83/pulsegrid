@@ -325,13 +325,13 @@ function curtainMeta(telemetry) {
   const moving = servos.some(([, servo]) => servo.multiturn_active);
   const recoveryNeeded = servos.some(([, servo]) => servo.position_recovery_required);
   const servoState = recoveryNeeded ? 'Recalibracion requerida' : moving ? 'En movimiento' : servos.length ? `Servos ${servos.map(([id, servo]) => `${id}: ${Math.round(Number(servo.blind_percent) || 0)}%`).join(' · ')}` : 'Sin servos detectados';
-  return { icon: 'blinds', meta: [{ icon: 'blinds', text: opening }, { icon: recoveryNeeded ? 'triangle-alert' : moving ? 'move-horizontal' : 'circle-pause', text: servoState }] };
+  return { icon: 'blinds', meta: [{ icon: 'blinds', text: opening }, { icon: recoveryNeeded ? 'triangle-alert' : moving ? 'move-horizontal' : 'circle-pause', text: servoState }, { icon: 'cpu', text: telemetry.firmwareVersion ? `Firmware ${telemetry.firmwareVersion}` : 'Firmware sin confirmar' }] };
 }
 
 function devicePresentation(device) {
   const telemetry = parseTelemetry(device.telemetry);
   if (telemetry.kind === 'curtain') return curtainMeta(telemetry);
-  return { icon: 'cpu', meta: [{ icon: 'radio', text: device.status === 'online' ? 'Telemetria activa' : 'Sin conexion' }, { icon: 'circle-dot', text: device.report ? 'Ultimo estado recibido' : 'Sin telemetria' }] };
+  return { icon: 'cpu', meta: [{ icon: 'radio', text: device.status === 'online' ? 'Telemetria activa' : 'Sin conexion' }, { icon: 'circle-dot', text: device.report ? 'Ultimo estado recibido' : 'Sin telemetria' }, { icon: 'cpu', text: telemetry.firmwareVersion ? `Firmware ${telemetry.firmwareVersion}` : 'Firmware sin confirmar' }] };
 }
 
 function updateSidebarFirmwareVersion() {
@@ -399,7 +399,7 @@ function signalMarkup(signal) {
 function renderDeviceRows() {
   const rows = $('#device-rows');
   if (!rows) return;
-  rows.innerHTML = devices.map((device) => `<div class="device-row"><div class="device-name"><span class="device-icon"><i data-lucide="${device.icon}"></i></span><span><strong>${device.name}</strong><small>${device.id} · ${device.type}</small></span></div>${deviceStatus(device)}<span>${device.report}</span>${signalMarkup(device.signal)}<button class="row-menu" data-device-menu="${device.id}" title="Gestionar ${device.name}" aria-label="Gestionar ${device.name}"><i data-lucide="more-vertical"></i></button></div>`).join('');
+  rows.innerHTML = devices.map((device) => { const firmware = device.meta.find((item) => item.text.startsWith('Firmware'))?.text || 'Firmware sin confirmar'; return `<div class="device-row"><div class="device-name"><span class="device-icon"><i data-lucide="${device.icon}"></i></span><span><strong>${device.name}</strong><small>${device.id} · ${device.type} · ${firmware}</small></span></div>${deviceStatus(device)}<span>${device.report}</span>${signalMarkup(device.signal)}<button class="row-menu" data-device-menu="${device.id}" title="Gestionar ${device.name}" aria-label="Gestionar ${device.name}"><i data-lucide="more-vertical"></i></button></div>`; }).join('');
   renderIcons();
 }
 
