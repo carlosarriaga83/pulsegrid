@@ -331,7 +331,8 @@ app.post('/api/firmware/releases', requireSession, apiReady, async (request, res
     const preparedFiles = files.map((file) => {
       const name = firmwareFileName(file.name);
       if (typeof file.content !== 'string' || file.content.length > 500000) throw new Error('Contenido de firmware invalido');
-      const content = Buffer.from(file.content, 'utf8');
+      const content = file.encoding === 'base64' ? Buffer.from(file.content, 'base64') : Buffer.from(file.content, 'utf8');
+      if (!content.length || content.length > 500000) throw new Error('Contenido de firmware invalido');
       return { name, content, size: content.length, sha256: crypto.createHash('sha256').update(content).digest('hex') };
     });
     if (new Set(preparedFiles.map((file) => file.name)).size !== preparedFiles.length) return fail(response, 422, 'No repitas archivos en una version');

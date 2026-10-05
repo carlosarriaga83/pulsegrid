@@ -9,9 +9,18 @@ const API_URL = '/api';
 
 async function apiRequest(action, options = {}) {
   const response = await fetch(`${API_URL}/${action}`, { credentials: 'include', headers: { 'Content-Type': 'application/json' }, ...options });
-  const data = await response.json();
+  const text = await response.text();
+  let data;
+  try { data = JSON.parse(text); } catch (error) { throw new Error(`El servidor respondio ${response.status}: ${text.slice(0, 160) || 'sin detalle'}`); }
   if (!response.ok) throw new Error(data.error || 'No fue posible completar la solicitud');
   return data;
+}
+
+async function firmwareFilePayload(file) {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = '';
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+  return { name: file.name, content: btoa(binary), encoding: 'base64' };
 }
 
 function ensureSettingsViewInMain() {
@@ -129,7 +138,7 @@ function bindFirmwareReleaseControls() {
     const files = Array.from(form.querySelector('#firmware-release-files').files || []);
     if (!files.length) return showToast('Selecciona al menos un archivo .py');
     try {
-      const payload = { version: form.querySelector('#firmware-release-version').value.trim(), whatsNew: form.querySelector('#firmware-release-whats-new').value.trim(), files: await Promise.all(files.map(async (file) => ({ name: file.name, content: await file.text() }))) };
+      const payload = { version: form.querySelector('#firmware-release-version').value.trim(), whatsNew: form.querySelector('#firmware-release-whats-new').value.trim(), files: await Promise.all(files.map(firmwareFilePayload)) };
       const result = await apiRequest('firmware/releases', { method: 'POST', body: JSON.stringify(payload) });
       form.querySelector('#firmware-release-status').textContent = `Publicado ${result.release.version} con ${result.release.files.length} archivos.`;
       showToast('Firmware publicado');
@@ -180,7 +189,7 @@ function bindFirmwareViewControls() {
     const files = Array.from(form.querySelector('#firmware-release-files').files || []);
     if (!files.length) return showToast('Selecciona al menos un archivo .py');
     try {
-      const payload = { version: form.querySelector('#firmware-release-version').value.trim(), whatsNew: form.querySelector('#firmware-release-whats-new').value.trim(), files: await Promise.all(files.map(async (file) => ({ name: file.name, content: await file.text() }))) };
+      const payload = { version: form.querySelector('#firmware-release-version').value.trim(), whatsNew: form.querySelector('#firmware-release-whats-new').value.trim(), files: await Promise.all(files.map(firmwareFilePayload)) };
       const result = await apiRequest('firmware/releases', { method: 'POST', body: JSON.stringify(payload) });
       status.textContent = `Publicado ${result.release.version} con ${result.release.files.length} archivos.`;
       form.reset();
