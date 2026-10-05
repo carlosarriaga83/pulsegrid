@@ -333,6 +333,13 @@ function devicePresentation(device) {
   return { icon: 'cpu', meta: [{ icon: 'radio', text: device.status === 'online' ? 'Telemetria activa' : 'Sin conexion' }, { icon: 'circle-dot', text: device.report ? 'Ultimo estado recibido' : 'Sin telemetria' }] };
 }
 
+function updateSidebarFirmwareVersion() {
+  const label = $('#sidebar-firmware-version');
+  if (!label) return;
+  const firmwareDevice = devices.map((device) => parseTelemetry(device.telemetry)).find((telemetry) => telemetry.firmwareVersion);
+  label.textContent = firmwareDevice ? `Firmware ${firmwareDevice.firmwareVersion}` : 'Firmware sin datos';
+}
+
 async function loadDevices() {
   if (cloudRefreshInFlight) return;
   cloudRefreshInFlight = true;
@@ -347,6 +354,7 @@ async function loadDevices() {
   renderDeviceRows();
   renderDeviceCards();
   renderCommandDeviceState();
+  updateSidebarFirmwareVersion();
   updateDeviceSummary();
   await loadCommandHistory();
 }
