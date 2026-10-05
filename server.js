@@ -45,13 +45,19 @@ function firmwareVersion(version) {
   return String(version);
 }
 
+function newFirmwareVersion(version) {
+  const safeVersion = firmwareVersion(version);
+  if (!/^\d{4}\.\d{2}\.\d{2}\.[A-Za-z0-9_-]+$/.test(safeVersion)) throw new Error('La version debe usar YYYY.MM.DD.X');
+  return safeVersion;
+}
+
 function firmwareFileName(fileName) {
   if (!firmwareFiles.has(String(fileName || ''))) throw new Error('Archivo de firmware no permitido');
   return String(fileName);
 }
 
 async function readFirmwareManifest(userId, version) {
-  const [releases] = await database().execute(`SELECT id, version, is_active AS isActive, created_at AS createdAt FROM firmware_releases WHERE user_id = ? ${version ? 'AND version = ?' : 'AND is_active = 1'} ORDER BY created_at DESC LIMIT 1`, version ? [userId, firmwareVersion(version)] : [userId]);
+  const [releases] = await database().execute(`SELECT id, version, notes AS whatsNew, is_active AS isActive, created_at AS createdAt FROM firmware_releases WHERE user_id = ? ${version ? 'AND version = ?' : 'AND is_active = 1'} ORDER BY created_at DESC LIMIT 1`, version ? [userId, firmwareVersion(version)] : [userId]);
   if (!releases[0]) return null;
   const [files] = await database().execute('SELECT name, OCTET_LENGTH(content) AS size, sha256 FROM firmware_files WHERE release_id = ? ORDER BY name', [releases[0].id]);
   if (!files.length) throw new Error('El manifiesto no contiene archivos');
@@ -60,7 +66,7 @@ async function readFirmwareManifest(userId, version) {
 }
 
 async function readFirmwareReleases(userId) {
-  const [releases] = await database().execute('SELECT id, version, is_active AS isActive, created_at AS createdAt FROM firmware_releases WHERE user_id = ? ORDER BY created_at DESC', [userId]);
+  const [releases] = await database().execute('SELECT id, version, notes AS whatsNew, is_active AS isActive, created_at AS createdAt FROM firmware_releases WHERE user_id = ? ORDER BY created_at DESC', [userId]);
   if (!releases.length) return [];
   const placeholders = releases.map(() => '?').join(',');
   const [files] = await database().execute(`SELECT release_id AS releaseId, name, OCTET_LENGTH(content) AS size, sha256 FROM firmware_files WHERE release_id IN (${placeholders}) ORDER BY name`, releases.map((release) => release.id));
@@ -121,7 +127,8 @@ async function ensureSchema() {
     await db.execute("CREATE TABLE IF NOT EXISTS telemetry (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, device_id INT UNSIGNED NOT NULL, payload JSON NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, INDEX telemetry_device (device_id), CONSTRAINT telemetry_device_fk FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE) ENGINE=InnoDB");
     await db.execute("CREATE TABLE IF NOT EXISTS commands (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, device_id INT UNSIGNED NOT NULL, command_name VARCHAR(80) NOT NULL, payload JSON NOT NULL, status VARCHAR(30) NOT NULL DEFAULT 'queued', error_message VARCHAR(500) NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, CONSTRAINT commands_device_fk FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE) ENGINE=InnoDB");
     try { await db.execute('ALTER TABLE commands ADD COLUMN error_message VARCHAR(500) NULL'); } catch (error) { if (error.code !== 'ER_DUP_FIELDNAME') throw error; }
-    await db.execute("CREATE TABLE IF NOT EXISTS firmware_releases (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, user_id INT UNSIGNED NOT NULL, version VARCHAR(40) NOT NULL, is_active TINYINT(1) NOT NULL DEFAULT 0, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, UNIQUE KEY firmware_user_version (user_id, version), INDEX firmware_active (user_id, is_active), CONSTRAINT firmware_releases_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE) ENGINE=InnoDB");
+    await db.execute("CREATE TABLE IF NOT EXISTS firmware_releases (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, user_id INT UNSIGNED NOT NULL, version VARCHAR(40) NOT NULL, notes VARCHAR(280) NOT NULL DEFAULT '', is_active TINYINT(1) NOT NULL DEFAULT 0, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, UNIQUE KEY firmware_user_version (user_id, version), INDEX firmware_active (user_id, is_active), CONSTRAINT firmware_releases_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE) ENGINE=InnoDB");
+    try { await db.execute("ALTER TABLE firmware_releases ADD COLUMN notes VARCHAR(280) NOT NULL DEFAULT ''"); } catch (error) { if (error.code !== 'ER_DUP_FIELDNAME') throw error; }
     await db.execute("CREATE TABLE IF NOT EXISTS firmware_files (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, release_id BIGINT UNSIGNED NOT NULL, name VARCHAR(80) NOT NULL, content MEDIUMBLOB NOT NULL, sha256 CHAR(64) NOT NULL, UNIQUE KEY firmware_release_file (release_id, name), CONSTRAINT firmware_files_release_fk FOREIGN KEY (release_id) REFERENCES firmware_releases(id) ON DELETE CASCADE) ENGINE=InnoDB");
   })();
   return schemaReady;
@@ -315,8 +322,10 @@ app.delete('/api/firmware/releases/:version', requireSession, apiReady, async (r
 
 app.post('/api/firmware/releases', requireSession, apiReady, async (request, response) => {
   try {
-    const { version, files } = request.body || {};
-    const safeVersion = firmwareVersion(version);
+    const { version, whatsNew, files } = request.body || {};
+    const safeVersion = newFirmwareVersion(version);
+    const safeWhatsNew = String(whatsNew || '').trim();
+    if (!safeWhatsNew || safeWhatsNew.length > 280) return fail(response, 422, 'Whats new debe contener entre 1 y 280 caracteres');
     if (!Array.isArray(files) || files.length === 0 || files.length > 20) return fail(response, 422, 'files debe contener entre 1 y 20 archivos');
     const userId = await sessionUserId(request.session.user.email);
     const preparedFiles = files.map((file) => {
@@ -331,7 +340,7 @@ app.post('/api/firmware/releases', requireSession, apiReady, async (request, res
       await connection.beginTransaction();
       await connection.execute('DELETE FROM firmware_releases WHERE user_id = ? AND version = ?', [userId, safeVersion]);
       await connection.execute('UPDATE firmware_releases SET is_active = 0 WHERE user_id = ?', [userId]);
-      const [release] = await connection.execute('INSERT INTO firmware_releases (user_id, version, is_active) VALUES (?, ?, 1)', [userId, safeVersion]);
+      const [release] = await connection.execute('INSERT INTO firmware_releases (user_id, version, notes, is_active) VALUES (?, ?, ?, 1)', [userId, safeVersion, safeWhatsNew]);
       for (const file of preparedFiles) {
         await connection.execute('INSERT INTO firmware_files (release_id, name, content, sha256) VALUES (?, ?, ?, ?)', [release.insertId, file.name, file.content, file.sha256]);
       }

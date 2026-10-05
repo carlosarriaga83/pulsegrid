@@ -1,0 +1,17 @@
+.firmware-table-head,
+.firmware-release-row {
+  grid-template-columns: minmax(140px, 1.1fr) minmax(150px, 1.2fr) minmax(200px, 1.6fr) minmax(150px, 1fr) minmax(130px, 1fr) 42px;
+  min-width: 980px;
+}
+
+@media (max-width: 760px) {
+  .firmware-table-head,
+  .firmware-release-row {
+    grid-template-columns: 1fr;
+    min-width: 0;
+  }
+
+  .firmware-table-head {
+    display: none;
+  }
+}
