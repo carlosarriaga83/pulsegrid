@@ -2,6 +2,7 @@ const devices = [];
 const CLOUD_REFRESH_MS = 2000;
 let cloudRefreshInFlight = false;
 let cloudVersion;
+let telemetryChart;
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -687,6 +688,64 @@ async function loadTelemetry(deviceId = $('#telemetry-device')?.value || devices
     renderIcons();
     formatTelemetryPayloadBlocks();
   } catch (error) { view.innerHTML = `<div class="panel" style="padding:30px;color:var(--muted)">${error.message}</div>`; }
+}
+
+function telemetryValues(payload, prefix = '', values = {}) {
+  if (!payload || typeof payload !== 'object') return values;
+  Object.entries(payload).forEach(([key, value]) => {
+    const path = prefix ? `${prefix}.${key}` : key;
+    if (typeof value === 'number' && Number.isFinite(value)) values[path] = value;
+    else if (typeof value === 'object' && value !== null && !Array.isArray(value)) telemetryValues(value, path, values);
+  });
+  return values;
+}
+
+function telemetryMetricLabel(metric) {
+  return metric.replace(/^status\./, '').replaceAll('_', ' ').replaceAll('.', ' / ');
+}
+
+function renderTelemetryChart(samples, metric) {
+  if (telemetryChart) { telemetryChart.destroy(); telemetryChart = null; }
+  const canvas = $('#telemetry-chart');
+  if (!canvas || !window.Chart || !metric) return;
+  const points = [...samples].reverse().map((sample) => ({ x: new Date(sample.createdAt).getTime(), y: telemetryValues(sample.payload)[metric] })).filter((point) => Number.isFinite(point.y));
+  telemetryChart = new Chart(canvas, {
+    type: 'line',
+    data: { datasets: [{ label: telemetryMetricLabel(metric), data: points, borderColor: '#c8f76b', backgroundColor: 'rgba(200,247,107,.13)', fill: true, borderWidth: 2, pointRadius: 2, pointHoverRadius: 4, tension: .28 }] },
+    options: { responsive: true, maintainAspectRatio: false, animation: false, interaction: { mode: 'nearest', axis: 'x', intersect: false }, plugins: { legend: { display: false }, tooltip: { displayColors: false, callbacks: { title: (items) => new Date(items[0].parsed.x).toLocaleString('es-MX'), label: (item) => `${telemetryMetricLabel(metric)}: ${item.formattedValue}` } } }, scales: { x: { type: 'time', time: { tooltipFormat: 'dd MMM, HH:mm', displayFormats: { minute: 'HH:mm', hour: 'HH:mm', day: 'dd MMM' } }, grid: { color: 'rgba(146,155,156,.12)' }, ticks: { color: '#929b9c', font: { size: 10 } } }, y: { grid: { color: 'rgba(146,155,156,.12)' }, ticks: { color: '#929b9c', font: { size: 10 } } } } }
+  });
+}
+
+async function loadTelemetry(deviceId = $('#telemetry-device')?.value || devices[0]?.id, refresh = false) {
+  const view = $('#view-telemetry');
+  if (!view) return;
+  if (!deviceId) { view.innerHTML = '<div class="panel" style="padding:30px;color:var(--muted)">Agrega un dispositivo para consultar telemetria.</div>'; return; }
+  try {
+    const limit = Number($('#telemetry-limit')?.value || 100);
+    let refreshWarning = '';
+    let result;
+    try {
+      result = await apiRequest(`telemetry?deviceId=${encodeURIComponent(deviceId)}&limit=${limit}${refresh ? '&refresh=true' : ''}`);
+    } catch (error) {
+      if (!refresh) throw error;
+      result = await apiRequest(`telemetry?deviceId=${encodeURIComponent(deviceId)}&limit=${limit}&refresh=false`);
+      refreshWarning = `No fue posible actualizar desde Tuya: ${error.message}. Se muestra el historial guardado.`;
+    }
+    const samples = result.telemetry;
+    const latest = samples[0];
+    const device = devices.find((item) => item.id === deviceId);
+    const metrics = [...new Set(samples.flatMap((sample) => Object.keys(telemetryValues(sample.payload))))];
+    const selectedMetric = metrics.includes($('#telemetry-metric')?.value) ? $('#telemetry-metric').value : metrics[0];
+    const latestValue = selectedMetric && latest ? telemetryValues(latest.payload)[selectedMetric] : null;
+    view.innerHTML = `<div class="page-heading"><div><p class="eyebrow">DATOS EN TIEMPO REAL</p><h1>Telemetria<span class="accent-dot">.</span></h1><p class="heading-copy">Series temporales de las lecturas almacenadas por tus dispositivos.</p></div><button class="secondary-button" id="telemetry-refresh"><i data-lucide="refresh-cw"></i> Actualizar</button></div><div class="telemetry-toolbar panel"><label>Dispositivo<select id="telemetry-device">${devices.map((item) => `<option value="${escapeTelemetryHtml(item.id)}"${item.id === deviceId ? ' selected' : ''}>${escapeTelemetryHtml(item.name)} · ${escapeTelemetryHtml(item.id)}</option>`).join('')}</select></label><label>Metrica<select id="telemetry-metric" ${metrics.length ? '' : 'disabled'}>${metrics.length ? metrics.map((metric) => `<option value="${escapeTelemetryHtml(metric)}"${metric === selectedMetric ? ' selected' : ''}>${escapeTelemetryHtml(telemetryMetricLabel(metric))}</option>`).join('') : '<option>Sin valores numericos</option>'}</select></label><label>Historial<select id="telemetry-limit"><option value="30"${limit === 30 ? ' selected' : ''}>30 muestras</option><option value="100"${limit === 100 ? ' selected' : ''}>100 muestras</option></select></label></div>${refreshWarning ? `<p class="telemetry-warning"><i data-lucide="triangle-alert"></i>${escapeTelemetryHtml(refreshWarning)}</p>` : ''}<div class="telemetry-overview"><article class="metric-card"><span class="metric-label"><i data-lucide="database"></i> Muestras</span><strong>${samples.length}</strong><span class="trend stable">Historial disponible</span></article><article class="metric-card"><span class="metric-label"><i data-lucide="clock-3"></i> Ultima lectura</span><strong style="font-size:18px">${latest ? new Date(latest.createdAt).toLocaleTimeString('es-MX') : '--'}</strong><span class="trend stable">${device?.status === 'online' ? 'Dispositivo en linea' : 'Sin conexion reciente'}</span></article><article class="metric-card"><span class="metric-label"><i data-lucide="activity"></i>${selectedMetric ? escapeTelemetryHtml(telemetryMetricLabel(selectedMetric)) : 'Estado reportado'}</span><strong style="font-size:18px">${Number.isFinite(latestValue) ? latestValue : '--'}</strong><span class="trend stable">${selectedMetric ? 'Valor mas reciente' : 'Sin valores numericos'}</span></article></div><article class="panel telemetry-chart-panel"><div class="panel-heading"><div><h2>Lecturas en el tiempo</h2><p>${device ? `${escapeTelemetryHtml(device.name)} · ${escapeTelemetryHtml(device.id)}` : escapeTelemetryHtml(deviceId)}</p></div>${metrics.length ? '<button class="text-button" id="telemetry-reset-zoom"><i data-lucide="scan-search"></i> Restablecer vista</button>' : ''}</div><div class="telemetry-chart-wrap">${metrics.length ? '<canvas id="telemetry-chart" aria-label="Grafica de telemetria"></canvas>' : '<p class="empty-state">No hay valores numericos que se puedan graficar todavia.</p>'}</div></article><article class="panel telemetry-history-panel"><div class="panel-heading"><div><h2>Ultimas lecturas</h2><p>Detalles sin modificar de cada muestra.</p></div></div><div class="activity-list">${samples.length ? samples.slice(0, 10).map((sample) => `<div class="activity-item" style="align-items:flex-start"><span class="activity-icon lime"><i data-lucide="radio"></i></span><div style="min-width:0;flex:1"><strong>${escapeTelemetryHtml(telemetrySummary(sample.payload))}</strong><details><summary>${new Date(sample.createdAt).toLocaleString('es-MX')} · Ver JSON</summary><pre>${prettyTelemetryJson(sample.payload)}</pre></details></div></div>`).join('') : '<p class="empty-state">Aun no hay telemetria para este dispositivo.</p>'}</div></article>`;
+    $('#telemetry-device').addEventListener('change', (event) => loadTelemetry(event.target.value));
+    $('#telemetry-metric').addEventListener('change', () => renderTelemetryChart(samples, $('#telemetry-metric').value));
+    $('#telemetry-limit').addEventListener('change', () => loadTelemetry(deviceId, false));
+    $('#telemetry-refresh').addEventListener('click', () => loadTelemetry(deviceId));
+    $('#telemetry-reset-zoom')?.addEventListener('click', () => telemetryChart?.resetZoom?.());
+    renderTelemetryChart(samples, selectedMetric);
+    renderIcons();
+  } catch (error) { view.innerHTML = `<div class="panel" style="padding:30px;color:var(--muted)">${escapeTelemetryHtml(error.message)}</div>`; }
 }
 
 function showToast(message) {

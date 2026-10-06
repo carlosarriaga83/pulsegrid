@@ -16,7 +16,9 @@ const publicRoot = path.join(root, 'public');
 let pool;
 let schemaReady;
 let automationTickRunning = false;
+let tuyaTelemetrySyncRunning = false;
 const tuyaTokens = new Map();
+const tuyaSyncIntervalMs = Math.min(Math.max(Number(process.env.TUYA_SYNC_INTERVAL_MS) || 60000, 15000), 15 * 60 * 1000);
 
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
@@ -312,11 +314,78 @@ async function dispatchDeviceCommand(db, device, command, payload) {
 }
 
 async function syncTuyaDevice(db, device) {
-  const status = await tuyaRequest(device.userId, 'GET', `/v1.0/devices/${encodeURIComponent(device.device_id)}/status`);
-  const payload = { provider: 'tuya', status: Array.isArray(status) ? Object.fromEntries(status.map((item) => [item.code, item.value])) : status };
+  const values = {};
+  const errors = [];
+  let received = false;
+  try {
+    const status = await tuyaRequest(device.userId, 'GET', `/v1.0/devices/${encodeURIComponent(device.device_id)}/status`);
+    const entries = Array.isArray(status) ? status : Object.entries(status || {}).map(([code, value]) => ({ code, value }));
+    entries.forEach((item) => { if (item?.code) values[item.code] = item.value; });
+    received = entries.length > 0;
+  } catch (error) {
+    errors.push(error.message);
+  }
+  try {
+    const shadow = await tuyaRequest(device.userId, 'GET', `/v2.0/cloud/thing/${encodeURIComponent(device.device_id)}/shadow/properties`);
+    const properties = Array.isArray(shadow?.properties) ? shadow.properties : [];
+    properties.forEach((item) => { if (item?.code) values[item.code] = item.value; });
+    received = received || properties.length > 0;
+  } catch (error) {
+    errors.push(error.message);
+  }
+  const accountStatus = device.accountDevice?.status || device.accountDevice?.dps;
+  if (Array.isArray(accountStatus)) {
+    accountStatus.forEach((item) => { if (item?.code) values[item.code] = item.value; });
+    received = received || accountStatus.length > 0;
+  } else if (accountStatus && typeof accountStatus === 'object') {
+    Object.assign(values, accountStatus);
+    received = true;
+  }
+  if (!received) throw new Error(errors.filter(Boolean).join('; ') || 'Tuya no devolvio datos para este dispositivo');
+  const online = typeof device.accountDevice?.online === 'boolean' ? device.accountDevice.online : null;
+  const payload = { provider: 'tuya', status: values };
   await db.execute('INSERT INTO telemetry (device_id, payload) VALUES (?, ?)', [device.id, JSON.stringify(payload)]);
-  await db.execute("UPDATE devices SET status = 'online', last_seen = NOW() WHERE id = ?", [device.id]);
+  await db.execute("UPDATE devices SET status = COALESCE(?, status), last_seen = NOW() WHERE id = ?", [online === null ? null : online ? 'online' : 'offline', device.id]);
   return payload;
+}
+
+async function syncTuyaDevicesForUser(db, userId) {
+  const [devices] = await db.execute("SELECT id, user_id AS userId, device_id FROM devices WHERE user_id = ? AND provider = 'tuya'", [userId]);
+  if (!devices.length) return { synced: 0, failed: 0 };
+  const accountDevices = await tuyaAccountDevices(userId);
+  const accountById = new Map(accountDevices.map((item) => [String(item.id), item]));
+  const results = await Promise.all(devices.map(async (device) => {
+    try {
+      await syncTuyaDevice(db, { ...device, accountDevice: accountById.get(String(device.device_id)) });
+      return true;
+    } catch (error) {
+      console.warn(`Tuya sync failed for ${device.device_id}: ${error.message}`);
+      return false;
+    }
+  }));
+  return { synced: results.filter(Boolean).length, failed: results.filter((result) => !result).length };
+}
+
+async function runTuyaTelemetrySync() {
+  if (tuyaTelemetrySyncRunning) return;
+  tuyaTelemetrySyncRunning = true;
+  try {
+    await ensureSchema();
+    const db = database();
+    const [connections] = await db.execute("SELECT DISTINCT devices.user_id AS userId FROM devices INNER JOIN tuya_connections ON tuya_connections.user_id = devices.user_id WHERE devices.provider = 'tuya'");
+    for (const connection of connections) {
+      try {
+        const result = await syncTuyaDevicesForUser(db, connection.userId);
+        if (result.failed) console.warn(`Tuya sync user ${connection.userId}: ${result.synced} synced, ${result.failed} failed`);
+      } catch (error) {
+        console.warn(`Tuya sync user ${connection.userId} failed: ${error.message}`);
+      }
+    }
+  } catch (error) {
+    console.error('Tuya telemetry scheduler:', error.message);
+  } finally {
+    tuyaTelemetrySyncRunning = false;
+  }
 }
 
 app.use(cookieSession({
@@ -339,6 +408,7 @@ async function ensureSchema() {
     try { await db.execute('ALTER TABLE devices ADD COLUMN capabilities JSON NULL AFTER provider'); } catch (error) { if (error.code !== 'ER_DUP_FIELDNAME') throw error; }
     await db.execute("CREATE TABLE IF NOT EXISTS tuya_connections (user_id INT UNSIGNED PRIMARY KEY, client_id VARCHAR(120) NOT NULL, secret_ciphertext TEXT NOT NULL, endpoint VARCHAR(160) NOT NULL, tuya_user_id VARCHAR(120) NULL, reference_device_id VARCHAR(120) NULL, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, CONSTRAINT tuya_connections_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE) ENGINE=InnoDB");
     await db.execute("CREATE TABLE IF NOT EXISTS telemetry (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, device_id INT UNSIGNED NOT NULL, payload JSON NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, INDEX telemetry_device (device_id), CONSTRAINT telemetry_device_fk FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE) ENGINE=InnoDB");
+    try { await db.execute('ALTER TABLE telemetry ADD INDEX telemetry_device_created (device_id, created_at)'); } catch (error) { if (error.code !== 'ER_DUP_KEYNAME') throw error; }
     await db.execute("CREATE TABLE IF NOT EXISTS commands (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, device_id INT UNSIGNED NOT NULL, command_name VARCHAR(80) NOT NULL, payload JSON NOT NULL, status VARCHAR(30) NOT NULL DEFAULT 'queued', error_message VARCHAR(500) NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, CONSTRAINT commands_device_fk FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE) ENGINE=InnoDB");
     try { await db.execute('ALTER TABLE commands ADD COLUMN error_message VARCHAR(500) NULL'); } catch (error) { if (error.code !== 'ER_DUP_FIELDNAME') throw error; }
     await db.execute("CREATE TABLE IF NOT EXISTS automations (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, user_id INT UNSIGNED NOT NULL, device_id INT UNSIGNED NOT NULL, name VARCHAR(120) NOT NULL, trigger_time CHAR(5) NOT NULL, timezone VARCHAR(64) NULL, weekdays VARCHAR(13) NOT NULL DEFAULT '0,1,2,3,4,5,6', action_name ENUM('open','close','position') NOT NULL, position DECIMAL(5,2) NULL, enabled TINYINT(1) NOT NULL DEFAULT 1, last_run_at TIMESTAMP NULL, last_run_date CHAR(10) NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, INDEX automation_schedule (enabled, trigger_time, last_run_date), CONSTRAINT automations_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE, CONSTRAINT automations_device_fk FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE) ENGINE=InnoDB");
@@ -471,6 +541,13 @@ app.get('/api/integrations/tuya/devices', requireSession, apiReady, async (reque
   } catch (error) { fail(response, 503, error.message); }
 });
 
+app.post('/api/integrations/tuya/sync', requireSession, apiReady, async (request, response) => {
+  try {
+    const result = await syncTuyaDevicesForUser(database(), await sessionUserId(request.session.user.email));
+    response.json({ ok: true, ...result });
+  } catch (error) { fail(response, 503, error.message); }
+});
+
 app.post('/api/integrations/tuya/import', requireSession, apiReady, async (request, response) => {
   const requestedIds = Array.isArray(request.body?.deviceIds) ? [...new Set(request.body.deviceIds.map(String))] : [];
   if (!requestedIds.length) return fail(response, 422, 'Selecciona al menos un dispositivo Tuya');
@@ -503,7 +580,7 @@ app.get('/api/telemetry', requireSession, apiReady, async (request, response) =>
   const db = database();
   const [devices] = await db.execute('SELECT id, user_id AS userId, device_id, provider FROM devices WHERE user_id = (SELECT id FROM users WHERE email = ?) AND device_id = ? LIMIT 1', [request.session.user.email, deviceId]);
   if (!devices[0]) return fail(response, 404, 'Dispositivo no encontrado');
-  if (devices[0].provider === 'tuya' && request.query.refresh !== 'false') {
+  if (devices[0].provider === 'tuya' && request.query.refresh === 'true') {
     try { await syncTuyaDevice(db, devices[0]); } catch (error) { return fail(response, 503, error.message); }
   }
   const [rows] = await db.execute('SELECT telemetry.payload, telemetry.created_at AS createdAt FROM telemetry WHERE telemetry.device_id = ? ORDER BY telemetry.id DESC LIMIT ?', [devices[0].id, limit]);
@@ -758,4 +835,6 @@ app.listen(port, () => {
   console.log(`Pulsegrid running on port ${port}`);
   runScheduledAutomations();
   setInterval(runScheduledAutomations, 30 * 1000);
+  runTuyaTelemetrySync();
+  setInterval(runTuyaTelemetrySync, tuyaSyncIntervalMs);
 });
