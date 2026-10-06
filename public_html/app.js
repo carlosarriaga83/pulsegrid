@@ -168,6 +168,7 @@ function automationTimezone() {
 }
 
 function automationActionLabel(rule) {
+  if (rule.commandName === 'tuya.set') return `Tuya: ${rule.commandPayload?.code} = ${typeof rule.commandPayload?.value === 'object' ? JSON.stringify(rule.commandPayload.value) : rule.commandPayload?.value}`;
   if (rule.action === 'open') return 'Abrir cortina';
   if (rule.action === 'close') return 'Cerrar cortina';
   return `Mover cortina a ${Number(rule.position)}%`;
@@ -195,6 +196,17 @@ function populateAutomationDevices() {
   const selected = select.value;
   select.innerHTML = `<option value="">Selecciona un dispositivo</option>${devices.map((device) => `<option value="${escapeTelemetryHtml(device.id)}">${escapeTelemetryHtml(device.name)} · ${escapeTelemetryHtml(device.id)}</option>`).join('')}`;
   select.value = selected;
+  populateAutomationActions();
+}
+
+function populateAutomationActions() {
+  const action = $('#automation-action');
+  const device = devices.find((item) => item.id === $('#automation-device')?.value);
+  if (!action) return;
+  const selected = action.value;
+  const tuyaActions = device?.provider === 'tuya' ? tuyaCommandOptions(device) : [];
+  action.innerHTML = tuyaActions.length ? tuyaActions.map((item) => `<option value="${escapeTelemetryHtml(item.value)}">${escapeTelemetryHtml(item.label)}</option>`).join('') : '<option value="open">Abrir cortina</option><option value="close">Cerrar cortina</option><option value="position">Mover cortina a una posicion</option>';
+  action.value = [...action.options].some((item) => item.value === selected) ? selected : action.options[0]?.value || '';
 }
 
 function renderAutomations(rules) {
@@ -234,7 +246,9 @@ function setupAutomationsView() {
     cancelEdit.hidden = true;
     renderIcons();
   };
-  action.addEventListener('change', () => { position.hidden = action.value !== 'position'; });
+  const updateActionFields = () => { position.hidden = action.value !== 'position'; };
+  action.addEventListener('change', updateActionFields);
+  $('#automation-device').addEventListener('change', () => { populateAutomationActions(); updateActionFields(); });
   $('#automation-weekdays').addEventListener('click', (event) => {
     const button = event.target.closest('[data-weekday]');
     if (button) button.setAttribute('aria-pressed', String(button.getAttribute('aria-pressed') !== 'true'));
@@ -243,7 +257,9 @@ function setupAutomationsView() {
     event.preventDefault();
     const status = $('#automation-status');
     const editingId = form.dataset.editingId;
-    const body = { name: $('#automation-name').value.trim(), deviceId: $('#automation-device').value, triggerTime: $('#automation-time').value, weekdays: selectedAutomationWeekdays(), action: action.value, position: Number($('#automation-position').value), timezone: form.dataset.editingTimezone || automationTimezone() };
+    const choice = action.value;
+    const tuyaAction = tuyaCommandOptions(devices.find((item) => item.id === $('#automation-device').value)).find((item) => item.value === choice);
+    const body = { name: $('#automation-name').value.trim(), deviceId: $('#automation-device').value, triggerTime: $('#automation-time').value, weekdays: selectedAutomationWeekdays(), action: tuyaAction ? 'open' : choice, position: Number($('#automation-position').value), commandName: tuyaAction ? 'tuya.set' : null, commandPayload: tuyaAction?.payload || null, timezone: form.dataset.editingTimezone || automationTimezone() };
     try { await apiRequest(editingId ? `automations/${editingId}` : 'automations', { method: editingId ? 'PATCH' : 'POST', body: JSON.stringify(body) }); resetForm(); status.textContent = editingId ? 'Automation actualizada.' : 'Automation creada y lista para ejecutarse.'; await loadAutomations(); showToast(editingId ? 'Automation actualizada' : 'Automation creada'); }
     catch (error) { status.textContent = error.message; }
   });
@@ -266,7 +282,8 @@ function setupAutomationsView() {
       $('#automation-device').value = rule.deviceId;
       $('#automation-time').value = rule.triggerTime;
       setAutomationWeekdays(rule.weekdays);
-      action.value = rule.action;
+      populateAutomationActions();
+      action.value = rule.commandName === 'tuya.set' ? `tuya:${rule.commandPayload?.code}` : rule.action;
       $('#automation-position').value = rule.position == null ? 50 : rule.position;
       position.hidden = rule.action !== 'position';
       $('#automation-form-title').textContent = 'Editar regla';
@@ -462,6 +479,24 @@ function parseTelemetry(telemetry) {
   try { return JSON.parse(telemetry); } catch { return {}; }
 }
 
+function parseCapabilities(capabilities) {
+  if (Array.isArray(capabilities)) return capabilities;
+  try { return JSON.parse(capabilities || '[]'); } catch { return []; }
+}
+
+function tuyaDefaultValue(capability) {
+  let values = capability.values;
+  if (typeof values === 'string') { try { values = JSON.parse(values); } catch { values = {}; } }
+  if (capability.type === 'Boolean') return false;
+  if (capability.type === 'Enum') return values?.range?.[0] ?? '';
+  if (capability.type === 'Integer') return Number(values?.min ?? 0);
+  return '';
+}
+
+function tuyaCommandOptions(device) {
+  return parseCapabilities(device?.capabilities).map((capability) => ({ value: `tuya:${capability.code}`, label: capability.name || capability.code, payload: { code: capability.code, value: tuyaDefaultValue(capability) } }));
+}
+
 function curtainMeta(telemetry) {
   const servos = Object.entries(telemetry.servos || {});
   const percentages = servos.map(([, servo]) => Number(servo.blind_percent)).filter(Number.isFinite);
@@ -475,6 +510,7 @@ function curtainMeta(telemetry) {
 function devicePresentation(device) {
   const telemetry = parseTelemetry(device.telemetry);
   if (telemetry.kind === 'curtain') return curtainMeta(telemetry);
+  if (device.provider === 'tuya') return { icon: 'cloud', meta: [{ icon: 'cloud', text: 'Tuya Cloud' }, { icon: 'radio', text: device.status === 'online' ? 'Estado sincronizable' : 'Sin conexion' }, { icon: 'sliders-horizontal', text: `${parseCapabilities(device.capabilities).length} funciones disponibles` }] };
   return { icon: 'cpu', meta: [{ icon: 'radio', text: device.status === 'online' ? 'Telemetria activa' : 'Sin conexion' }, { icon: 'circle-dot', text: device.report ? 'Ultimo estado recibido' : 'Sin telemetria' }, { icon: 'cpu', text: telemetry.firmwareVersion ? `Firmware ${telemetry.firmwareVersion}` : 'Firmware sin confirmar' }] };
 }
 
@@ -670,6 +706,52 @@ async function openModal() {
 }
 function closeModal() { $('#device-modal').classList.remove('open'); }
 
+async function openTuyaSettings() {
+  try {
+    const result = await apiRequest('integrations/tuya/config');
+    const config = result.config || {};
+    const modal = document.createElement('div');
+    modal.className = 'modal-backdrop open';
+    modal.innerHTML = `<div class="modal"><button class="modal-close" aria-label="Cerrar"><i data-lucide="x"></i></button><div class="modal-icon"><i data-lucide="cloud-cog"></i></div><p class="eyebrow">TUYA CLOUD</p><h2>Configurar Tuya</h2><p class="modal-copy">Conecta tu proyecto Tuya a esta cuenta Pulsegrid.</p><form id="tuya-config-form"><label>Client ID<input name="clientId"${result.configured ? '' : ' required'} maxlength="120" placeholder="${escapeTelemetryHtml(config.clientIdHint || 'Client ID')}"></label><label>Client Secret<input name="clientSecret" type="password" autocomplete="new-password" placeholder="${result.configured ? 'Deja vacio para conservarlo' : 'Client Secret'}"></label><label>Endpoint<select name="endpoint"><option value="https://openapi.tuyaus.com">Estados Unidos</option><option value="https://openapi.tuyaeu.com">Europa</option><option value="https://openapi.tuyacn.com">China</option><option value="https://openapi.tuyain.com">India</option></select></label><label>UID de cuenta Tuya<input name="tuyaUserId" maxlength="120" value="${escapeTelemetryHtml(config.tuyaUserId || '')}" placeholder="Opcional si indicas dispositivo de referencia"></label><label>Dispositivo de referencia<input name="referenceDeviceId" maxlength="120" value="${escapeTelemetryHtml(config.referenceDeviceId || '')}" placeholder="Opcional si indicas UID"></label><div class="modal-actions"><button type="button" class="secondary-button modal-cancel">Cancelar</button><button class="primary-button" type="submit"><i data-lucide="save"></i> Guardar conexion</button></div></form></div>`;
+    document.body.append(modal);
+    const endpoint = modal.querySelector('[name="endpoint"]');
+    endpoint.value = ['https://openapi.tuyaus.com', 'https://openapi.tuyaeu.com', 'https://openapi.tuyacn.com', 'https://openapi.tuyain.com'].includes(config.endpoint) ? config.endpoint : 'https://openapi.tuyaus.com';
+    const close = () => modal.remove();
+    modal.querySelector('.modal-close').addEventListener('click', close);
+    modal.querySelector('.modal-cancel').addEventListener('click', close);
+    modal.addEventListener('click', (event) => { if (event.target === modal) close(); });
+    modal.querySelector('#tuya-config-form').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const values = new FormData(event.currentTarget);
+      try { await apiRequest('integrations/tuya/config', { method: 'POST', body: JSON.stringify(Object.fromEntries(values)) }); close(); showToast('Conexion Tuya guardada'); }
+      catch (error) { showToast(error.message); }
+    });
+    renderIcons();
+  } catch (error) { showToast(error.message); }
+}
+
+async function openTuyaImport() {
+  try {
+    const result = await apiRequest('integrations/tuya/devices');
+    const modal = document.createElement('div');
+    modal.className = 'modal-backdrop open';
+    modal.innerHTML = `<div class="modal"><button class="modal-close" aria-label="Cerrar"><i data-lucide="x"></i></button><div class="modal-icon"><i data-lucide="cloud"></i></div><p class="eyebrow">TUYA CLOUD</p><h2>Importar dispositivos</h2><p class="modal-copy">Elige los dispositivos vinculados a tu proyecto Tuya.</p><form id="tuya-import-form"><div style="display:grid;gap:8px;max-height:280px;overflow:auto">${result.devices.length ? result.devices.map((device) => `<label class="switch-row"><input type="checkbox" name="tuya-device" value="${escapeTelemetryHtml(device.id)}"><span><strong>${escapeTelemetryHtml(device.name)}</strong><small>${escapeTelemetryHtml(device.type)} · ${device.online ? 'En linea' : 'Fuera de linea'}</small></span></label>`).join('') : '<p class="empty-state">No hay dispositivos disponibles en esta cuenta Tuya.</p>'}</div><div class="modal-actions"><button type="button" class="secondary-button modal-cancel">Cancelar</button><button class="primary-button" type="submit"${result.devices.length ? '' : ' disabled'}><i data-lucide="download-cloud"></i> Importar seleccionados</button></div></form></div>`;
+    document.body.append(modal);
+    const close = () => modal.remove();
+    modal.querySelector('.modal-close').addEventListener('click', close);
+    modal.querySelector('.modal-cancel').addEventListener('click', close);
+    modal.addEventListener('click', (event) => { if (event.target === modal) close(); });
+    modal.querySelector('#tuya-import-form').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const deviceIds = $$('input[name="tuya-device"]:checked', modal).map((input) => input.value);
+      if (!deviceIds.length) return showToast('Selecciona al menos un dispositivo Tuya');
+      try { const imported = await apiRequest('integrations/tuya/import', { method: 'POST', body: JSON.stringify({ deviceIds }) }); await loadDevices(); close(); showToast(`${imported.imported} dispositivo${imported.imported === 1 ? '' : 's'} Tuya importado${imported.imported === 1 ? '' : 's'}`); }
+      catch (error) { showToast(error.message); }
+    });
+    renderIcons();
+  } catch (error) { showToast(error.message); }
+}
+
 function updateDeviceSummary() {
   const online = devices.filter((device) => device.status === 'online').length;
   const offline = devices.length - online;
@@ -708,7 +790,11 @@ function renderCommandDeviceState() {
     ? `<span><i data-lucide="${device.icon}"></i> Estado actual: ${device.status === 'online' ? 'En linea' : 'Fuera de linea'}</span>${device.meta.map((item) => `<span><i data-lucide="${item.icon}"></i> ${item.text}</span>`).join('')}`
     : '<span><i data-lucide="circle-off"></i> Sin estado disponible</span>';
   renderIcons();
+  configureDeviceCommands();
 }
+$$('[data-open-modal="add-device"], #add-device').forEach((button) => button.addEventListener('click', openModal));
+$$('[data-open-modal="configure-tuya"]').forEach((button) => button.addEventListener('click', openTuyaSettings));
+$$('[data-open-modal="import-tuya"]').forEach((button) => button.addEventListener('click', openTuyaImport));
 
 function calibrationWizardMarkup() {
   return `<div class="panel calibration-wizard" id="calibration-wizard"><div class="panel-heading"><div><h2>Calibrar persiana</h2><p>Define el lado del motor, guarda cerrada/desplegada y abierta/enrollada, y verifica las posiciones.</p></div><span class="secure-badge"><i data-lucide="wand-sparkles"></i> Guiado</span></div><div class="calibration-steps"><div class="calibration-step active" data-calibration-step="1"><b>1</b><span>Motor</span></div><div class="calibration-step" data-calibration-step="2"><b>2</b><span>Extremo inicial</span></div><div class="calibration-step" data-calibration-step="3"><b>3</b><span>Recorrido</span></div><div class="calibration-step" data-calibration-step="4"><b>4</b><span>Prueba</span></div></div><div class="calibration-settings"><label>Servo<select id="calibration-servo"><option value="1">Servo 1</option><option value="2">Servo 2</option></select></label><label>Lado del motor<select id="calibration-motor-side"><option value="left">Izquierdo</option><option value="right">Derecho</option></select></label><button class="primary-button" id="calibration-start"><i data-lucide="rotate-ccw"></i> Reiniciar calibracion</button></div><p id="calibration-status" class="form-status">Elige el lado del motor e inicia. Desplegada significa cerrada; enrollada significa abierta.</p><div class="calibration-actions"><button class="secondary-button" id="calibration-deployed" disabled><i data-lucide="flag"></i> Guardar cerrada (desplegada)</button><button class="secondary-button" id="calibration-rolled" disabled><i data-lucide="flag"></i> Guardar abierta (enrollada)</button><button class="secondary-button" id="calibration-jog-deployed" disabled><i data-lucide="arrow-down"></i> Mover hacia cerrada</button><button class="secondary-button" id="calibration-jog-rolled" disabled><i data-lucide="arrow-up"></i> Mover hacia abierta</button><button class="secondary-button" id="calibration-jog-clockwise" disabled><i data-lucide="rotate-cw"></i> Una vuelta horario (frente del pinon)</button><button class="secondary-button" id="calibration-jog-counterclockwise" disabled><i data-lucide="rotate-ccw"></i> Una vuelta antihorario (frente del pinon)</button><button class="primary-button" id="calibration-test-open" data-percent="100" disabled><i data-lucide="arrow-up"></i> Probar abierta</button><button class="secondary-button" id="calibration-test-closed" data-percent="0" disabled><i data-lucide="arrow-down"></i> Probar cerrada</button><button class="secondary-button" id="calibration-test-half" data-percent="50" disabled><i data-lucide="circle-half"></i> Probar 50%</button></div></div>`;
@@ -904,7 +990,7 @@ $$('.copy-button').forEach((button) => button.addEventListener('click', async ()
   showToast('Copiado al portapapeles');
 }));
 
-function configureCurtainCommands() {
+function configureDeviceCommands() {
   const commandSelect = $('#command-name') || $$('.command-compose select')[1];
   const payload = $('#command-payload') || $('.command-compose textarea');
   if (!commandSelect || !payload) return;
@@ -922,8 +1008,10 @@ function configureCurtainCommands() {
     'servo.torque': { payload: { servoId: 1, enabled: true }, help: 'servoId: 1 o 2. enabled: true o false.' },
     'servo.resetTurns': { payload: { servoId: 1 }, help: 'servoId: 1 o 2. Reinicia el contador absoluto si no hay movimiento.' }
   };
+  const selectedDevice = devices.find((device) => device.id === $('#command-device')?.value);
+  const tuyaCommands = selectedDevice?.provider === 'tuya' ? tuyaCommandOptions(selectedDevice) : [];
   commandSelect.id = 'command-name';
-  commandSelect.innerHTML = '<option value="curtain.open">Abrir cortina</option><option value="curtain.close">Cerrar cortina</option><option value="curtain.stop">Detener cortina</option><option value="curtain.move">Mover cortina</option><option value="servo.configure">Configurar servo</option><option value="blind.configure">Configurar extremos</option><option value="blind.markRolled">Marcar completamente enrollada</option><option value="blind.markDeployed">Marcar completamente desplegada</option><option value="blind.jog">Avanzar una vuelta</option><option value="motion.configure">Configurar movimiento</option><option value="servo.torque">Configurar torque</option><option value="servo.resetTurns">Reiniciar vueltas</option>';
+  commandSelect.innerHTML = tuyaCommands.length ? tuyaCommands.map((item) => `<option value="${escapeTelemetryHtml(item.value)}">${escapeTelemetryHtml(item.label)}</option>`).join('') : '<option value="curtain.open">Abrir cortina</option><option value="curtain.close">Cerrar cortina</option><option value="curtain.stop">Detener cortina</option><option value="curtain.move">Mover cortina</option><option value="servo.configure">Configurar servo</option><option value="blind.configure">Configurar extremos</option><option value="blind.markRolled">Marcar completamente enrollada</option><option value="blind.markDeployed">Marcar completamente desplegada</option><option value="blind.jog">Avanzar una vuelta</option><option value="motion.configure">Configurar movimiento</option><option value="servo.torque">Configurar torque</option><option value="servo.resetTurns">Reiniciar vueltas</option>';
   payload.id = 'command-payload';
   let help = $('#command-payload-help');
   if (!help) {
@@ -933,23 +1021,24 @@ function configureCurtainCommands() {
     payload.insertAdjacentElement('afterend', help);
   }
   const applyCommandTemplate = () => {
-    const definition = commands[commandSelect.value];
+    const definition = tuyaCommands.find((item) => item.value === commandSelect.value) || commands[commandSelect.value];
     payload.value = JSON.stringify(definition.payload, null, 2);
-    help.textContent = definition.help;
+    help.textContent = definition.help || 'Funcion disponible desde Tuya Cloud.';
   };
   commandSelect.addEventListener('change', applyCommandTemplate);
   applyCommandTemplate();
 }
 
-configureCurtainCommands();
+configureDeviceCommands();
 $('#execute-command').addEventListener('click', async () => {
   const deviceId = $('#command-device').value;
-  const command = $('#command-name').value;
+  const commandChoice = $('#command-name').value;
   try {
     const payload = JSON.parse($('#command-payload').value || '{}');
+    const command = commandChoice.startsWith('tuya:') ? 'tuya.set' : commandChoice;
     await apiRequest('commands', { method: 'POST', body: JSON.stringify({ deviceId, command, payload }) });
     loadDevices();
-    showToast('Comando en cola para el dispositivo');
+    showToast(command === 'tuya.set' ? 'Comando enviado a Tuya' : 'Comando en cola para el dispositivo');
   } catch (error) {
     showToast(error instanceof SyntaxError ? 'El payload debe ser JSON valido' : error.message);
   }

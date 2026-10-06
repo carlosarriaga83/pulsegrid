@@ -16,6 +16,7 @@ const publicRoot = path.join(root, 'public');
 let pool;
 let schemaReady;
 let automationTickRunning = false;
+const tuyaTokens = new Map();
 
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
@@ -94,15 +95,21 @@ function automationInput(body = {}) {
   const deviceId = String(body.deviceId || '').trim();
   const triggerTime = String(body.triggerTime || '').trim();
   const action = String(body.action || '').trim();
+  const commandName = String(body.commandName || '').trim();
+  const commandPayload = body.commandPayload;
   const position = Number(body.position);
   const timezone = automationTimezone(body.timezone);
   const weekdays = automationWeekdays(body.weekdays);
   if (!name || name.length > 120 || !deviceId || !/^\d{2}:\d{2}$/.test(triggerTime)) throw new Error('Nombre, dispositivo y hora HH:MM son obligatorios');
   const [hours, minutes] = triggerTime.split(':').map(Number);
   if (hours > 23 || minutes > 59) throw new Error('Hora de automatizacion invalida');
+  if (commandName) {
+    if (commandName !== 'tuya.set' || !commandPayload || typeof commandPayload !== 'object' || Array.isArray(commandPayload)) throw new Error('El comando de automatizacion no es valido');
+    return { name, deviceId, triggerTime, action: 'open', position: null, timezone, weekdays, commandName, commandPayload };
+  }
   if (action === 'position' && (!Number.isFinite(position) || position < 0 || position > 100)) throw new Error('La posicion debe estar entre 0 y 100');
   automationAction(action, position);
-  return { name, deviceId, triggerTime, action, position: action === 'position' ? position : null, timezone, weekdays };
+  return { name, deviceId, triggerTime, action, position: action === 'position' ? position : null, timezone, weekdays, commandName: null, commandPayload: null };
 }
 
 async function runScheduledAutomations() {
@@ -111,14 +118,15 @@ async function runScheduledAutomations() {
   try {
     await ensureSchema();
     const db = database();
-    const [rules] = await db.execute('SELECT id, device_id AS deviceId, trigger_time AS triggerTime, action_name AS action, position, timezone, weekdays FROM automations WHERE enabled = 1 AND timezone IS NOT NULL');
+    const [rules] = await db.execute('SELECT id, device_id AS deviceId, trigger_time AS triggerTime, action_name AS action, position, command_name AS commandName, command_payload AS commandPayload, timezone, weekdays FROM automations WHERE enabled = 1 AND timezone IS NOT NULL');
     for (const rule of rules) {
       const localTime = automationLocalTime(rule.timezone);
       if (localTime.time !== rule.triggerTime || !String(rule.weekdays).split(',').map(Number).includes(localTime.weekday)) continue;
       const [claimed] = await db.execute('UPDATE automations SET last_run_at = NOW(), last_run_date = ? WHERE id = ? AND enabled = 1 AND (last_run_date IS NULL OR last_run_date <> ?)', [localTime.date, rule.id, localTime.date]);
       if (!claimed.affectedRows) continue;
-      const action = automationAction(rule.action, rule.position);
-      await db.execute('INSERT INTO commands (device_id, command_name, payload) VALUES (?, ?, ?)', [rule.deviceId, action.command, JSON.stringify(action.payload)]);
+      const command = rule.commandName ? { command: rule.commandName, payload: typeof rule.commandPayload === 'string' ? JSON.parse(rule.commandPayload) : rule.commandPayload } : automationAction(rule.action, rule.position);
+      const [devices] = await db.execute('SELECT id, user_id AS userId, provider, capabilities FROM devices WHERE id = ? LIMIT 1', [rule.deviceId]);
+      if (devices[0]) await dispatchDeviceCommand(db, devices[0], command.command, command.payload);
     }
   } catch (error) {
     console.error('Automation scheduler:', error.message);
@@ -179,6 +187,138 @@ function database() {
   return pool;
 }
 
+function tuyaEncryptionKey() {
+  return crypto.scryptSync(process.env.TUYA_CREDENTIALS_KEY || process.env.SESSION_SECRET || 'replace-this-in-hostinger', 'pulsegrid-tuya', 32);
+}
+
+function encryptTuyaSecret(secret) {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', tuyaEncryptionKey(), iv);
+  const encrypted = Buffer.concat([cipher.update(secret, 'utf8'), cipher.final()]);
+  return `${iv.toString('base64')}.${cipher.getAuthTag().toString('base64')}.${encrypted.toString('base64')}`;
+}
+
+function decryptTuyaSecret(ciphertext) {
+  const [iv, tag, encrypted] = String(ciphertext || '').split('.').map((part) => Buffer.from(part, 'base64'));
+  if (!iv || !tag || !encrypted) throw new Error('La credencial Tuya guardada no es valida');
+  const decipher = crypto.createDecipheriv('aes-256-gcm', tuyaEncryptionKey(), iv);
+  decipher.setAuthTag(tag);
+  return Buffer.concat([decipher.update(encrypted), decipher.final()]).toString('utf8');
+}
+
+function tuyaEndpoint(endpoint) {
+  const url = new URL(String(endpoint || 'https://openapi.tuyaus.com'));
+  if (url.protocol !== 'https:' || !/^openapi(?:-[a-z0-9]+)?\.tuya(?:us|eu|cn|in)?\.com$/i.test(url.hostname)) throw new Error('El endpoint Tuya no es valido');
+  return url.origin;
+}
+
+async function tuyaConfiguration(userId) {
+  if (userId) {
+    const [rows] = await database().execute('SELECT client_id AS clientId, secret_ciphertext AS secretCiphertext, endpoint, tuya_user_id AS tuyaUserId, reference_device_id AS referenceDeviceId FROM tuya_connections WHERE user_id = ? LIMIT 1', [userId]);
+    if (rows[0]) return { ...rows[0], clientSecret: decryptTuyaSecret(rows[0].secretCiphertext), endpoint: tuyaEndpoint(rows[0].endpoint) };
+  }
+  const clientId = process.env.TUYA_CLIENT_ID || process.env.TUYA_ACCESS_ID;
+  const clientSecret = process.env.TUYA_CLIENT_SECRET || process.env.TUYA_ACCESS_SECRET;
+  if (!clientId || !clientSecret) throw new Error('Tuya no esta configurado en el servidor');
+  return { clientId, clientSecret, endpoint: tuyaEndpoint(process.env.TUYA_ENDPOINT), tuyaUserId: String(process.env.TUYA_USER_ID || '').trim(), referenceDeviceId: String(process.env.TUYA_REFERENCE_DEVICE_ID || '').trim() };
+}
+
+function tuyaHttp(method, endpoint, pathName, headers, bodyText = '') {
+  return new Promise((resolve, reject) => {
+    const target = new URL(`${endpoint}${pathName}`);
+    const request = https.request({ hostname: target.hostname, port: 443, path: `${target.pathname}${target.search}`, method, headers: { ...headers, ...(bodyText ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(bodyText) } : {}) }, timeout: 15000 }, (response) => {
+      let raw = '';
+      response.setEncoding('utf8');
+      response.on('data', (chunk) => { raw += chunk; });
+      response.on('end', () => {
+        try { resolve(JSON.parse(raw)); } catch { reject(new Error('Respuesta invalida de Tuya')); }
+      });
+    });
+    request.on('timeout', () => request.destroy(new Error('Tuya no respondio a tiempo')));
+    request.on('error', reject);
+    request.end(bodyText);
+  });
+}
+
+function tuyaSignature(config, token, timestamp, method, pathName, bodyText = '') {
+  const stringToSign = `${method}\n${crypto.createHash('sha256').update(bodyText).digest('hex')}\n\n${pathName}`;
+  const source = token ? `${config.clientId}${token}${timestamp}${stringToSign}` : `${config.clientId}${timestamp}${stringToSign}`;
+  return crypto.createHmac('sha256', config.clientSecret).update(source).digest('hex').toUpperCase();
+}
+
+async function tuyaToken(userId) {
+  const config = await tuyaConfiguration(userId);
+  const tokenKey = String(userId || `environment:${config.clientId}`);
+  const cached = tuyaTokens.get(tokenKey);
+  if (cached && Date.now() < cached.expiresAt) return { config, token: cached.token };
+  const pathName = '/v1.0/token?grant_type=1';
+  const timestamp = String(Date.now());
+  const response = await tuyaHttp('GET', config.endpoint, pathName, { client_id: config.clientId, t: timestamp, sign: tuyaSignature(config, null, timestamp, 'GET', pathName), sign_method: 'HMAC-SHA256' });
+  if (!response.success || !response.result?.access_token) throw new Error(response.msg || 'No fue posible autenticar con Tuya');
+  const token = response.result.access_token;
+  tuyaTokens.set(tokenKey, { token, expiresAt: Date.now() + Math.max(60000, (Number(response.result.expire_time) - 60) * 1000) });
+  return { config, token };
+}
+
+async function tuyaRequest(userId, method, pathName, body) {
+  const { config, token } = await tuyaToken(userId);
+  const bodyText = body ? JSON.stringify(body) : '';
+  const timestamp = String(Date.now());
+  const response = await tuyaHttp(method, config.endpoint, pathName, { client_id: config.clientId, access_token: token, t: timestamp, sign: tuyaSignature(config, token, timestamp, method, pathName, bodyText), sign_method: 'HMAC-SHA256' }, bodyText);
+  if (!response.success) {
+    if ([1010, 1011, 28841105].includes(Number(response.code))) tuyaTokens.delete(String(userId || `environment:${config.clientId}`));
+    throw new Error(response.msg || 'Tuya rechazo la solicitud');
+  }
+  return response.result;
+}
+
+async function tuyaAccountDevices(ownerId) {
+  const config = await tuyaConfiguration(ownerId);
+  if (config.tuyaUserId) return tuyaRequest(ownerId, 'GET', `/v1.0/users/${encodeURIComponent(config.tuyaUserId)}/devices`);
+  const referenceId = String(config.referenceDeviceId || '').trim();
+  if (referenceId) {
+    const reference = await tuyaRequest(ownerId, 'GET', `/v1.0/devices/${encodeURIComponent(referenceId)}`);
+    if (reference?.uid) return tuyaRequest(ownerId, 'GET', `/v1.0/users/${encodeURIComponent(reference.uid)}/devices`);
+  }
+  const result = await tuyaRequest(ownerId, 'GET', '/v2.0/cloud/thing/device?page_no=1&page_size=100');
+  return result?.list || result || [];
+}
+
+function tuyaFunctions(capabilities) {
+  const values = typeof capabilities === 'string' ? JSON.parse(capabilities || '[]') : capabilities;
+  return Array.isArray(values) ? values : [];
+}
+
+function validateTuyaCommand(device, command, payload) {
+  if (command !== 'tuya.set' || !payload || typeof payload.code !== 'string' || !Object.hasOwn(payload, 'value')) throw new Error('Usa tuya.set con code y value');
+  if (!tuyaFunctions(device.capabilities).some((item) => item.code === payload.code)) throw new Error('La funcion Tuya no pertenece a este dispositivo');
+}
+
+async function dispatchDeviceCommand(db, device, command, payload) {
+  if (device.provider !== 'tuya') {
+    const [result] = await db.execute('INSERT INTO commands (device_id, command_name, payload) VALUES (?, ?, ?)', [device.id, command, JSON.stringify(payload)]);
+    return { id: result.insertId, status: 'queued' };
+  }
+  validateTuyaCommand(device, command, payload);
+  const [result] = await db.execute("INSERT INTO commands (device_id, command_name, payload, status) VALUES (?, ?, ?, 'running')", [device.id, command, JSON.stringify(payload)]);
+  try {
+    await tuyaRequest(device.userId, 'POST', `/v1.0/devices/${encodeURIComponent(device.device_id)}/commands`, { commands: [{ code: payload.code, value: payload.value }] });
+    await db.execute("UPDATE commands SET status = 'succeeded' WHERE id = ?", [result.insertId]);
+    return { id: result.insertId, status: 'succeeded' };
+  } catch (error) {
+    await db.execute("UPDATE commands SET status = 'failed', error_message = ? WHERE id = ?", [String(error.message).slice(0, 500), result.insertId]);
+    throw error;
+  }
+}
+
+async function syncTuyaDevice(db, device) {
+  const status = await tuyaRequest(device.userId, 'GET', `/v1.0/devices/${encodeURIComponent(device.device_id)}/status`);
+  const payload = { provider: 'tuya', status: Array.isArray(status) ? Object.fromEntries(status.map((item) => [item.code, item.value])) : status };
+  await db.execute('INSERT INTO telemetry (device_id, payload) VALUES (?, ?)', [device.id, JSON.stringify(payload)]);
+  await db.execute("UPDATE devices SET status = 'online', last_seen = NOW() WHERE id = ?", [device.id]);
+  return payload;
+}
+
 app.use(cookieSession({
   name: 'pulsegrid.sid',
   keys: [process.env.SESSION_SECRET || 'replace-this-in-hostinger'],
@@ -194,7 +334,10 @@ async function ensureSchema() {
     const db = database();
     await db.execute("CREATE TABLE IF NOT EXISTS users (id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY, name VARCHAR(120) NOT NULL, email VARCHAR(190) NOT NULL UNIQUE, password_hash VARCHAR(255) NOT NULL, role ENUM('admin','operator','viewer') NOT NULL DEFAULT 'viewer', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP) ENGINE=InnoDB");
     await db.execute("CREATE TABLE IF NOT EXISTS api_keys (id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY, user_id INT UNSIGNED NOT NULL UNIQUE, key_hash CHAR(64) NOT NULL UNIQUE, key_hint VARCHAR(16) NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, last_used_at TIMESTAMP NULL, CONSTRAINT api_keys_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE) ENGINE=InnoDB");
-    await db.execute("CREATE TABLE IF NOT EXISTS devices (id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY, user_id INT UNSIGNED NOT NULL, device_id VARCHAR(80) NOT NULL, name VARCHAR(120) NOT NULL, type VARCHAR(60) NOT NULL, status ENUM('online','offline') NOT NULL DEFAULT 'offline', last_seen TIMESTAMP NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, UNIQUE KEY user_device (user_id, device_id), CONSTRAINT devices_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE) ENGINE=InnoDB");
+    await db.execute("CREATE TABLE IF NOT EXISTS devices (id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY, user_id INT UNSIGNED NOT NULL, device_id VARCHAR(80) NOT NULL, name VARCHAR(120) NOT NULL, type VARCHAR(60) NOT NULL, provider VARCHAR(20) NOT NULL DEFAULT 'pulsegrid', capabilities JSON NULL, status ENUM('online','offline') NOT NULL DEFAULT 'offline', last_seen TIMESTAMP NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, UNIQUE KEY user_device (user_id, device_id), CONSTRAINT devices_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE) ENGINE=InnoDB");
+    try { await db.execute("ALTER TABLE devices ADD COLUMN provider VARCHAR(20) NOT NULL DEFAULT 'pulsegrid' AFTER type"); } catch (error) { if (error.code !== 'ER_DUP_FIELDNAME') throw error; }
+    try { await db.execute('ALTER TABLE devices ADD COLUMN capabilities JSON NULL AFTER provider'); } catch (error) { if (error.code !== 'ER_DUP_FIELDNAME') throw error; }
+    await db.execute("CREATE TABLE IF NOT EXISTS tuya_connections (user_id INT UNSIGNED PRIMARY KEY, client_id VARCHAR(120) NOT NULL, secret_ciphertext TEXT NOT NULL, endpoint VARCHAR(160) NOT NULL, tuya_user_id VARCHAR(120) NULL, reference_device_id VARCHAR(120) NULL, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, CONSTRAINT tuya_connections_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE) ENGINE=InnoDB");
     await db.execute("CREATE TABLE IF NOT EXISTS telemetry (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, device_id INT UNSIGNED NOT NULL, payload JSON NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, INDEX telemetry_device (device_id), CONSTRAINT telemetry_device_fk FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE) ENGINE=InnoDB");
     await db.execute("CREATE TABLE IF NOT EXISTS commands (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, device_id INT UNSIGNED NOT NULL, command_name VARCHAR(80) NOT NULL, payload JSON NOT NULL, status VARCHAR(30) NOT NULL DEFAULT 'queued', error_message VARCHAR(500) NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, CONSTRAINT commands_device_fk FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE) ENGINE=InnoDB");
     try { await db.execute('ALTER TABLE commands ADD COLUMN error_message VARCHAR(500) NULL'); } catch (error) { if (error.code !== 'ER_DUP_FIELDNAME') throw error; }
@@ -202,6 +345,8 @@ async function ensureSchema() {
     try { await db.execute('ALTER TABLE automations ADD COLUMN timezone VARCHAR(64) NULL AFTER trigger_time'); } catch (error) { if (error.code !== 'ER_DUP_FIELDNAME') throw error; }
     try { await db.execute("ALTER TABLE automations ADD COLUMN weekdays VARCHAR(13) NOT NULL DEFAULT '0,1,2,3,4,5,6' AFTER timezone"); } catch (error) { if (error.code !== 'ER_DUP_FIELDNAME') throw error; }
     try { await db.execute('ALTER TABLE automations ADD COLUMN last_run_date CHAR(10) NULL AFTER last_run_at'); } catch (error) { if (error.code !== 'ER_DUP_FIELDNAME') throw error; }
+    try { await db.execute('ALTER TABLE automations ADD COLUMN command_name VARCHAR(80) NULL AFTER action_name'); } catch (error) { if (error.code !== 'ER_DUP_FIELDNAME') throw error; }
+    try { await db.execute('ALTER TABLE automations ADD COLUMN command_payload JSON NULL AFTER command_name'); } catch (error) { if (error.code !== 'ER_DUP_FIELDNAME') throw error; }
     await db.execute("CREATE TABLE IF NOT EXISTS firmware_releases (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, user_id INT UNSIGNED NOT NULL, version VARCHAR(40) NOT NULL, notes VARCHAR(280) NOT NULL DEFAULT '', is_active TINYINT(1) NOT NULL DEFAULT 0, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, UNIQUE KEY firmware_user_version (user_id, version), INDEX firmware_active (user_id, is_active), CONSTRAINT firmware_releases_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE) ENGINE=InnoDB");
     try { await db.execute("ALTER TABLE firmware_releases ADD COLUMN notes VARCHAR(280) NOT NULL DEFAULT ''"); } catch (error) { if (error.code !== 'ER_DUP_FIELDNAME') throw error; }
     await db.execute("CREATE TABLE IF NOT EXISTS firmware_files (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, release_id BIGINT UNSIGNED NOT NULL, name VARCHAR(80) NOT NULL, content MEDIUMBLOB NOT NULL, sha256 CHAR(64) NOT NULL, UNIQUE KEY firmware_release_file (release_id, name), CONSTRAINT firmware_files_release_fk FOREIGN KEY (release_id) REFERENCES firmware_releases(id) ON DELETE CASCADE) ENGINE=InnoDB");
@@ -274,7 +419,7 @@ app.post('/api/api-key', requireSession, apiReady, async (request, response) => 
 
 app.get('/api/devices', apiReady, async (request, response) => {
   if (!request.session.user) return fail(response, 401, 'Authentication required');
-  const [rows] = await database().execute("SELECT devices.device_id AS id, devices.name, devices.type, CASE WHEN devices.last_seen IS NOT NULL AND devices.last_seen >= DATE_SUB(NOW(), INTERVAL 90 SECOND) THEN 'online' ELSE 'offline' END AS status, devices.last_seen AS report, (SELECT telemetry.payload FROM telemetry WHERE telemetry.device_id = devices.id ORDER BY telemetry.id DESC LIMIT 1) AS telemetry FROM devices WHERE devices.user_id = (SELECT id FROM users WHERE email = ?) ORDER BY devices.created_at DESC", [request.session.user.email]);
+  const [rows] = await database().execute("SELECT devices.device_id AS id, devices.name, devices.type, devices.provider, devices.capabilities, CASE WHEN devices.provider = 'tuya' THEN devices.status WHEN devices.last_seen IS NOT NULL AND devices.last_seen >= DATE_SUB(NOW(), INTERVAL 90 SECOND) THEN 'online' ELSE 'offline' END AS status, devices.last_seen AS report, (SELECT telemetry.payload FROM telemetry WHERE telemetry.device_id = devices.id ORDER BY telemetry.id DESC LIMIT 1) AS telemetry FROM devices WHERE devices.user_id = (SELECT id FROM users WHERE email = ?) ORDER BY devices.created_at DESC", [request.session.user.email]);
   response.json({ devices: rows });
 });
 
@@ -294,11 +439,67 @@ app.delete('/api/devices/:deviceId', requireSession, apiReady, async (request, r
   response.json({ ok: true });
 });
 
+app.get('/api/integrations/tuya/config', requireSession, apiReady, async (request, response) => {
+  const [rows] = await database().execute('SELECT client_id AS clientId, endpoint, tuya_user_id AS tuyaUserId, reference_device_id AS referenceDeviceId FROM tuya_connections WHERE user_id = (SELECT id FROM users WHERE email = ?) LIMIT 1', [request.session.user.email]);
+  const config = rows[0];
+  response.json({ configured: Boolean(config), config: config ? { clientIdHint: `${config.clientId.slice(0, 6)}...${config.clientId.slice(-4)}`, endpoint: config.endpoint, tuyaUserId: config.tuyaUserId || '', referenceDeviceId: config.referenceDeviceId || '' } : null });
+});
+
+app.post('/api/integrations/tuya/config', requireSession, apiReady, async (request, response) => {
+  try {
+    const clientIdInput = String(request.body?.clientId || '').trim();
+    const clientSecret = String(request.body?.clientSecret || '').trim();
+    const endpoint = tuyaEndpoint(request.body?.endpoint);
+    const tuyaUserId = String(request.body?.tuyaUserId || '').trim();
+    const referenceDeviceId = String(request.body?.referenceDeviceId || '').trim();
+    if ((tuyaUserId && referenceDeviceId) || (!tuyaUserId && !referenceDeviceId)) throw new Error('Indica un usuario o dispositivo de referencia Tuya');
+    const userId = await sessionUserId(request.session.user.email);
+    const [existing] = await database().execute('SELECT client_id AS clientId, secret_ciphertext AS secretCiphertext FROM tuya_connections WHERE user_id = ? LIMIT 1', [userId]);
+    const clientId = clientIdInput || existing[0]?.clientId;
+    if (!clientId || clientId.length > 120) throw new Error('Client ID es obligatorio');
+    if (!clientSecret && !existing[0]) throw new Error('Client Secret es obligatorio al crear la conexion');
+    await database().execute('INSERT INTO tuya_connections (user_id, client_id, secret_ciphertext, endpoint, tuya_user_id, reference_device_id) VALUES (?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE client_id = VALUES(client_id), secret_ciphertext = VALUES(secret_ciphertext), endpoint = VALUES(endpoint), tuya_user_id = VALUES(tuya_user_id), reference_device_id = VALUES(reference_device_id)', [userId, clientId, clientSecret ? encryptTuyaSecret(clientSecret) : existing[0].secretCiphertext, endpoint, tuyaUserId || null, referenceDeviceId || null]);
+    tuyaTokens.delete(String(userId));
+    response.json({ ok: true });
+  } catch (error) { fail(response, 422, error.message); }
+});
+
+app.get('/api/integrations/tuya/devices', requireSession, apiReady, async (request, response) => {
+  try {
+    const devices = await tuyaAccountDevices(await sessionUserId(request.session.user.email));
+    response.json({ devices: devices.map((device) => ({ id: device.id, name: device.name || device.product_name || device.id, type: device.category || device.product_name || 'Tuya', online: Boolean(device.online) })) });
+  } catch (error) { fail(response, 503, error.message); }
+});
+
+app.post('/api/integrations/tuya/import', requireSession, apiReady, async (request, response) => {
+  const requestedIds = Array.isArray(request.body?.deviceIds) ? [...new Set(request.body.deviceIds.map(String))] : [];
+  if (!requestedIds.length) return fail(response, 422, 'Selecciona al menos un dispositivo Tuya');
+  try {
+    const userId = await sessionUserId(request.session.user.email);
+    const accountDevices = await tuyaAccountDevices(userId);
+    const selected = accountDevices.filter((device) => requestedIds.includes(String(device.id)));
+    if (!selected.length) return fail(response, 404, 'Los dispositivos ya no estan disponibles en Tuya');
+    const db = database();
+    for (const device of selected) {
+      const functions = await tuyaRequest(userId, 'GET', `/v1.0/devices/${encodeURIComponent(device.id)}/functions`);
+      const capabilities = (functions?.functions || []).map(({ code, name, desc, type, values }) => ({ code, name: name || desc || code, type, values }));
+      await db.execute("INSERT INTO devices (user_id, device_id, name, type, provider, capabilities, status, last_seen) VALUES ((SELECT id FROM users WHERE email = ?), ?, ?, ?, 'tuya', ?, ?, NOW()) ON DUPLICATE KEY UPDATE name = VALUES(name), type = VALUES(type), provider = 'tuya', capabilities = VALUES(capabilities), status = VALUES(status), last_seen = NOW()", [request.session.user.email, String(device.id), String(device.name || device.product_name || device.id).slice(0, 120), String(device.category || device.product_name || 'Tuya').slice(0, 60), JSON.stringify(capabilities), device.online ? 'online' : 'offline']);
+    }
+    response.status(201).json({ ok: true, imported: selected.length });
+  } catch (error) { fail(response, 503, error.message); }
+});
+
 app.get('/api/telemetry', requireSession, apiReady, async (request, response) => {
   const deviceId = String(request.query.deviceId || '').trim();
   const limit = Math.min(Math.max(Number.parseInt(request.query.limit, 10) || 30, 1), 100);
   if (!deviceId) return fail(response, 422, 'deviceId es obligatorio');
-  const [rows] = await database().execute('SELECT telemetry.payload, telemetry.created_at AS createdAt FROM telemetry JOIN devices ON devices.id = telemetry.device_id WHERE devices.user_id = (SELECT id FROM users WHERE email = ?) AND devices.device_id = ? ORDER BY telemetry.id DESC LIMIT ?', [request.session.user.email, deviceId, limit]);
+  const db = database();
+  const [devices] = await db.execute('SELECT id, user_id AS userId, device_id, provider FROM devices WHERE user_id = (SELECT id FROM users WHERE email = ?) AND device_id = ? LIMIT 1', [request.session.user.email, deviceId]);
+  if (!devices[0]) return fail(response, 404, 'Dispositivo no encontrado');
+  if (devices[0].provider === 'tuya' && request.query.refresh !== 'false') {
+    try { await syncTuyaDevice(db, devices[0]); } catch (error) { return fail(response, 503, error.message); }
+  }
+  const [rows] = await db.execute('SELECT telemetry.payload, telemetry.created_at AS createdAt FROM telemetry WHERE telemetry.device_id = ? ORDER BY telemetry.id DESC LIMIT ?', [devices[0].id, limit]);
   response.json({ telemetry: rows.map((row) => ({ ...row, payload: typeof row.payload === 'string' ? JSON.parse(row.payload) : row.payload })) });
 });
 
@@ -349,10 +550,12 @@ app.post('/api/commands', requireSession, apiReady, async (request, response) =>
   const { deviceId, command, payload = {} } = request.body || {};
   if (!deviceId || !command || typeof command !== 'string' || !payload || typeof payload !== 'object' || Array.isArray(payload)) return fail(response, 422, 'Device ID, comando y payload JSON son obligatorios');
   const db = database();
-  const [devices] = await db.execute('SELECT id FROM devices WHERE user_id = (SELECT id FROM users WHERE email = ?) AND device_id = ? LIMIT 1', [request.session.user.email, String(deviceId).trim()]);
+  const [devices] = await db.execute('SELECT id, user_id AS userId, device_id, provider, capabilities FROM devices WHERE user_id = (SELECT id FROM users WHERE email = ?) AND device_id = ? LIMIT 1', [request.session.user.email, String(deviceId).trim()]);
   if (!devices[0]) return fail(response, 404, 'Dispositivo no encontrado');
-  const [result] = await db.execute('INSERT INTO commands (device_id, command_name, payload) VALUES (?, ?, ?)', [devices[0].id, command.trim(), JSON.stringify(payload)]);
-  response.status(201).json({ ok: true, commandId: result.insertId, status: 'queued' });
+  try {
+    const result = await dispatchDeviceCommand(db, devices[0], command.trim(), payload);
+    response.status(201).json({ ok: true, commandId: result.id, status: result.status });
+  } catch (error) { fail(response, 422, error.message); }
 });
 
 app.get('/api/commands', requireSession, apiReady, async (request, response) => {
@@ -363,17 +566,18 @@ app.get('/api/commands', requireSession, apiReady, async (request, response) => 
 app.get('/api/automations', requireSession, apiReady, async (request, response) => {
   const timezone = request.query.timezone ? automationTimezone(request.query.timezone) : null;
   if (timezone) await database().execute('UPDATE automations SET timezone = ? WHERE user_id = (SELECT id FROM users WHERE email = ?) AND timezone IS NULL', [timezone, request.session.user.email]);
-  const [rows] = await database().execute('SELECT automations.id, automations.name, devices.device_id AS deviceId, devices.name AS deviceName, automations.trigger_time AS triggerTime, automations.timezone, automations.weekdays, automations.action_name AS action, automations.position, automations.enabled, automations.last_run_at AS lastRunAt FROM automations JOIN devices ON devices.id = automations.device_id WHERE automations.user_id = (SELECT id FROM users WHERE email = ?) ORDER BY automations.trigger_time, automations.id', [request.session.user.email]);
-  response.json({ automations: rows.map((rule) => ({ ...rule, weekdays: String(rule.weekdays).split(',').map(Number) })) });
+  const [rows] = await database().execute('SELECT automations.id, automations.name, devices.device_id AS deviceId, devices.name AS deviceName, devices.provider, devices.capabilities, automations.trigger_time AS triggerTime, automations.timezone, automations.weekdays, automations.action_name AS action, automations.position, automations.command_name AS commandName, automations.command_payload AS commandPayload, automations.enabled, automations.last_run_at AS lastRunAt FROM automations JOIN devices ON devices.id = automations.device_id WHERE automations.user_id = (SELECT id FROM users WHERE email = ?) ORDER BY automations.trigger_time, automations.id', [request.session.user.email]);
+  response.json({ automations: rows.map((rule) => ({ ...rule, commandPayload: typeof rule.commandPayload === 'string' ? JSON.parse(rule.commandPayload) : rule.commandPayload, weekdays: String(rule.weekdays).split(',').map(Number) })) });
 });
 
 app.post('/api/automations', requireSession, apiReady, async (request, response) => {
   try {
     const rule = automationInput(request.body);
     const db = database();
-    const [devices] = await db.execute('SELECT id FROM devices WHERE user_id = (SELECT id FROM users WHERE email = ?) AND device_id = ? LIMIT 1', [request.session.user.email, rule.deviceId]);
+    const [devices] = await db.execute('SELECT id, user_id AS userId, provider, capabilities FROM devices WHERE user_id = (SELECT id FROM users WHERE email = ?) AND device_id = ? LIMIT 1', [request.session.user.email, rule.deviceId]);
     if (!devices[0]) return fail(response, 404, 'Dispositivo no encontrado');
-    const [result] = await db.execute('INSERT INTO automations (user_id, device_id, name, trigger_time, timezone, weekdays, action_name, position) VALUES ((SELECT id FROM users WHERE email = ?), ?, ?, ?, ?, ?, ?, ?)', [request.session.user.email, devices[0].id, rule.name, rule.triggerTime, rule.timezone, rule.weekdays.join(','), rule.action, rule.position]);
+    if (rule.commandName) validateTuyaCommand(devices[0], rule.commandName, rule.commandPayload);
+    const [result] = await db.execute('INSERT INTO automations (user_id, device_id, name, trigger_time, timezone, weekdays, action_name, position, command_name, command_payload) VALUES ((SELECT id FROM users WHERE email = ?), ?, ?, ?, ?, ?, ?, ?, ?, ?)', [request.session.user.email, devices[0].id, rule.name, rule.triggerTime, rule.timezone, rule.weekdays.join(','), rule.action, rule.position, rule.commandName, rule.commandPayload ? JSON.stringify(rule.commandPayload) : null]);
     response.status(201).json({ ok: true, id: result.insertId });
   } catch (error) {
     fail(response, 422, error.message);
@@ -390,9 +594,10 @@ app.patch('/api/automations/:id', requireSession, apiReady, async (request, resp
       return response.json({ ok: true });
     }
     const rule = automationInput(body);
-    const [devices] = await db.execute('SELECT id FROM devices WHERE user_id = (SELECT id FROM users WHERE email = ?) AND device_id = ? LIMIT 1', [request.session.user.email, rule.deviceId]);
+    const [devices] = await db.execute('SELECT id, user_id AS userId, provider, capabilities FROM devices WHERE user_id = (SELECT id FROM users WHERE email = ?) AND device_id = ? LIMIT 1', [request.session.user.email, rule.deviceId]);
     if (!devices[0]) return fail(response, 404, 'Dispositivo no encontrado');
-    const [result] = await db.execute('UPDATE automations SET device_id = ?, name = ?, trigger_time = ?, timezone = ?, weekdays = ?, action_name = ?, position = ?, last_run_at = NULL, last_run_date = NULL WHERE id = ? AND user_id = (SELECT id FROM users WHERE email = ?)', [devices[0].id, rule.name, rule.triggerTime, rule.timezone, rule.weekdays.join(','), rule.action, rule.position, request.params.id, request.session.user.email]);
+    if (rule.commandName) validateTuyaCommand(devices[0], rule.commandName, rule.commandPayload);
+    const [result] = await db.execute('UPDATE automations SET device_id = ?, name = ?, trigger_time = ?, timezone = ?, weekdays = ?, action_name = ?, position = ?, command_name = ?, command_payload = ?, last_run_at = NULL, last_run_date = NULL WHERE id = ? AND user_id = (SELECT id FROM users WHERE email = ?)', [devices[0].id, rule.name, rule.triggerTime, rule.timezone, rule.weekdays.join(','), rule.action, rule.position, rule.commandName, rule.commandPayload ? JSON.stringify(rule.commandPayload) : null, request.params.id, request.session.user.email]);
     if (!result.affectedRows) return fail(response, 404, 'Automatizacion no encontrada');
     response.json({ ok: true });
   } catch (error) {
