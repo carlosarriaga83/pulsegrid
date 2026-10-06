@@ -467,7 +467,7 @@ app.post('/api/integrations/tuya/config', requireSession, apiReady, async (reque
 app.get('/api/integrations/tuya/devices', requireSession, apiReady, async (request, response) => {
   try {
     const devices = await tuyaAccountDevices(await sessionUserId(request.session.user.email));
-    response.json({ devices: devices.map((device) => ({ id: device.id, name: device.name || device.product_name || device.id, type: device.category || device.product_name || 'Tuya', online: Boolean(device.online) })) });
+    response.json({ devices: devices.map((device) => ({ id: device.id, name: device.name || device.product_name || device.id, type: device.category || 'Tuya', productName: device.product_name || '', online: Boolean(device.online) })) });
   } catch (error) { fail(response, 503, error.message); }
 });
 
@@ -480,12 +480,19 @@ app.post('/api/integrations/tuya/import', requireSession, apiReady, async (reque
     const selected = accountDevices.filter((device) => requestedIds.includes(String(device.id)));
     if (!selected.length) return fail(response, 404, 'Los dispositivos ya no estan disponibles en Tuya');
     const db = database();
+    let limitedControls = 0;
     for (const device of selected) {
-      const functions = await tuyaRequest(userId, 'GET', `/v1.0/devices/${encodeURIComponent(device.id)}/functions`);
-      const capabilities = (functions?.functions || []).map(({ code, name, desc, type, values }) => ({ code, name: name || desc || code, type, values }));
+      let capabilities = [];
+      try {
+        const functions = await tuyaRequest(userId, 'GET', `/v1.0/devices/${encodeURIComponent(device.id)}/functions`);
+        capabilities = (functions?.functions || []).map(({ code, name, desc, type, values }) => ({ code, name: name || desc || code, type, values }));
+      } catch (error) {
+        limitedControls += 1;
+        console.warn(`Tuya functions unavailable for ${device.id}: ${error.message}`);
+      }
       await db.execute("INSERT INTO devices (user_id, device_id, name, type, provider, capabilities, status, last_seen) VALUES ((SELECT id FROM users WHERE email = ?), ?, ?, ?, 'tuya', ?, ?, NOW()) ON DUPLICATE KEY UPDATE name = VALUES(name), type = VALUES(type), provider = 'tuya', capabilities = VALUES(capabilities), status = VALUES(status), last_seen = NOW()", [request.session.user.email, String(device.id), String(device.name || device.product_name || device.id).slice(0, 120), String(device.category || device.product_name || 'Tuya').slice(0, 60), JSON.stringify(capabilities), device.online ? 'online' : 'offline']);
     }
-    response.status(201).json({ ok: true, imported: selected.length });
+    response.status(201).json({ ok: true, imported: selected.length, limitedControls });
   } catch (error) { fail(response, 503, error.message); }
 });
 

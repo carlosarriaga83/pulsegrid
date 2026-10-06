@@ -204,8 +204,9 @@ function populateAutomationActions() {
   const device = devices.find((item) => item.id === $('#automation-device')?.value);
   if (!action) return;
   const selected = action.value;
-  const tuyaActions = device?.provider === 'tuya' ? tuyaCommandOptions(device) : [];
-  action.innerHTML = tuyaActions.length ? tuyaActions.map((item) => `<option value="${escapeTelemetryHtml(item.value)}">${escapeTelemetryHtml(item.label)}</option>`).join('') : '<option value="open">Abrir cortina</option><option value="close">Cerrar cortina</option><option value="position">Mover cortina a una posicion</option>';
+  const isTuyaDevice = device?.provider === 'tuya';
+  const tuyaActions = isTuyaDevice ? tuyaCommandOptions(device) : [];
+  action.innerHTML = tuyaActions.length ? tuyaActions.map((item) => `<option value="${escapeTelemetryHtml(item.value)}">${escapeTelemetryHtml(item.label)}</option>`).join('') : isTuyaDevice ? '<option value="">Tuya no expone acciones programables</option>' : '<option value="open">Abrir cortina</option><option value="close">Cerrar cortina</option><option value="position">Mover cortina a una posicion</option>';
   action.value = [...action.options].some((item) => item.value === selected) ? selected : action.options[0]?.value || '';
 }
 
@@ -258,6 +259,7 @@ function setupAutomationsView() {
     const status = $('#automation-status');
     const editingId = form.dataset.editingId;
     const choice = action.value;
+    if (!choice) { status.textContent = 'Tuya no expone acciones programables para este dispositivo.'; return; }
     const tuyaAction = tuyaCommandOptions(devices.find((item) => item.id === $('#automation-device').value)).find((item) => item.value === choice);
     const body = { name: $('#automation-name').value.trim(), deviceId: $('#automation-device').value, triggerTime: $('#automation-time').value, weekdays: selectedAutomationWeekdays(), action: tuyaAction ? 'open' : choice, position: Number($('#automation-position').value), commandName: tuyaAction ? 'tuya.set' : null, commandPayload: tuyaAction?.payload || null, timezone: form.dataset.editingTimezone || automationTimezone() };
     try { await apiRequest(editingId ? `automations/${editingId}` : 'automations', { method: editingId ? 'PATCH' : 'POST', body: JSON.stringify(body) }); resetForm(); status.textContent = editingId ? 'Automation actualizada.' : 'Automation creada y lista para ejecutarse.'; await loadAutomations(); showToast(editingId ? 'Automation actualizada' : 'Automation creada'); }
@@ -733,19 +735,36 @@ async function openTuyaSettings() {
 async function openTuyaImport() {
   try {
     const result = await apiRequest('integrations/tuya/devices');
+    const typeLabel = (device) => device.productName || device.type || 'Dispositivo Tuya';
     const modal = document.createElement('div');
     modal.className = 'modal-backdrop open';
-    modal.innerHTML = `<div class="modal"><button class="modal-close" aria-label="Cerrar"><i data-lucide="x"></i></button><div class="modal-icon"><i data-lucide="cloud"></i></div><p class="eyebrow">TUYA CLOUD</p><h2>Importar dispositivos</h2><p class="modal-copy">Elige los dispositivos vinculados a tu proyecto Tuya.</p><form id="tuya-import-form"><div style="display:grid;gap:8px;max-height:280px;overflow:auto">${result.devices.length ? result.devices.map((device) => `<label class="switch-row"><input type="checkbox" name="tuya-device" value="${escapeTelemetryHtml(device.id)}"><span><strong>${escapeTelemetryHtml(device.name)}</strong><small>${escapeTelemetryHtml(device.type)} · ${device.online ? 'En linea' : 'Fuera de linea'}</small></span></label>`).join('') : '<p class="empty-state">No hay dispositivos disponibles en esta cuenta Tuya.</p>'}</div><div class="modal-actions"><button type="button" class="secondary-button modal-cancel">Cancelar</button><button class="primary-button" type="submit"${result.devices.length ? '' : ' disabled'}><i data-lucide="download-cloud"></i> Importar seleccionados</button></div></form></div>`;
+    modal.innerHTML = `<div class="modal tuya-import-modal"><button class="modal-close" aria-label="Cerrar"><i data-lucide="x"></i></button><div class="modal-icon"><i data-lucide="cloud"></i></div><p class="eyebrow">TUYA CLOUD</p><h2>Importar dispositivos</h2><p class="modal-copy">Selecciona los equipos que quieres sumar a Pulsegrid.</p><form id="tuya-import-form"><div class="tuya-import-tools"><label class="search-box"><i data-lucide="search"></i><input id="tuya-device-search" placeholder="Buscar por nombre o tipo" autocomplete="off"></label><button class="text-button" type="button" id="tuya-select-visible">Seleccionar visibles</button></div><div class="tuya-import-summary"><span id="tuya-selection-count">0 seleccionados</span><span>${result.devices.filter((device) => device.online).length} en linea · ${result.devices.length} disponibles</span></div><div class="tuya-device-list">${result.devices.length ? result.devices.map((device) => `<label class="tuya-device-option" data-tunya-search="${escapeTelemetryHtml(`${device.name} ${typeLabel(device)} ${device.type}`.toLowerCase())}"><input type="checkbox" name="tuya-device" value="${escapeTelemetryHtml(device.id)}"><span class="tuya-device-icon"><i data-lucide="${device.online ? 'radio' : 'radio-tower'}"></i></span><span class="tuya-device-copy"><strong>${escapeTelemetryHtml(device.name)}</strong><small>${escapeTelemetryHtml(typeLabel(device))}</small><code>${escapeTelemetryHtml(device.id)}</code></span><span class="device-status ${device.online ? 'online' : 'offline'}"><i class="status-dot"></i>${device.online ? 'En linea' : 'Fuera de linea'}</span><i class="tuya-device-check" data-lucide="check"></i></label>`).join('') : '<p class="empty-state">No hay dispositivos disponibles en esta cuenta Tuya.</p>'}</div><div class="modal-actions"><button type="button" class="secondary-button modal-cancel">Cancelar</button><button class="primary-button" type="submit" id="tuya-import-submit" disabled><i data-lucide="download-cloud"></i> Importar 0 dispositivos</button></div></form></div>`;
     document.body.append(modal);
     const close = () => modal.remove();
     modal.querySelector('.modal-close').addEventListener('click', close);
     modal.querySelector('.modal-cancel').addEventListener('click', close);
     modal.addEventListener('click', (event) => { if (event.target === modal) close(); });
+    const checkboxes = () => $$('input[name="tuya-device"]', modal);
+    const refreshSelection = () => {
+      const selected = checkboxes().filter((input) => input.checked);
+      checkboxes().forEach((input) => input.closest('.tuya-device-option').classList.toggle('is-selected', input.checked));
+      modal.querySelector('#tuya-selection-count').textContent = `${selected.length} seleccionado${selected.length === 1 ? '' : 's'}`;
+      const submit = modal.querySelector('#tuya-import-submit');
+      submit.disabled = selected.length === 0;
+      submit.innerHTML = `<i data-lucide="download-cloud"></i> Importar ${selected.length || ''} dispositivo${selected.length === 1 ? '' : 's'}`;
+      renderIcons();
+    };
+    modal.querySelector('#tuya-device-search').addEventListener('input', (event) => {
+      const query = event.target.value.trim().toLowerCase();
+      $$('.tuya-device-option', modal).forEach((item) => { item.hidden = Boolean(query && !item.dataset.tunyaSearch.includes(query)); });
+    });
+    modal.querySelector('#tuya-select-visible').addEventListener('click', () => { $$('.tuya-device-option:not([hidden]) input', modal).forEach((input) => { input.checked = true; }); refreshSelection(); });
+    modal.querySelector('.tuya-device-list').addEventListener('change', refreshSelection);
     modal.querySelector('#tuya-import-form').addEventListener('submit', async (event) => {
       event.preventDefault();
       const deviceIds = $$('input[name="tuya-device"]:checked', modal).map((input) => input.value);
       if (!deviceIds.length) return showToast('Selecciona al menos un dispositivo Tuya');
-      try { const imported = await apiRequest('integrations/tuya/import', { method: 'POST', body: JSON.stringify({ deviceIds }) }); await loadDevices(); close(); showToast(`${imported.imported} dispositivo${imported.imported === 1 ? '' : 's'} Tuya importado${imported.imported === 1 ? '' : 's'}`); }
+      try { const imported = await apiRequest('integrations/tuya/import', { method: 'POST', body: JSON.stringify({ deviceIds }) }); await loadDevices(); close(); showToast(imported.limitedControls ? `${imported.imported} importados; ${imported.limitedControls} sin controles Tuya` : `${imported.imported} dispositivo${imported.imported === 1 ? '' : 's'} Tuya importado${imported.imported === 1 ? '' : 's'}`); }
       catch (error) { showToast(error.message); }
     });
     renderIcons();
@@ -1009,9 +1028,10 @@ function configureDeviceCommands() {
     'servo.resetTurns': { payload: { servoId: 1 }, help: 'servoId: 1 o 2. Reinicia el contador absoluto si no hay movimiento.' }
   };
   const selectedDevice = devices.find((device) => device.id === $('#command-device')?.value);
-  const tuyaCommands = selectedDevice?.provider === 'tuya' ? tuyaCommandOptions(selectedDevice) : [];
+  const isTuyaDevice = selectedDevice?.provider === 'tuya';
+  const tuyaCommands = isTuyaDevice ? tuyaCommandOptions(selectedDevice) : [];
   commandSelect.id = 'command-name';
-  commandSelect.innerHTML = tuyaCommands.length ? tuyaCommands.map((item) => `<option value="${escapeTelemetryHtml(item.value)}">${escapeTelemetryHtml(item.label)}</option>`).join('') : '<option value="curtain.open">Abrir cortina</option><option value="curtain.close">Cerrar cortina</option><option value="curtain.stop">Detener cortina</option><option value="curtain.move">Mover cortina</option><option value="servo.configure">Configurar servo</option><option value="blind.configure">Configurar extremos</option><option value="blind.markRolled">Marcar completamente enrollada</option><option value="blind.markDeployed">Marcar completamente desplegada</option><option value="blind.jog">Avanzar una vuelta</option><option value="motion.configure">Configurar movimiento</option><option value="servo.torque">Configurar torque</option><option value="servo.resetTurns">Reiniciar vueltas</option>';
+  commandSelect.innerHTML = tuyaCommands.length ? tuyaCommands.map((item) => `<option value="${escapeTelemetryHtml(item.value)}">${escapeTelemetryHtml(item.label)}</option>`).join('') : isTuyaDevice ? '<option value="">Tuya no expone controles para este equipo</option>' : '<option value="curtain.open">Abrir cortina</option><option value="curtain.close">Cerrar cortina</option><option value="curtain.stop">Detener cortina</option><option value="curtain.move">Mover cortina</option><option value="servo.configure">Configurar servo</option><option value="blind.configure">Configurar extremos</option><option value="blind.markRolled">Marcar completamente enrollada</option><option value="blind.markDeployed">Marcar completamente desplegada</option><option value="blind.jog">Avanzar una vuelta</option><option value="motion.configure">Configurar movimiento</option><option value="servo.torque">Configurar torque</option><option value="servo.resetTurns">Reiniciar vueltas</option>';
   payload.id = 'command-payload';
   let help = $('#command-payload-help');
   if (!help) {
@@ -1022,8 +1042,8 @@ function configureDeviceCommands() {
   }
   const applyCommandTemplate = () => {
     const definition = tuyaCommands.find((item) => item.value === commandSelect.value) || commands[commandSelect.value];
-    payload.value = JSON.stringify(definition.payload, null, 2);
-    help.textContent = definition.help || 'Funcion disponible desde Tuya Cloud.';
+    payload.value = JSON.stringify(definition?.payload || {}, null, 2);
+    help.textContent = definition?.help || (isTuyaDevice ? 'Tuya no expone controles para este equipo; la telemetria seguira disponible.' : '');
   };
   commandSelect.addEventListener('change', applyCommandTemplate);
   applyCommandTemplate();
@@ -1034,6 +1054,7 @@ $('#execute-command').addEventListener('click', async () => {
   const deviceId = $('#command-device').value;
   const commandChoice = $('#command-name').value;
   try {
+    if (!commandChoice) throw new Error('Tuya no expone controles para este dispositivo');
     const payload = JSON.parse($('#command-payload').value || '{}');
     const command = commandChoice.startsWith('tuya:') ? 'tuya.set' : commandChoice;
     await apiRequest('commands', { method: 'POST', body: JSON.stringify({ deviceId, command, payload }) });
