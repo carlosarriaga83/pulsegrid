@@ -158,8 +158,10 @@ function firmwareViewMarkup() {
 }
 
 function automationsViewMarkup() {
-  return `<section class="view" id="view-automations"><div class="page-heading"><div><p class="eyebrow">IF THIS, THEN THAT</p><h1>Automations<span class="accent-dot">.</span></h1><p class="heading-copy">Programa acciones repetibles para tus dispositivos desde la nube.</p></div></div><div class="automation-layout"><form class="panel automation-form" id="automation-form"><div class="panel-heading"><div><h2>Nueva regla</h2><p>Cuando llegue la hora, Pulsegrid pondra la accion en la cola del dispositivo.</p></div><span class="secure-badge"><i data-lucide="workflow"></i> IFTTT</span></div><label>Nombre<input id="automation-name" maxlength="120" required placeholder="Abrir persiana por la manana"></label><label>Dispositivo<select id="automation-device" required><option value="">Selecciona un dispositivo</option></select></label><div class="automation-fields"><label>Cuando<select id="automation-trigger"><option value="daily">Todos los dias a una hora</option></select></label><label>Hora<input id="automation-time" type="time" required></label></div><label>Entonces<select id="automation-action"><option value="open">Abrir cortina</option><option value="close">Cerrar cortina</option><option value="position">Mover cortina a una posicion</option></select></label><label id="automation-position-field" hidden>Posicion<input id="automation-position" type="number" min="0" max="100" value="50">%</label><button class="primary-button" type="submit"><i data-lucide="plus"></i> Crear automation</button><p class="form-status" id="automation-status">Las reglas se ejecutan en tu zona horaria.</p></form><section class="panel automation-list"><div class="panel-heading"><div><h2>Reglas activas</h2><p id="automation-count">Cargando automations...</p></div><button class="icon-button" id="automation-refresh" title="Actualizar"><i data-lucide="refresh-cw"></i></button></div><div id="automation-rows" class="automation-rows"></div></section></div></section>`;
+  return `<section class="view" id="view-automations"><div class="page-heading"><div><p class="eyebrow">IF THIS, THEN THAT</p><h1>Automations<span class="accent-dot">.</span></h1><p class="heading-copy">Programa acciones repetibles para tus dispositivos desde la nube.</p></div></div><div class="automation-layout"><form class="panel automation-form" id="automation-form"><div class="panel-heading"><div><h2 id="automation-form-title">Nueva regla</h2><p id="automation-form-copy">Cuando llegue la hora, Pulsegrid pondra la accion en la cola del dispositivo.</p></div><span class="secure-badge"><i data-lucide="workflow"></i> IFTTT</span></div><label>Nombre<input id="automation-name" maxlength="120" required placeholder="Abrir persiana por la manana"></label><label>Dispositivo<select id="automation-device" required><option value="">Selecciona un dispositivo</option></select></label><div class="automation-fields"><label>Cuando<select id="automation-trigger"><option value="daily">Todos los dias a una hora</option></select></label><label>Hora<input id="automation-time" type="time" required></label></div><label>Entonces<select id="automation-action"><option value="open">Abrir cortina</option><option value="close">Cerrar cortina</option><option value="position">Mover cortina a una posicion</option></select></label><label id="automation-position-field" hidden>Posicion<input id="automation-position" type="number" min="0" max="100" value="50">%</label><div class="automation-form-actions"><button class="primary-button" id="automation-submit" type="submit"><i data-lucide="plus"></i> Crear automation</button><button class="secondary-button" id="automation-cancel-edit" type="button" hidden>Cancelar</button></div><p class="form-status" id="automation-status">Las reglas se ejecutan en tu zona horaria.</p></form><section class="panel automation-list"><div class="panel-heading"><div><h2>Reglas activas</h2><p id="automation-count">Cargando automations...</p></div><button class="icon-button" id="automation-refresh" title="Actualizar"><i data-lucide="refresh-cw"></i></button></div><div id="automation-rows" class="automation-rows"></div></section></div></section>`;
 }
+
+let automationRules = [];
 
 function automationTimezone() {
   return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
@@ -185,14 +187,14 @@ function renderAutomations(rules) {
   if (!rows || !count) return;
   count.textContent = `${rules.length} regla${rules.length === 1 ? '' : 's'} configurada${rules.length === 1 ? '' : 's'}.`;
   if (!rules.length) { rows.innerHTML = '<div class="empty-state">Todavia no hay automations. Crea una regla para empezar.</div>'; return; }
-  rows.innerHTML = rules.map((rule) => `<article class="automation-row ${rule.enabled ? '' : 'is-paused'}"><div class="automation-time"><strong>${escapeTelemetryHtml(rule.triggerTime)}</strong><small>cada dia</small></div><div class="automation-copy"><strong>${escapeTelemetryHtml(rule.name)}</strong><span>Si son las ${escapeTelemetryHtml(rule.triggerTime)}, entonces ${escapeTelemetryHtml(automationActionLabel(rule))} en ${escapeTelemetryHtml(rule.deviceName)}.</span><small>${escapeTelemetryHtml(rule.timezone || 'Zona pendiente')} · ${rule.lastRunAt ? `Ultima ejecucion: ${new Date(rule.lastRunAt).toLocaleString('es-MX')}` : 'Aun no se ha ejecutado'}</small></div><label class="switch-row automation-switch" title="Activar o pausar"><input type="checkbox" data-automation-toggle="${rule.id}"${rule.enabled ? ' checked' : ''}><i></i></label><button class="icon-button danger-icon" data-automation-delete="${rule.id}" title="Eliminar automation"><i data-lucide="trash-2"></i></button></article>`).join('');
+  rows.innerHTML = rules.map((rule) => `<article class="automation-row ${rule.enabled ? '' : 'is-paused'}"><div class="automation-time"><strong>${escapeTelemetryHtml(rule.triggerTime)}</strong><small>cada dia</small></div><div class="automation-copy"><strong>${escapeTelemetryHtml(rule.name)}</strong><span>Si son las ${escapeTelemetryHtml(rule.triggerTime)}, entonces ${escapeTelemetryHtml(automationActionLabel(rule))} en ${escapeTelemetryHtml(rule.deviceName)}.</span><small>${escapeTelemetryHtml(rule.timezone || 'Zona pendiente')} · ${rule.lastRunAt ? `Ultima ejecucion: ${new Date(rule.lastRunAt).toLocaleString('es-MX')}` : 'Aun no se ha ejecutado'}</small></div><label class="switch-row automation-switch" title="Activar o pausar"><input type="checkbox" data-automation-toggle="${rule.id}"${rule.enabled ? ' checked' : ''}><i></i></label><div class="automation-row-actions"><button class="icon-button" data-automation-edit="${rule.id}" title="Editar automation"><i data-lucide="pencil"></i></button><button class="icon-button danger-icon" data-automation-delete="${rule.id}" title="Eliminar automation"><i data-lucide="trash-2"></i></button></div></article>`).join('');
   renderIcons();
 }
 
 async function loadAutomations() {
   const rows = $('#automation-rows');
   if (!rows) return;
-  try { const result = await apiRequest(`automations?timezone=${encodeURIComponent(automationTimezone())}`); renderAutomations(result.automations || []); }
+  try { const result = await apiRequest(`automations?timezone=${encodeURIComponent(automationTimezone())}`); automationRules = result.automations || []; renderAutomations(automationRules); }
   catch (error) { rows.innerHTML = `<div class="empty-state">${escapeTelemetryHtml(error.message)}</div>`; }
 }
 
@@ -203,14 +205,28 @@ function setupAutomationsView() {
   form.dataset.bound = 'true';
   const action = $('#automation-action');
   const position = $('#automation-position-field');
+  const cancelEdit = $('#automation-cancel-edit');
+  const resetForm = () => {
+    delete form.dataset.editingId;
+    delete form.dataset.editingTimezone;
+    form.reset();
+    position.hidden = true;
+    $('#automation-form-title').textContent = 'Nueva regla';
+    $('#automation-form-copy').textContent = 'Cuando llegue la hora, Pulsegrid pondra la accion en la cola del dispositivo.';
+    $('#automation-submit').innerHTML = '<i data-lucide="plus"></i> Crear automation';
+    cancelEdit.hidden = true;
+    renderIcons();
+  };
   action.addEventListener('change', () => { position.hidden = action.value !== 'position'; });
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     const status = $('#automation-status');
-    const body = { name: $('#automation-name').value.trim(), deviceId: $('#automation-device').value, triggerTime: $('#automation-time').value, action: action.value, position: Number($('#automation-position').value), timezone: automationTimezone() };
-    try { await apiRequest('automations', { method: 'POST', body: JSON.stringify(body) }); form.reset(); position.hidden = true; status.textContent = 'Automation creada y lista para ejecutarse.'; await loadAutomations(); showToast('Automation creada'); }
+    const editingId = form.dataset.editingId;
+    const body = { name: $('#automation-name').value.trim(), deviceId: $('#automation-device').value, triggerTime: $('#automation-time').value, action: action.value, position: Number($('#automation-position').value), timezone: form.dataset.editingTimezone || automationTimezone() };
+    try { await apiRequest(editingId ? `automations/${editingId}` : 'automations', { method: editingId ? 'PATCH' : 'POST', body: JSON.stringify(body) }); resetForm(); status.textContent = editingId ? 'Automation actualizada.' : 'Automation creada y lista para ejecutarse.'; await loadAutomations(); showToast(editingId ? 'Automation actualizada' : 'Automation creada'); }
     catch (error) { status.textContent = error.message; }
   });
+  cancelEdit.addEventListener('click', resetForm);
   $('#automation-refresh').addEventListener('click', loadAutomations);
   $('#automation-rows').addEventListener('change', async (event) => {
     const id = event.target.dataset.automationToggle;
@@ -219,6 +235,26 @@ function setupAutomationsView() {
     catch (error) { showToast(error.message); await loadAutomations(); }
   });
   $('#automation-rows').addEventListener('click', async (event) => {
+    const editButton = event.target.closest('[data-automation-edit]');
+    if (editButton) {
+      const rule = automationRules.find((item) => String(item.id) === editButton.dataset.automationEdit);
+      if (!rule) return;
+      form.dataset.editingId = rule.id;
+      form.dataset.editingTimezone = rule.timezone || automationTimezone();
+      $('#automation-name').value = rule.name;
+      $('#automation-device').value = rule.deviceId;
+      $('#automation-time').value = rule.triggerTime;
+      action.value = rule.action;
+      $('#automation-position').value = rule.position == null ? 50 : rule.position;
+      position.hidden = rule.action !== 'position';
+      $('#automation-form-title').textContent = 'Editar regla';
+      $('#automation-form-copy').textContent = `Editando una regla en ${form.dataset.editingTimezone}.`;
+      $('#automation-submit').innerHTML = '<i data-lucide="save"></i> Guardar cambios';
+      cancelEdit.hidden = false;
+      renderIcons();
+      form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
     const button = event.target.closest('[data-automation-delete]');
     if (!button || !window.confirm('Eliminar esta automation?')) return;
     try { await apiRequest(`automations/${button.dataset.automationDelete}`, { method: 'DELETE' }); await loadAutomations(); showToast('Automation eliminada'); }

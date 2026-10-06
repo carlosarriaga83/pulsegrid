@@ -371,11 +371,23 @@ app.post('/api/automations', requireSession, apiReady, async (request, response)
 });
 
 app.patch('/api/automations/:id', requireSession, apiReady, async (request, response) => {
-  const enabled = (request.body || {}).enabled;
-  if (typeof enabled !== 'boolean') return fail(response, 422, 'enabled debe ser booleano');
-  const [result] = await database().execute('UPDATE automations SET enabled = ? WHERE id = ? AND user_id = (SELECT id FROM users WHERE email = ?)', [enabled, request.params.id, request.session.user.email]);
-  if (!result.affectedRows) return fail(response, 404, 'Automatizacion no encontrada');
-  response.json({ ok: true });
+  try {
+    const body = request.body || {};
+    const db = database();
+    if (typeof body.enabled === 'boolean' && Object.keys(body).length === 1) {
+      const [result] = await db.execute('UPDATE automations SET enabled = ? WHERE id = ? AND user_id = (SELECT id FROM users WHERE email = ?)', [body.enabled, request.params.id, request.session.user.email]);
+      if (!result.affectedRows) return fail(response, 404, 'Automatizacion no encontrada');
+      return response.json({ ok: true });
+    }
+    const rule = automationInput(body);
+    const [devices] = await db.execute('SELECT id FROM devices WHERE user_id = (SELECT id FROM users WHERE email = ?) AND device_id = ? LIMIT 1', [request.session.user.email, rule.deviceId]);
+    if (!devices[0]) return fail(response, 404, 'Dispositivo no encontrado');
+    const [result] = await db.execute('UPDATE automations SET device_id = ?, name = ?, trigger_time = ?, timezone = ?, action_name = ?, position = ?, last_run_at = NULL, last_run_date = NULL WHERE id = ? AND user_id = (SELECT id FROM users WHERE email = ?)', [devices[0].id, rule.name, rule.triggerTime, rule.timezone, rule.action, rule.position, request.params.id, request.session.user.email]);
+    if (!result.affectedRows) return fail(response, 404, 'Automatizacion no encontrada');
+    response.json({ ok: true });
+  } catch (error) {
+    fail(response, 422, error.message);
+  }
 });
 
 app.delete('/api/automations/:id', requireSession, apiReady, async (request, response) => {
