@@ -794,7 +794,7 @@ function navigate(viewName) {
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-$$('.nav-item[data-view]').forEach((item) => item.addEventListener('click', () => { navigate(item.dataset.view); if (item.dataset.view === 'telemetry') loadTelemetry(); if (item.dataset.view === 'firmware') loadFirmwareReleases(); if (item.dataset.view === 'automations') { populateAutomationDevices(); loadAutomations(); } }));
+$$('.nav-item[data-view]').forEach((item) => item.addEventListener('click', () => { navigate(item.dataset.view); if (item.dataset.view === 'telemetry') loadTelemetry(); if (item.dataset.view === 'firmware') loadFirmwareReleases(); if (item.dataset.view === 'automations') loadDevices().then(loadAutomations); }));
 $$('[data-view-target]').forEach((button) => button.addEventListener('click', () => navigate(button.dataset.viewTarget)));
 $$('[data-open-modal="add-device"], #add-device').forEach((button) => button.addEventListener('click', openModal));
 $('.modal-close').addEventListener('click', closeModal);
