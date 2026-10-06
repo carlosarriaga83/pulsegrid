@@ -15,6 +15,7 @@ const root = __dirname;
 const publicRoot = path.join(root, 'public');
 let pool;
 let schemaReady;
+let automationTickRunning = false;
 
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
@@ -54,6 +55,49 @@ function newFirmwareVersion(version) {
 function firmwareFileName(fileName) {
   if (!firmwareFiles.has(String(fileName || ''))) throw new Error('Archivo de firmware no permitido');
   return String(fileName);
+}
+
+function automationAction(action, position) {
+  if (action === 'open') return { command: 'curtain.open', payload: {} };
+  if (action === 'close') return { command: 'curtain.close', payload: {} };
+  if (action === 'position') return { command: 'curtain.move', payload: { servoId: 1, percent: position, speed: 800, acceleration: 50 } };
+  throw new Error('Accion de automatizacion invalida');
+}
+
+function automationInput(body = {}) {
+  const name = String(body.name || '').trim();
+  const deviceId = String(body.deviceId || '').trim();
+  const triggerTime = String(body.triggerTime || '').trim();
+  const action = String(body.action || '').trim();
+  const position = Number(body.position);
+  if (!name || name.length > 120 || !deviceId || !/^\d{2}:\d{2}$/.test(triggerTime)) throw new Error('Nombre, dispositivo y hora HH:MM son obligatorios');
+  const [hours, minutes] = triggerTime.split(':').map(Number);
+  if (hours > 23 || minutes > 59) throw new Error('Hora de automatizacion invalida');
+  if (action === 'position' && (!Number.isFinite(position) || position < 0 || position > 100)) throw new Error('La posicion debe estar entre 0 y 100');
+  automationAction(action, position);
+  return { name, deviceId, triggerTime, action, position: action === 'position' ? position : null };
+}
+
+async function runScheduledAutomations() {
+  if (automationTickRunning) return;
+  automationTickRunning = true;
+  try {
+    await ensureSchema();
+    const time = new Date();
+    const triggerTime = `${String(time.getHours()).padStart(2, '0')}:${String(time.getMinutes()).padStart(2, '0')}`;
+    const db = database();
+    const [rules] = await db.execute("SELECT id, device_id AS deviceId, action_name AS action, position FROM automations WHERE enabled = 1 AND trigger_time = ? AND (last_run_at IS NULL OR DATE(last_run_at) <> CURDATE())", [triggerTime]);
+    for (const rule of rules) {
+      const [claimed] = await db.execute("UPDATE automations SET last_run_at = NOW() WHERE id = ? AND enabled = 1 AND (last_run_at IS NULL OR DATE(last_run_at) <> CURDATE())", [rule.id]);
+      if (!claimed.affectedRows) continue;
+      const action = automationAction(rule.action, rule.position);
+      await db.execute('INSERT INTO commands (device_id, command_name, payload) VALUES (?, ?, ?)', [rule.deviceId, action.command, JSON.stringify(action.payload)]);
+    }
+  } catch (error) {
+    console.error('Automation scheduler:', error.message);
+  } finally {
+    automationTickRunning = false;
+  }
 }
 
 async function readFirmwareManifest(userId, version) {
@@ -127,6 +171,7 @@ async function ensureSchema() {
     await db.execute("CREATE TABLE IF NOT EXISTS telemetry (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, device_id INT UNSIGNED NOT NULL, payload JSON NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, INDEX telemetry_device (device_id), CONSTRAINT telemetry_device_fk FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE) ENGINE=InnoDB");
     await db.execute("CREATE TABLE IF NOT EXISTS commands (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, device_id INT UNSIGNED NOT NULL, command_name VARCHAR(80) NOT NULL, payload JSON NOT NULL, status VARCHAR(30) NOT NULL DEFAULT 'queued', error_message VARCHAR(500) NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, CONSTRAINT commands_device_fk FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE) ENGINE=InnoDB");
     try { await db.execute('ALTER TABLE commands ADD COLUMN error_message VARCHAR(500) NULL'); } catch (error) { if (error.code !== 'ER_DUP_FIELDNAME') throw error; }
+    await db.execute("CREATE TABLE IF NOT EXISTS automations (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, user_id INT UNSIGNED NOT NULL, device_id INT UNSIGNED NOT NULL, name VARCHAR(120) NOT NULL, trigger_time CHAR(5) NOT NULL, action_name ENUM('open','close','position') NOT NULL, position DECIMAL(5,2) NULL, enabled TINYINT(1) NOT NULL DEFAULT 1, last_run_at TIMESTAMP NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, INDEX automation_schedule (enabled, trigger_time, last_run_at), CONSTRAINT automations_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE, CONSTRAINT automations_device_fk FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE) ENGINE=InnoDB");
     await db.execute("CREATE TABLE IF NOT EXISTS firmware_releases (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, user_id INT UNSIGNED NOT NULL, version VARCHAR(40) NOT NULL, notes VARCHAR(280) NOT NULL DEFAULT '', is_active TINYINT(1) NOT NULL DEFAULT 0, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, UNIQUE KEY firmware_user_version (user_id, version), INDEX firmware_active (user_id, is_active), CONSTRAINT firmware_releases_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE) ENGINE=InnoDB");
     try { await db.execute("ALTER TABLE firmware_releases ADD COLUMN notes VARCHAR(280) NOT NULL DEFAULT ''"); } catch (error) { if (error.code !== 'ER_DUP_FIELDNAME') throw error; }
     await db.execute("CREATE TABLE IF NOT EXISTS firmware_files (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, release_id BIGINT UNSIGNED NOT NULL, name VARCHAR(80) NOT NULL, content MEDIUMBLOB NOT NULL, sha256 CHAR(64) NOT NULL, UNIQUE KEY firmware_release_file (release_id, name), CONSTRAINT firmware_files_release_fk FOREIGN KEY (release_id) REFERENCES firmware_releases(id) ON DELETE CASCADE) ENGINE=InnoDB");
@@ -285,6 +330,38 @@ app.get('/api/commands', requireSession, apiReady, async (request, response) => 
   response.json({ commands: rows });
 });
 
+app.get('/api/automations', requireSession, apiReady, async (request, response) => {
+  const [rows] = await database().execute('SELECT automations.id, automations.name, devices.device_id AS deviceId, devices.name AS deviceName, automations.trigger_time AS triggerTime, automations.action_name AS action, automations.position, automations.enabled, automations.last_run_at AS lastRunAt FROM automations JOIN devices ON devices.id = automations.device_id WHERE automations.user_id = (SELECT id FROM users WHERE email = ?) ORDER BY automations.trigger_time, automations.id', [request.session.user.email]);
+  response.json({ automations: rows });
+});
+
+app.post('/api/automations', requireSession, apiReady, async (request, response) => {
+  try {
+    const rule = automationInput(request.body);
+    const db = database();
+    const [devices] = await db.execute('SELECT id FROM devices WHERE user_id = (SELECT id FROM users WHERE email = ?) AND device_id = ? LIMIT 1', [request.session.user.email, rule.deviceId]);
+    if (!devices[0]) return fail(response, 404, 'Dispositivo no encontrado');
+    const [result] = await db.execute('INSERT INTO automations (user_id, device_id, name, trigger_time, action_name, position) VALUES ((SELECT id FROM users WHERE email = ?), ?, ?, ?, ?, ?)', [request.session.user.email, devices[0].id, rule.name, rule.triggerTime, rule.action, rule.position]);
+    response.status(201).json({ ok: true, id: result.insertId });
+  } catch (error) {
+    fail(response, 422, error.message);
+  }
+});
+
+app.patch('/api/automations/:id', requireSession, apiReady, async (request, response) => {
+  const enabled = (request.body || {}).enabled;
+  if (typeof enabled !== 'boolean') return fail(response, 422, 'enabled debe ser booleano');
+  const [result] = await database().execute('UPDATE automations SET enabled = ? WHERE id = ? AND user_id = (SELECT id FROM users WHERE email = ?)', [enabled, request.params.id, request.session.user.email]);
+  if (!result.affectedRows) return fail(response, 404, 'Automatizacion no encontrada');
+  response.json({ ok: true });
+});
+
+app.delete('/api/automations/:id', requireSession, apiReady, async (request, response) => {
+  const [result] = await database().execute('DELETE FROM automations WHERE id = ? AND user_id = (SELECT id FROM users WHERE email = ?)', [request.params.id, request.session.user.email]);
+  if (!result.affectedRows) return fail(response, 404, 'Automatizacion no encontrada');
+  response.json({ ok: true });
+});
+
 app.get('/api/firmware/releases', requireSession, apiReady, async (request, response) => {
   try {
     response.json({ releases: await readFirmwareReleases(await sessionUserId(request.session.user.email)) });
@@ -421,4 +498,8 @@ app.get('/', (request, response) => response.sendFile(path.join(publicRoot, 'ind
 app.all('/api/*splat', (request, response) => fail(response, 404, 'Unknown action'));
 app.use((request, response) => response.status(404).send('Not found'));
 
-app.listen(port, () => console.log(`Pulsegrid running on port ${port}`));
+app.listen(port, () => {
+  console.log(`Pulsegrid running on port ${port}`);
+  runScheduledAutomations();
+  setInterval(runScheduledAutomations, 30 * 1000);
+});

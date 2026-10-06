@@ -157,6 +157,71 @@ function firmwareViewMarkup() {
   return `<section class="view" id="view-firmware"><div class="page-heading"><div><p class="eyebrow">CICLO DE VIDA</p><h1>Firmware<span class="accent-dot">.</span></h1><p class="heading-copy">Publica, inspecciona y administra las versiones MicroPython de tus dispositivos.</p></div><button class="secondary-button" id="firmware-refresh"><i data-lucide="refresh-cw"></i> Actualizar</button></div><div class="panel firmware-publish-panel"><div class="panel-heading"><div><h2>Nueva publicacion</h2><p>Los archivos permitidos se almacenan y quedan disponibles para OTA.</p></div><span class="secure-badge"><i data-lucide="shield-check"></i> Verificado</span></div><form id="firmware-release-form" class="firmware-form"><label>Version<input id="firmware-release-version" required pattern="\d{4}\.\d{2}\.\d{2}\.[A-Za-z0-9_-]+" placeholder="2026.10.04.motion-guard"></label><label>What's new<input id="firmware-release-whats-new" required maxlength="280" placeholder="Protege los extremos y mejora la parada"></label><label>Archivos .py<input id="firmware-release-files" type="file" accept=".py,text/x-python" multiple required></label><button class="primary-button" type="submit"><i data-lucide="upload-cloud"></i> Publicar version</button></form><p id="firmware-release-status" class="form-status">Ninguna publicacion nueva en esta sesion.</p></div><div class="panel firmware-table-panel"><div class="panel-heading"><div><h2>Versiones publicadas</h2><p id="firmware-release-count">Consulta el historial de releases y sus archivos.</p></div></div><div class="firmware-table-wrap"><div class="firmware-table-head"><span>Version</span><span>Contenido</span><span>What's new</span><span>Fecha</span><span>Estado</span><span></span></div><div id="firmware-release-rows"><div class="empty-state">Cargando versiones...</div></div></div></div></section>`;
 }
 
+function automationsViewMarkup() {
+  return `<section class="view" id="view-automations"><div class="page-heading"><div><p class="eyebrow">IF THIS, THEN THAT</p><h1>Automations<span class="accent-dot">.</span></h1><p class="heading-copy">Programa acciones repetibles para tus dispositivos desde la nube.</p></div></div><div class="automation-layout"><form class="panel automation-form" id="automation-form"><div class="panel-heading"><div><h2>Nueva regla</h2><p>Cuando llegue la hora, Pulsegrid pondra la accion en la cola del dispositivo.</p></div><span class="secure-badge"><i data-lucide="workflow"></i> IFTTT</span></div><label>Nombre<input id="automation-name" maxlength="120" required placeholder="Abrir persiana por la manana"></label><label>Dispositivo<select id="automation-device" required><option value="">Selecciona un dispositivo</option></select></label><div class="automation-fields"><label>Cuando<select id="automation-trigger"><option value="daily">Todos los dias a una hora</option></select></label><label>Hora<input id="automation-time" type="time" required></label></div><label>Entonces<select id="automation-action"><option value="open">Abrir cortina</option><option value="close">Cerrar cortina</option><option value="position">Mover cortina a una posicion</option></select></label><label id="automation-position-field" hidden>Posicion<input id="automation-position" type="number" min="0" max="100" value="50">%</label><button class="primary-button" type="submit"><i data-lucide="plus"></i> Crear automation</button><p class="form-status" id="automation-status">Las reglas se ejecutan una vez por dia, segun la hora del servidor.</p></form><section class="panel automation-list"><div class="panel-heading"><div><h2>Reglas activas</h2><p id="automation-count">Cargando automations...</p></div><button class="icon-button" id="automation-refresh" title="Actualizar"><i data-lucide="refresh-cw"></i></button></div><div id="automation-rows" class="automation-rows"></div></section></div></section>`;
+}
+
+function automationActionLabel(rule) {
+  if (rule.action === 'open') return 'Abrir cortina';
+  if (rule.action === 'close') return 'Cerrar cortina';
+  return `Mover cortina a ${Number(rule.position)}%`;
+}
+
+function populateAutomationDevices() {
+  const select = $('#automation-device');
+  if (!select) return;
+  const selected = select.value;
+  select.innerHTML = `<option value="">Selecciona un dispositivo</option>${devices.map((device) => `<option value="${escapeTelemetryHtml(device.id)}">${escapeTelemetryHtml(device.name)} · ${escapeTelemetryHtml(device.id)}</option>`).join('')}`;
+  select.value = selected;
+}
+
+function renderAutomations(rules) {
+  const rows = $('#automation-rows');
+  const count = $('#automation-count');
+  if (!rows || !count) return;
+  count.textContent = `${rules.length} regla${rules.length === 1 ? '' : 's'} configurada${rules.length === 1 ? '' : 's'}.`;
+  if (!rules.length) { rows.innerHTML = '<div class="empty-state">Todavia no hay automations. Crea una regla para empezar.</div>'; return; }
+  rows.innerHTML = rules.map((rule) => `<article class="automation-row ${rule.enabled ? '' : 'is-paused'}"><div class="automation-time"><strong>${escapeTelemetryHtml(rule.triggerTime)}</strong><small>cada dia</small></div><div class="automation-copy"><strong>${escapeTelemetryHtml(rule.name)}</strong><span>Si son las ${escapeTelemetryHtml(rule.triggerTime)}, entonces ${escapeTelemetryHtml(automationActionLabel(rule))} en ${escapeTelemetryHtml(rule.deviceName)}.</span><small>${rule.lastRunAt ? `Ultima ejecucion: ${new Date(rule.lastRunAt).toLocaleString('es-MX')}` : 'Aun no se ha ejecutado'}</small></div><label class="switch-row automation-switch" title="Activar o pausar"><input type="checkbox" data-automation-toggle="${rule.id}"${rule.enabled ? ' checked' : ''}><i></i></label><button class="icon-button danger-icon" data-automation-delete="${rule.id}" title="Eliminar automation"><i data-lucide="trash-2"></i></button></article>`).join('');
+  renderIcons();
+}
+
+async function loadAutomations() {
+  const rows = $('#automation-rows');
+  if (!rows) return;
+  try { const result = await apiRequest('automations'); renderAutomations(result.automations || []); }
+  catch (error) { rows.innerHTML = `<div class="empty-state">${escapeTelemetryHtml(error.message)}</div>`; }
+}
+
+function setupAutomationsView() {
+  if (!$('#view-automations')) $('.view-container').insertAdjacentHTML('beforeend', automationsViewMarkup());
+  const form = $('#automation-form');
+  if (!form || form.dataset.bound) return;
+  form.dataset.bound = 'true';
+  const action = $('#automation-action');
+  const position = $('#automation-position-field');
+  action.addEventListener('change', () => { position.hidden = action.value !== 'position'; });
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const status = $('#automation-status');
+    const body = { name: $('#automation-name').value.trim(), deviceId: $('#automation-device').value, triggerTime: $('#automation-time').value, action: action.value, position: Number($('#automation-position').value) };
+    try { await apiRequest('automations', { method: 'POST', body: JSON.stringify(body) }); form.reset(); position.hidden = true; status.textContent = 'Automation creada y lista para ejecutarse.'; await loadAutomations(); showToast('Automation creada'); }
+    catch (error) { status.textContent = error.message; }
+  });
+  $('#automation-refresh').addEventListener('click', loadAutomations);
+  $('#automation-rows').addEventListener('change', async (event) => {
+    const id = event.target.dataset.automationToggle;
+    if (!id) return;
+    try { await apiRequest(`automations/${id}`, { method: 'PATCH', body: JSON.stringify({ enabled: event.target.checked }) }); await loadAutomations(); }
+    catch (error) { showToast(error.message); await loadAutomations(); }
+  });
+  $('#automation-rows').addEventListener('click', async (event) => {
+    const button = event.target.closest('[data-automation-delete]');
+    if (!button || !window.confirm('Eliminar esta automation?')) return;
+    try { await apiRequest(`automations/${button.dataset.automationDelete}`, { method: 'DELETE' }); await loadAutomations(); showToast('Automation eliminada'); }
+    catch (error) { showToast(error.message); }
+  });
+}
+
 function renderFirmwareReleases(releases) {
   const rows = $('#firmware-release-rows');
   const count = $('#firmware-release-count');
@@ -271,6 +336,7 @@ function setupWikiNavigation() {
     bindFirmwareReleaseControls();
   }
   setupFirmwareView();
+  setupAutomationsView();
   renderWikiPage('intro');
 }
 
@@ -384,6 +450,7 @@ async function loadDevices() {
   updateSidebarFirmwareVersion();
   void updateSidebarCloudVersion();
   updateDeviceSummary();
+  populateAutomationDevices();
   await loadCommandHistory();
 }
 
@@ -727,7 +794,7 @@ function navigate(viewName) {
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-$$('.nav-item[data-view]').forEach((item) => item.addEventListener('click', () => { navigate(item.dataset.view); if (item.dataset.view === 'telemetry') loadTelemetry(); if (item.dataset.view === 'firmware') loadFirmwareReleases(); }));
+$$('.nav-item[data-view]').forEach((item) => item.addEventListener('click', () => { navigate(item.dataset.view); if (item.dataset.view === 'telemetry') loadTelemetry(); if (item.dataset.view === 'firmware') loadFirmwareReleases(); if (item.dataset.view === 'automations') { populateAutomationDevices(); loadAutomations(); } }));
 $$('[data-view-target]').forEach((button) => button.addEventListener('click', () => navigate(button.dataset.viewTarget)));
 $$('[data-open-modal="add-device"], #add-device').forEach((button) => button.addEventListener('click', openModal));
 $('.modal-close').addEventListener('click', closeModal);

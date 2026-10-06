@@ -157,6 +157,71 @@ function firmwareViewMarkup() {
   return `<section class="view" id="view-firmware"><div class="page-heading"><div><p class="eyebrow">CICLO DE VIDA</p><h1>Firmware<span class="accent-dot">.</span></h1><p class="heading-copy">Publica, inspecciona y administra las versiones MicroPython de tus dispositivos.</p></div><button class="secondary-button" id="firmware-refresh"><i data-lucide="refresh-cw"></i> Actualizar</button></div><div class="panel firmware-publish-panel"><div class="panel-heading"><div><h2>Nueva publicacion</h2><p>Los archivos permitidos se almacenan y quedan disponibles para OTA.</p></div><span class="secure-badge"><i data-lucide="shield-check"></i> Verificado</span></div><form id="firmware-release-form" class="firmware-form"><label>Version<input id="firmware-release-version" required pattern="\d{4}\.\d{2}\.\d{2}\.[A-Za-z0-9_-]+" placeholder="2026.10.04.motion-guard"></label><label>What's new<input id="firmware-release-whats-new" required maxlength="280" placeholder="Protege los extremos y mejora la parada"></label><label>Archivos .py<input id="firmware-release-files" type="file" accept=".py,text/x-python" multiple required></label><button class="primary-button" type="submit"><i data-lucide="upload-cloud"></i> Publicar version</button></form><p id="firmware-release-status" class="form-status">Ninguna publicacion nueva en esta sesion.</p></div><div class="panel firmware-table-panel"><div class="panel-heading"><div><h2>Versiones publicadas</h2><p id="firmware-release-count">Consulta el historial de releases y sus archivos.</p></div></div><div class="firmware-table-wrap"><div class="firmware-table-head"><span>Version</span><span>Contenido</span><span>What's new</span><span>Fecha</span><span>Estado</span><span></span></div><div id="firmware-release-rows"><div class="empty-state">Cargando versiones...</div></div></div></div></section>`;
 }
 
+function automationsViewMarkup() {
+  return `<section class="view" id="view-automations"><div class="page-heading"><div><p class="eyebrow">IF THIS, THEN THAT</p><h1>Automations<span class="accent-dot">.</span></h1><p class="heading-copy">Programa acciones repetibles para tus dispositivos desde la nube.</p></div></div><div class="automation-layout"><form class="panel automation-form" id="automation-form"><div class="panel-heading"><div><h2>Nueva regla</h2><p>Cuando llegue la hora, Pulsegrid pondra la accion en la cola del dispositivo.</p></div><span class="secure-badge"><i data-lucide="workflow"></i> IFTTT</span></div><label>Nombre<input id="automation-name" maxlength="120" required placeholder="Abrir persiana por la manana"></label><label>Dispositivo<select id="automation-device" required><option value="">Selecciona un dispositivo</option></select></label><div class="automation-fields"><label>Cuando<select id="automation-trigger"><option value="daily">Todos los dias a una hora</option></select></label><label>Hora<input id="automation-time" type="time" required></label></div><label>Entonces<select id="automation-action"><option value="open">Abrir cortina</option><option value="close">Cerrar cortina</option><option value="position">Mover cortina a una posicion</option></select></label><label id="automation-position-field" hidden>Posicion<input id="automation-position" type="number" min="0" max="100" value="50">%</label><button class="primary-button" type="submit"><i data-lucide="plus"></i> Crear automation</button><p class="form-status" id="automation-status">Las reglas se ejecutan una vez por dia, segun la hora del servidor.</p></form><section class="panel automation-list"><div class="panel-heading"><div><h2>Reglas activas</h2><p id="automation-count">Cargando automations...</p></div><button class="icon-button" id="automation-refresh" title="Actualizar"><i data-lucide="refresh-cw"></i></button></div><div id="automation-rows" class="automation-rows"></div></section></div></section>`;
+}
+
+function automationActionLabel(rule) {
+  if (rule.action === 'open') return 'Abrir cortina';
+  if (rule.action === 'close') return 'Cerrar cortina';
+  return `Mover cortina a ${Number(rule.position)}%`;
+}
+
+function populateAutomationDevices() {
+  const select = $('#automation-device');
+  if (!select) return;
+  const selected = select.value;
+  select.innerHTML = `<option value="">Selecciona un dispositivo</option>${devices.map((device) => `<option value="${escapeTelemetryHtml(device.id)}">${escapeTelemetryHtml(device.name)} · ${escapeTelemetryHtml(device.id)}</option>`).join('')}`;
+  select.value = selected;
+}
+
+function renderAutomations(rules) {
+  const rows = $('#automation-rows');
+  const count = $('#automation-count');
+  if (!rows || !count) return;
+  count.textContent = `${rules.length} regla${rules.length === 1 ? '' : 's'} configurada${rules.length === 1 ? '' : 's'}.`;
+  if (!rules.length) { rows.innerHTML = '<div class="empty-state">Todavia no hay automations. Crea una regla para empezar.</div>'; return; }
+  rows.innerHTML = rules.map((rule) => `<article class="automation-row ${rule.enabled ? '' : 'is-paused'}"><div class="automation-time"><strong>${escapeTelemetryHtml(rule.triggerTime)}</strong><small>cada dia</small></div><div class="automation-copy"><strong>${escapeTelemetryHtml(rule.name)}</strong><span>Si son las ${escapeTelemetryHtml(rule.triggerTime)}, entonces ${escapeTelemetryHtml(automationActionLabel(rule))} en ${escapeTelemetryHtml(rule.deviceName)}.</span><small>${rule.lastRunAt ? `Ultima ejecucion: ${new Date(rule.lastRunAt).toLocaleString('es-MX')}` : 'Aun no se ha ejecutado'}</small></div><label class="switch-row automation-switch" title="Activar o pausar"><input type="checkbox" data-automation-toggle="${rule.id}"${rule.enabled ? ' checked' : ''}><i></i></label><button class="icon-button danger-icon" data-automation-delete="${rule.id}" title="Eliminar automation"><i data-lucide="trash-2"></i></button></article>`).join('');
+  renderIcons();
+}
+
+async function loadAutomations() {
+  const rows = $('#automation-rows');
+  if (!rows) return;
+  try { const result = await apiRequest('automations'); renderAutomations(result.automations || []); }
+  catch (error) { rows.innerHTML = `<div class="empty-state">${escapeTelemetryHtml(error.message)}</div>`; }
+}
+
+function setupAutomationsView() {
+  if (!$('#view-automations')) $('.view-container').insertAdjacentHTML('beforeend', automationsViewMarkup());
+  const form = $('#automation-form');
+  if (!form || form.dataset.bound) return;
+  form.dataset.bound = 'true';
+  const action = $('#automation-action');
+  const position = $('#automation-position-field');
+  action.addEventListener('change', () => { position.hidden = action.value !== 'position'; });
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const status = $('#automation-status');
+    const body = { name: $('#automation-name').value.trim(), deviceId: $('#automation-device').value, triggerTime: $('#automation-time').value, action: action.value, position: Number($('#automation-position').value) };
+    try { await apiRequest('automations', { method: 'POST', body: JSON.stringify(body) }); form.reset(); position.hidden = true; status.textContent = 'Automation creada y lista para ejecutarse.'; await loadAutomations(); showToast('Automation creada'); }
+    catch (error) { status.textContent = error.message; }
+  });
+  $('#automation-refresh').addEventListener('click', loadAutomations);
+  $('#automation-rows').addEventListener('change', async (event) => {
+    const id = event.target.dataset.automationToggle;
+    if (!id) return;
+    try { await apiRequest(`automations/${id}`, { method: 'PATCH', body: JSON.stringify({ enabled: event.target.checked }) }); await loadAutomations(); }
+    catch (error) { showToast(error.message); await loadAutomations(); }
+  });
+  $('#automation-rows').addEventListener('click', async (event) => {
+    const button = event.target.closest('[data-automation-delete]');
+    if (!button || !window.confirm('Eliminar esta automation?')) return;
+    try { await apiRequest(`automations/${button.dataset.automationDelete}`, { method: 'DELETE' }); await loadAutomations(); showToast('Automation eliminada'); }
+    catch (error) { showToast(error.message); }
+  });
+}
+
 function renderFirmwareReleases(releases) {
   const rows = $('#firmware-release-rows');
   const count = $('#firmware-release-count');
@@ -265,12 +330,13 @@ function setupWikiNavigation() {
     const apiView = document.createElement('section');
     apiView.className = 'view';
     apiView.id = 'view-api';
-    apiView.innerHTML = `<div class="page-heading"><div><p class="eyebrow">INTEGRACION</p><h1>API<span class="accent-dot">.</span></h1><p class="heading-copy">Credenciales, ejemplos y referencia para conectar tus dispositivos.</p></div></div><article class="wiki-article">${languageExamplesMarkup()}<div class="docs-section"><span class="step-number">05</span><div class="wiki-guide"><h2>Publicar firmware MicroPython</h2><p>Selecciona los archivos .py del dispositivo para crear una version OTA. El dispositivo verificara cada archivo antes de reiniciar.</p><form id="firmware-release-form" class="api-key-panel"><label>Version<input id="firmware-release-version" required placeholder="2026.10.1"></label><label>Archivos .py<input id="firmware-release-files" type="file" accept=".py,text/x-python" multiple required></label><button class="secondary-button" type="submit"><i data-lucide="upload-cloud"></i> Publicar version</button><p id="firmware-release-status">Ninguna version publicada desde esta sesion.</p></form></div></div></article>`;
+    apiView.innerHTML = `<div class="page-heading"><div><p class="eyebrow">INTEGRACION</p><h1>API<span class="accent-dot">.</span></h1><p class="heading-copy">Credenciales, ejemplos y referencia para conectar tus dispositivos.</p></div></div><article class="wiki-article">${languageExamplesMarkup()}<div class="docs-section"><span class="step-number">05</span><div class="wiki-guide"><h2>Publicar firmware MicroPython</h2><p>Selecciona los archivos .py del dispositivo para crear una version OTA. El dispositivo verificara cada archivo antes de reiniciar.</p><form id="firmware-release-form" class="api-key-panel"><label>Version<input id="firmware-release-version" required pattern="\d{4}\.\d{2}\.\d{2}\.[A-Za-z0-9_-]+" placeholder="2026.10.04.motion-guard"></label><label>What's new<input id="firmware-release-whats-new" required maxlength="280" placeholder="Describe los cambios de esta OTA"></label><label>Archivos .py<input id="firmware-release-files" type="file" accept=".py,text/x-python" multiple required></label><button class="secondary-button" type="submit"><i data-lucide="upload-cloud"></i> Publicar version</button><p id="firmware-release-status">Ninguna version publicada desde esta sesion.</p></form></div></div></article>`;
     $('.view-container').append(apiView);
     bindWikiApiControls();
     bindFirmwareReleaseControls();
   }
   setupFirmwareView();
+  setupAutomationsView();
   renderWikiPage('intro');
 }
 
@@ -384,6 +450,7 @@ async function loadDevices() {
   updateSidebarFirmwareVersion();
   void updateSidebarCloudVersion();
   updateDeviceSummary();
+  populateAutomationDevices();
   await loadCommandHistory();
 }
 
@@ -582,7 +649,7 @@ function renderCommandDeviceState() {
 }
 
 function calibrationWizardMarkup() {
-  return `<div class="panel calibration-wizard" id="calibration-wizard"><div class="panel-heading"><div><h2>Calibrar persiana</h2><p>Inicia en cualquiera de los extremos, avanza las vueltas necesarias y captura el extremo opuesto.</p></div><span class="secure-badge"><i data-lucide="wand-sparkles"></i> Guiado</span></div><div class="calibration-steps"><div class="calibration-step active" data-calibration-step="1"><b>1</b><span>Inicio</span></div><div class="calibration-step" data-calibration-step="2"><b>2</b><span>Recorrido</span></div><div class="calibration-step" data-calibration-step="3"><b>3</b><span>Prueba</span></div></div><label>Servo<select id="calibration-servo"><option value="1">Servo 1</option><option value="2">Servo 2</option></select></label><p id="calibration-status" class="form-status">Coloca la persiana en un extremo y capturalo.</p><div class="calibration-actions"><button class="secondary-button" id="calibration-deployed"><i data-lucide="flag"></i> Capturar desplegada</button><button class="secondary-button" id="calibration-rolled"><i data-lucide="flag"></i> Capturar enrollada</button><button class="secondary-button" id="calibration-jog" disabled><i data-lucide="rotate-cw"></i> Avanzar 1 vuelta</button><button class="secondary-button" id="calibration-reverse-jog" disabled><i data-lucide="rotate-ccw"></i> Retroceder 1 vuelta</button><button class="primary-button" id="calibration-test-open" data-percent="100" disabled><i data-lucide="arrow-up"></i> Probar abierta</button><button class="secondary-button" id="calibration-test-closed" data-percent="0" disabled><i data-lucide="arrow-down"></i> Probar cerrada</button><button class="secondary-button" id="calibration-test-half" data-percent="50" disabled><i data-lucide="circle-half"></i> Probar 50%</button></div></div>`;
+  return `<div class="panel calibration-wizard" id="calibration-wizard"><div class="panel-heading"><div><h2>Calibrar persiana</h2><p>Define el lado del motor, guarda cerrada/desplegada y abierta/enrollada, y verifica las posiciones.</p></div><span class="secure-badge"><i data-lucide="wand-sparkles"></i> Guiado</span></div><div class="calibration-steps"><div class="calibration-step active" data-calibration-step="1"><b>1</b><span>Motor</span></div><div class="calibration-step" data-calibration-step="2"><b>2</b><span>Extremo inicial</span></div><div class="calibration-step" data-calibration-step="3"><b>3</b><span>Recorrido</span></div><div class="calibration-step" data-calibration-step="4"><b>4</b><span>Prueba</span></div></div><div class="calibration-settings"><label>Servo<select id="calibration-servo"><option value="1">Servo 1</option><option value="2">Servo 2</option></select></label><label>Lado del motor<select id="calibration-motor-side"><option value="left">Izquierdo</option><option value="right">Derecho</option></select></label><button class="primary-button" id="calibration-start"><i data-lucide="rotate-ccw"></i> Reiniciar calibracion</button></div><p id="calibration-status" class="form-status">Elige el lado del motor e inicia. Desplegada significa cerrada; enrollada significa abierta.</p><div class="calibration-actions"><button class="secondary-button" id="calibration-deployed" disabled><i data-lucide="flag"></i> Guardar cerrada (desplegada)</button><button class="secondary-button" id="calibration-rolled" disabled><i data-lucide="flag"></i> Guardar abierta (enrollada)</button><button class="secondary-button" id="calibration-jog-deployed" disabled><i data-lucide="arrow-down"></i> Mover hacia cerrada</button><button class="secondary-button" id="calibration-jog-rolled" disabled><i data-lucide="arrow-up"></i> Mover hacia abierta</button><button class="secondary-button" id="calibration-jog-clockwise" disabled><i data-lucide="rotate-cw"></i> Una vuelta horario (frente del pinon)</button><button class="secondary-button" id="calibration-jog-counterclockwise" disabled><i data-lucide="rotate-ccw"></i> Una vuelta antihorario (frente del pinon)</button><button class="primary-button" id="calibration-test-open" data-percent="100" disabled><i data-lucide="arrow-up"></i> Probar abierta</button><button class="secondary-button" id="calibration-test-closed" data-percent="0" disabled><i data-lucide="arrow-down"></i> Probar cerrada</button><button class="secondary-button" id="calibration-test-half" data-percent="50" disabled><i data-lucide="circle-half"></i> Probar 50%</button></div></div>`;
 }
 
 function queueCalibrationCommand(command, payload) {
@@ -620,49 +687,102 @@ function renderCalibrationWizard() {
   const layout = $('.command-layout');
   if (!layout || $('#calibration-wizard')) return;
   layout.insertAdjacentHTML('beforeend', calibrationWizardMarkup());
-  $('#calibration-test-open').insertAdjacentHTML('beforebegin', '<button class="secondary-button" id="calibration-jog-clockwise" disabled><i data-lucide="rotate-cw"></i> Mover horario</button><button class="secondary-button" id="calibration-jog-counterclockwise" disabled><i data-lucide="rotate-ccw"></i> Mover antihorario</button>');
   const status = $('#calibration-status');
   const servo = $('#calibration-servo');
+  const motorSide = $('#calibration-motor-side');
+  const start = $('#calibration-start');
   const deployed = $('#calibration-deployed');
-  const jog = $('#calibration-jog');
-  const reverseJog = $('#calibration-reverse-jog');
+  const jogDeployed = $('#calibration-jog-deployed');
+  const jogRolled = $('#calibration-jog-rolled');
+  const jogClockwise = $('#calibration-jog-clockwise');
+  const jogCounterclockwise = $('#calibration-jog-counterclockwise');
   const rolled = $('#calibration-rolled');
   const testButtons = [$('#calibration-test-open'), $('#calibration-test-closed'), $('#calibration-test-half')];
   const deviceId = () => $('#command-device')?.value;
-  const setStep = (step) => $$('.calibration-step').forEach((item) => item.classList.toggle('active', Number(item.dataset.calibrationStep) === step));
+  let phase = 'setup';
   let firstReference = null;
-  const captureReference = async (reference) => { const isFirstReference = !firstReference; const selectedServoId = Number(servo.value); try { deployed.disabled = true; rolled.disabled = true; const result = await queueCalibrationCommand(reference === 'deployed' ? 'blind.markDeployed' : 'blind.markRolled', { servoId: selectedServoId }); await waitForCalibrationCommand(result.commandId); if (isFirstReference) { firstReference = reference; servo.dataset.lockedValue = servo.value; servo.disabled = true; jog.disabled = false; reverseJog.disabled = false; (reference === 'deployed' ? rolled : deployed).disabled = false; status.textContent = `Extremo ${reference === 'deployed' ? 'desplegado' : 'enrollado'} capturado. Avanza las vueltas necesarias y captura el extremo opuesto.`; setStep(2); } else { jog.disabled = true; reverseJog.disabled = true; testButtons.forEach((button) => { button.disabled = false; }); status.textContent = 'Limites guardados. Elige una prueba de posicion.'; setStep(3); } showToast(`Extremo ${reference === 'deployed' ? 'desplegado' : 'enrollado'} guardado`); } catch (error) { if (!firstReference) { deployed.disabled = false; rolled.disabled = false; } else if (reference !== firstReference) (firstReference === 'deployed' ? rolled : deployed).disabled = false; status.textContent = error.message; } };
-  deployed.addEventListener('click', () => captureReference('deployed'));
-  rolled.addEventListener('click', () => captureReference('rolled'));
-  jog.addEventListener('click', async () => { try { jog.disabled = true; reverseJog.disabled = true; const selectedDeviceId = deviceId(); const selectedServoId = Number(servo.value); const result = await queueCalibrationCommand('blind.jog', { servoId: selectedServoId, turns: -1 }); status.textContent = 'Avanzando una vuelta...'; await waitForCalibrationCommand(result.commandId); await waitForCalibrationIdle(selectedDeviceId, selectedServoId); (firstReference === 'deployed' ? rolled : deployed).disabled = false; jog.disabled = false; reverseJog.disabled = false; status.textContent = 'Vuelta terminada. Elige otra direccion o captura el extremo opuesto.'; } catch (error) { jog.disabled = false; reverseJog.disabled = false; status.textContent = error.message; } });
-  reverseJog.addEventListener('click', async () => { try { jog.disabled = true; reverseJog.disabled = true; const selectedDeviceId = deviceId(); const selectedServoId = Number(servo.value); const result = await queueCalibrationCommand('blind.jog', { servoId: selectedServoId, turns: 1 }); status.textContent = 'Retrocediendo una vuelta...'; await waitForCalibrationCommand(result.commandId); await waitForCalibrationIdle(selectedDeviceId, selectedServoId); (firstReference === 'deployed' ? rolled : deployed).disabled = false; jog.disabled = false; reverseJog.disabled = false; status.textContent = 'Vuelta terminada. Elige otra direccion o captura el extremo opuesto.'; } catch (error) { reverseJog.disabled = false; jog.disabled = false; status.textContent = error.message; } });
-  testButtons.forEach((button) => button.addEventListener('click', async () => { const percent = Number(button.dataset.percent); try { testButtons.forEach((item) => { item.disabled = true; }); const selectedDeviceId = deviceId(); const selectedServoId = Number(servo.value); status.textContent = `Probando ${percent}%...`; const result = await queueCalibrationCommand('curtain.move', { servoId: selectedServoId, percent, speed: 800, acceleration: 50 }); await waitForCalibrationCommand(result.commandId); await waitForCalibrationIdle(selectedDeviceId, selectedServoId); status.textContent = `Prueba completada: ${percent}%.`; showToast(`Posicion ${percent}% probada`); } catch (error) { status.textContent = error.message; } finally { testButtons.forEach((item) => { item.disabled = false; }); } }));
-  servo.addEventListener('change', () => { if (deployed.disabled) servo.value = servo.dataset.lockedValue; });
-  renderIcons();
-}
-
-function calibrationWizardMarkup() {
-  return `<div class="panel calibration-wizard" id="calibration-wizard"><div class="panel-heading"><div><h2>Calibrar persiana</h2><p>Define el lado del motor, guarda cerrada/desplegada y abierta/enrollada, y verifica las posiciones.</p></div><span class="secure-badge"><i data-lucide="wand-sparkles"></i> Guiado</span></div><div class="calibration-steps"><div class="calibration-step active" data-calibration-step="1"><b>1</b><span>Motor</span></div><div class="calibration-step" data-calibration-step="2"><b>2</b><span>Extremo inicial</span></div><div class="calibration-step" data-calibration-step="3"><b>3</b><span>Recorrido</span></div><div class="calibration-step" data-calibration-step="4"><b>4</b><span>Prueba</span></div></div><div class="calibration-settings"><label>Servo<select id="calibration-servo"><option value="1">Servo 1</option><option value="2">Servo 2</option></select></label><label>Lado del motor<select id="calibration-motor-side"><option value="left">Izquierdo</option><option value="right">Derecho</option></select></label><button class="primary-button" id="calibration-start"><i data-lucide="play"></i> Iniciar calibracion</button></div><p id="calibration-status" class="form-status">Elige el lado del motor e inicia. Desplegada significa cerrada; enrollada significa abierta.</p><div class="calibration-actions"><button class="secondary-button" id="calibration-deployed" disabled><i data-lucide="flag"></i> Guardar cerrada (desplegada)</button><button class="secondary-button" id="calibration-rolled" disabled><i data-lucide="flag"></i> Guardar abierta (enrollada)</button><button class="secondary-button" id="calibration-jog-deployed" disabled><i data-lucide="arrow-down"></i> Mover hacia cerrada</button><button class="secondary-button" id="calibration-jog-rolled" disabled><i data-lucide="arrow-up"></i> Mover hacia abierta</button><button class="primary-button" id="calibration-test-open" data-percent="100" disabled><i data-lucide="arrow-up"></i> Probar abierta</button><button class="secondary-button" id="calibration-test-closed" data-percent="0" disabled><i data-lucide="arrow-down"></i> Probar cerrada</button><button class="secondary-button" id="calibration-test-half" data-percent="50" disabled><i data-lucide="circle-half"></i> Probar 50%</button></div></div>`;
-}
-
-function renderCalibrationWizard() {
-  const layout = $('.command-layout');
-  if (!layout || $('#calibration-wizard')) return;
-  layout.insertAdjacentHTML('beforeend', calibrationWizardMarkup());
-  $('#calibration-test-open').insertAdjacentHTML('beforebegin', '<button class="secondary-button" id="calibration-jog-clockwise" disabled><i data-lucide="rotate-cw"></i> Mover horario</button><button class="secondary-button" id="calibration-jog-counterclockwise" disabled><i data-lucide="rotate-ccw"></i> Mover antihorario</button>');
-  const status = $('#calibration-status'); const servo = $('#calibration-servo'); const motorSide = $('#calibration-motor-side'); const start = $('#calibration-start'); const deployed = $('#calibration-deployed'); const rolled = $('#calibration-rolled'); const jogDeployed = $('#calibration-jog-deployed'); const jogRolled = $('#calibration-jog-rolled'); const jogClockwise = $('#calibration-jog-clockwise'); const jogCounterclockwise = $('#calibration-jog-counterclockwise'); const testButtons = [$('#calibration-test-open'), $('#calibration-test-closed'), $('#calibration-test-half')];
-  start.innerHTML = '<i data-lucide="rotate-ccw"></i> Reiniciar calibracion';
-  let phase = 'setup'; let firstReference = null;
   const setStep = (step) => $$('.calibration-step').forEach((item) => item.classList.toggle('active', Number(item.dataset.calibrationStep) === step));
   const setEnabled = (button, enabled) => { if (!button) return; button.disabled = !enabled; button.classList.toggle('is-ready', enabled); };
-  const renderState = () => { const first = phase === 'first-reference'; const travel = phase === 'travel'; const tests = phase === 'tests'; servo.disabled = phase !== 'setup'; motorSide.disabled = phase !== 'setup'; setEnabled(start, true); setEnabled(deployed, first || (travel && firstReference !== 'deployed')); setEnabled(rolled, first || (travel && firstReference !== 'rolled')); setEnabled(jogDeployed, travel); setEnabled(jogRolled, travel); setEnabled(jogClockwise, travel); setEnabled(jogCounterclockwise, travel); testButtons.forEach((button) => setEnabled(button, tests)); setStep(phase === 'setup' ? 1 : first ? 2 : travel ? 3 : 4); };
-  start.addEventListener('click', async () => { const servoId = Number(servo.value); try { setEnabled(start, false); status.textContent = 'Guardando lado del motor...'; let result = await queueCalibrationCommand('blind.setMotorSide', { servoId, side: motorSide.value }); await waitForCalibrationCommand(result.commandId); result = await queueCalibrationCommand('blind.beginCalibration', { servoId }); await waitForCalibrationCommand(result.commandId); firstReference = null; phase = 'first-reference'; status.textContent = 'Coloca la persiana en cerrada/desplegada o abierta/enrollada y guarda ese extremo.'; } catch (error) { status.textContent = error.message; } finally { renderState(); } });
-  const captureReference = async (reference) => { const isFirst = !firstReference; try { setEnabled(deployed, false); setEnabled(rolled, false); const result = await queueCalibrationCommand(reference === 'deployed' ? 'blind.markDeployed' : 'blind.markRolled', { servoId: Number(servo.value) }); await waitForCalibrationCommand(result.commandId); if (isFirst) { firstReference = reference; phase = 'travel'; status.textContent = `Extremo ${reference === 'deployed' ? 'cerrada/desplegada' : 'abierta/enrollada'} guardado. Mueve hacia el extremo opuesto y guardalo.`; } else { phase = 'tests'; status.textContent = 'Limites guardados. Elige una prueba de posicion.'; } showToast(`Extremo ${reference === 'deployed' ? 'desplegado' : 'enrollado'} guardado`); } catch (error) { status.textContent = error.message; } finally { renderState(); } };
-  deployed.addEventListener('click', () => captureReference('deployed')); rolled.addEventListener('click', () => captureReference('rolled'));
-  const jog = async (direction) => { try { setEnabled(jogDeployed, false); setEnabled(jogRolled, false); setEnabled(jogClockwise, false); setEnabled(jogCounterclockwise, false); const selectedDeviceId = $('#command-device')?.value; const servoId = Number(servo.value); const labels = { deployed: 'cerrada/desplegada', rolled: 'abierta/enrollada', clockwise: 'horario visto de frente al pinon', counterclockwise: 'antihorario visto de frente al pinon' }; status.textContent = `Moviendo una vuelta en sentido ${labels[direction]}...`; const result = await queueCalibrationCommand('blind.jog', { servoId, direction }); await waitForCalibrationCommand(result.commandId); await waitForCalibrationIdle(selectedDeviceId, servoId); status.textContent = 'Vuelta terminada. Continua hacia el extremo opuesto o guardalo.'; } catch (error) { status.textContent = error.message; } finally { renderState(); } };
-  jogDeployed.addEventListener('click', () => jog('deployed')); jogRolled.addEventListener('click', () => jog('rolled')); jogClockwise.addEventListener('click', () => jog('clockwise')); jogCounterclockwise.addEventListener('click', () => jog('counterclockwise'));
-  testButtons.forEach((button) => button.addEventListener('click', async () => { const percent = Number(button.dataset.percent); try { testButtons.forEach((item) => setEnabled(item, false)); const selectedDeviceId = $('#command-device')?.value; const servoId = Number(servo.value); status.textContent = `Probando ${percent}%...`; const result = await queueCalibrationCommand('curtain.move', { servoId, percent, speed: 800, acceleration: 50 }); await waitForCalibrationCommand(result.commandId); await waitForCalibrationIdle(selectedDeviceId, servoId); status.textContent = `Prueba completada: ${percent}%.`; showToast(`Posicion ${percent}% probada`); } catch (error) { status.textContent = error.message; } finally { renderState(); } }));
-  renderState(); renderIcons();
+  const renderState = () => {
+    const first = phase === 'first-reference';
+    const travel = phase === 'travel';
+    const tests = phase === 'tests';
+    servo.disabled = phase !== 'setup';
+    motorSide.disabled = phase !== 'setup';
+    setEnabled(start, true);
+    setEnabled(deployed, first || (travel && firstReference !== 'deployed'));
+    setEnabled(rolled, first || (travel && firstReference !== 'rolled'));
+    setEnabled(jogDeployed, travel);
+    setEnabled(jogRolled, travel);
+    setEnabled(jogClockwise, travel);
+    setEnabled(jogCounterclockwise, travel);
+    testButtons.forEach((button) => setEnabled(button, tests));
+    setStep(phase === 'setup' ? 1 : first ? 2 : travel ? 3 : 4);
+  };
+  start.addEventListener('click', async () => {
+    const selectedServoId = Number(servo.value);
+    try {
+      setEnabled(start, false);
+      status.textContent = 'Guardando lado del motor...';
+      let result = await queueCalibrationCommand('blind.setMotorSide', { servoId: selectedServoId, side: motorSide.value });
+      await waitForCalibrationCommand(result.commandId);
+      result = await queueCalibrationCommand('blind.beginCalibration', { servoId: selectedServoId });
+      await waitForCalibrationCommand(result.commandId);
+      firstReference = null;
+      phase = 'first-reference';
+      status.textContent = 'Coloca la persiana en cerrada/desplegada o abierta/enrollada y guarda ese extremo.';
+      renderState();
+    } catch (error) { status.textContent = error.message; renderState(); }
+  });
+  const captureReference = async (reference) => {
+    const isFirstReference = !firstReference;
+    const selectedServoId = Number(servo.value);
+    try {
+      setEnabled(deployed, false);
+      setEnabled(rolled, false);
+      const result = await queueCalibrationCommand(reference === 'deployed' ? 'blind.markDeployed' : 'blind.markRolled', { servoId: selectedServoId });
+      await waitForCalibrationCommand(result.commandId);
+      if (isFirstReference) {
+        firstReference = reference;
+        phase = 'travel';
+        status.textContent = `Extremo ${reference === 'deployed' ? 'cerrada/desplegada' : 'abierta/enrollada'} guardado. Mueve hacia el extremo opuesto y guardalo.`;
+      } else {
+        phase = 'tests';
+        status.textContent = 'Limites guardados. Elige una prueba de posicion.';
+      }
+      renderState();
+      showToast(`Extremo ${reference === 'deployed' ? 'desplegado' : 'enrollado'} guardado`);
+    } catch (error) {
+      status.textContent = error.message;
+      renderState();
+    }
+  };
+  deployed.addEventListener('click', () => captureReference('deployed'));
+  rolled.addEventListener('click', () => captureReference('rolled'));
+  const jog = async (direction) => {
+    try {
+      setEnabled(jogDeployed, false); setEnabled(jogRolled, false); setEnabled(jogClockwise, false); setEnabled(jogCounterclockwise, false);
+      const selectedDeviceId = deviceId(); const selectedServoId = Number(servo.value);
+      const labels = { deployed: 'cerrada/desplegada', rolled: 'abierta/enrollada', clockwise: 'horario', counterclockwise: 'antihorario' };
+      status.textContent = `Moviendo una vuelta en sentido ${labels[direction]}...`;
+      const result = await queueCalibrationCommand('blind.jog', { servoId: selectedServoId, direction });
+      await waitForCalibrationCommand(result.commandId); await waitForCalibrationIdle(selectedDeviceId, selectedServoId);
+      status.textContent = 'Vuelta terminada. Continua hacia el extremo opuesto o guardalo.';
+    } catch (error) { status.textContent = error.message; }
+    finally { renderState(); }
+  };
+  jogDeployed.addEventListener('click', () => jog('deployed'));
+  jogRolled.addEventListener('click', () => jog('rolled'));
+  jogClockwise.addEventListener('click', () => jog('clockwise'));
+  jogCounterclockwise.addEventListener('click', () => jog('counterclockwise'));
+  testButtons.forEach((button) => button.addEventListener('click', async () => {
+    const percent = Number(button.dataset.percent);
+    try { testButtons.forEach((item) => { item.disabled = true; }); const selectedDeviceId = deviceId(); const selectedServoId = Number(servo.value); status.textContent = `Probando ${percent}%...`; const result = await queueCalibrationCommand('curtain.move', { servoId: selectedServoId, percent, speed: 800, acceleration: 50 }); await waitForCalibrationCommand(result.commandId); await waitForCalibrationIdle(selectedDeviceId, selectedServoId); status.textContent = `Prueba completada: ${percent}%.`; showToast(`Posicion ${percent}% probada`); }
+    catch (error) { status.textContent = error.message; }
+    finally { renderState(); }
+  }));
+  renderState();
+  renderIcons();
 }
 
 function navigate(viewName) {
@@ -674,7 +794,7 @@ function navigate(viewName) {
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-$$('.nav-item[data-view]').forEach((item) => item.addEventListener('click', () => { navigate(item.dataset.view); if (item.dataset.view === 'telemetry') loadTelemetry(); if (item.dataset.view === 'firmware') loadFirmwareReleases(); }));
+$$('.nav-item[data-view]').forEach((item) => item.addEventListener('click', () => { navigate(item.dataset.view); if (item.dataset.view === 'telemetry') loadTelemetry(); if (item.dataset.view === 'firmware') loadFirmwareReleases(); if (item.dataset.view === 'automations') { populateAutomationDevices(); loadAutomations(); } }));
 $$('[data-view-target]').forEach((button) => button.addEventListener('click', () => navigate(button.dataset.viewTarget)));
 $$('[data-open-modal="add-device"], #add-device').forEach((button) => button.addEventListener('click', openModal));
 $('.modal-close').addEventListener('click', closeModal);
