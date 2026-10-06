@@ -158,7 +158,7 @@ function firmwareViewMarkup() {
 }
 
 function automationsViewMarkup() {
-  return `<section class="view" id="view-automations"><div class="page-heading"><div><p class="eyebrow">IF THIS, THEN THAT</p><h1>Automations<span class="accent-dot">.</span></h1><p class="heading-copy">Programa acciones repetibles para tus dispositivos desde la nube.</p></div></div><div class="automation-layout"><form class="panel automation-form" id="automation-form"><div class="panel-heading"><div><h2 id="automation-form-title">Nueva regla</h2><p id="automation-form-copy">Cuando llegue la hora, Pulsegrid pondra la accion en la cola del dispositivo.</p></div><span class="secure-badge"><i data-lucide="workflow"></i> IFTTT</span></div><label>Nombre<input id="automation-name" maxlength="120" required placeholder="Abrir persiana por la manana"></label><label>Dispositivo<select id="automation-device" required><option value="">Selecciona un dispositivo</option></select></label><div class="automation-fields"><label>Cuando<select id="automation-trigger"><option value="daily">Todos los dias a una hora</option></select></label><label>Hora<input id="automation-time" type="time" required></label></div><label>Entonces<select id="automation-action"><option value="open">Abrir cortina</option><option value="close">Cerrar cortina</option><option value="position">Mover cortina a una posicion</option></select></label><label id="automation-position-field" hidden>Posicion<input id="automation-position" type="number" min="0" max="100" value="50">%</label><div class="automation-form-actions"><button class="primary-button" id="automation-submit" type="submit"><i data-lucide="plus"></i> Crear automation</button><button class="secondary-button" id="automation-cancel-edit" type="button" hidden>Cancelar</button></div><p class="form-status" id="automation-status">Las reglas se ejecutan en tu zona horaria.</p></form><section class="panel automation-list"><div class="panel-heading"><div><h2>Reglas activas</h2><p id="automation-count">Cargando automations...</p></div><button class="icon-button" id="automation-refresh" title="Actualizar"><i data-lucide="refresh-cw"></i></button></div><div id="automation-rows" class="automation-rows"></div></section></div></section>`;
+  return `<section class="view" id="view-automations"><div class="page-heading"><div><p class="eyebrow">IF THIS, THEN THAT</p><h1>Automations<span class="accent-dot">.</span></h1><p class="heading-copy">Programa acciones repetibles para tus dispositivos desde la nube.</p></div></div><div class="automation-layout"><form class="panel automation-form" id="automation-form"><div class="panel-heading"><div><h2 id="automation-form-title">Nueva regla</h2><p id="automation-form-copy">Cuando llegue la hora, Pulsegrid pondra la accion en la cola del dispositivo.</p></div><span class="secure-badge"><i data-lucide="workflow"></i> IFTTT</span></div><label>Nombre<input id="automation-name" maxlength="120" required placeholder="Abrir persiana por la manana"></label><label>Dispositivo<select id="automation-device" required><option value="">Selecciona un dispositivo</option></select></label><div class="automation-fields"><label>Hora<input id="automation-time" type="time" required></label></div><fieldset class="automation-weekdays"><legend>Dias de ejecucion</legend><div id="automation-weekdays" role="group" aria-label="Dias de ejecucion"><button type="button" data-weekday="1" aria-pressed="true" title="Lunes">L</button><button type="button" data-weekday="2" aria-pressed="true" title="Martes">M</button><button type="button" data-weekday="3" aria-pressed="true" title="Miercoles">X</button><button type="button" data-weekday="4" aria-pressed="true" title="Jueves">J</button><button type="button" data-weekday="5" aria-pressed="true" title="Viernes">V</button><button type="button" data-weekday="6" aria-pressed="true" title="Sabado">S</button><button type="button" data-weekday="0" aria-pressed="true" title="Domingo">D</button></div></fieldset><label>Entonces<select id="automation-action"><option value="open">Abrir cortina</option><option value="close">Cerrar cortina</option><option value="position">Mover cortina a una posicion</option></select></label><label id="automation-position-field" hidden>Posicion<input id="automation-position" type="number" min="0" max="100" value="50">%</label><div class="automation-form-actions"><button class="primary-button" id="automation-submit" type="submit"><i data-lucide="plus"></i> Crear automation</button><button class="secondary-button" id="automation-cancel-edit" type="button" hidden>Cancelar</button></div><p class="form-status" id="automation-status">Las reglas se ejecutan en tu zona horaria.</p></form><section class="panel automation-list"><div class="panel-heading"><div><h2>Reglas activas</h2><p id="automation-count">Cargando automations...</p></div><button class="icon-button" id="automation-refresh" title="Actualizar"><i data-lucide="refresh-cw"></i></button></div><div id="automation-rows" class="automation-rows"></div></section></div></section>`;
 }
 
 let automationRules = [];
@@ -171,6 +171,22 @@ function automationActionLabel(rule) {
   if (rule.action === 'open') return 'Abrir cortina';
   if (rule.action === 'close') return 'Cerrar cortina';
   return `Mover cortina a ${Number(rule.position)}%`;
+}
+
+function automationWeekdayLabel(weekdays) {
+  const selected = new Set((weekdays || []).map(Number));
+  if (selected.size === 7) return 'todos los dias';
+  const labels = { 1: 'L', 2: 'M', 3: 'X', 4: 'J', 5: 'V', 6: 'S', 0: 'D' };
+  return [1, 2, 3, 4, 5, 6, 0].filter((day) => selected.has(day)).map((day) => labels[day]).join(' · ');
+}
+
+function setAutomationWeekdays(weekdays) {
+  const selected = new Set((weekdays || []).map(Number));
+  $$('#automation-weekdays [data-weekday]').forEach((button) => { button.setAttribute('aria-pressed', String(selected.has(Number(button.dataset.weekday)))); });
+}
+
+function selectedAutomationWeekdays() {
+  return $$('#automation-weekdays [data-weekday][aria-pressed="true"]').map((button) => Number(button.dataset.weekday));
 }
 
 function populateAutomationDevices() {
@@ -187,7 +203,7 @@ function renderAutomations(rules) {
   if (!rows || !count) return;
   count.textContent = `${rules.length} regla${rules.length === 1 ? '' : 's'} configurada${rules.length === 1 ? '' : 's'}.`;
   if (!rules.length) { rows.innerHTML = '<div class="empty-state">Todavia no hay automations. Crea una regla para empezar.</div>'; return; }
-  rows.innerHTML = rules.map((rule) => `<article class="automation-row ${rule.enabled ? '' : 'is-paused'}"><div class="automation-time"><strong>${escapeTelemetryHtml(rule.triggerTime)}</strong><small>cada dia</small></div><div class="automation-copy"><strong>${escapeTelemetryHtml(rule.name)}</strong><span>Si son las ${escapeTelemetryHtml(rule.triggerTime)}, entonces ${escapeTelemetryHtml(automationActionLabel(rule))} en ${escapeTelemetryHtml(rule.deviceName)}.</span><small>${escapeTelemetryHtml(rule.timezone || 'Zona pendiente')} · ${rule.lastRunAt ? `Ultima ejecucion: ${new Date(rule.lastRunAt).toLocaleString('es-MX')}` : 'Aun no se ha ejecutado'}</small></div><label class="switch-row automation-switch" title="Activar o pausar"><input type="checkbox" data-automation-toggle="${rule.id}"${rule.enabled ? ' checked' : ''}><i></i></label><div class="automation-row-actions"><button class="icon-button" data-automation-edit="${rule.id}" title="Editar automation"><i data-lucide="pencil"></i></button><button class="icon-button danger-icon" data-automation-delete="${rule.id}" title="Eliminar automation"><i data-lucide="trash-2"></i></button></div></article>`).join('');
+  rows.innerHTML = rules.map((rule) => `<article class="automation-row ${rule.enabled ? '' : 'is-paused'}"><div class="automation-time"><strong>${escapeTelemetryHtml(rule.triggerTime)}</strong><small>${escapeTelemetryHtml(automationWeekdayLabel(rule.weekdays))}</small></div><div class="automation-copy"><strong>${escapeTelemetryHtml(rule.name)}</strong><span>Si son las ${escapeTelemetryHtml(rule.triggerTime)} los ${escapeTelemetryHtml(automationWeekdayLabel(rule.weekdays))}, entonces ${escapeTelemetryHtml(automationActionLabel(rule))} en ${escapeTelemetryHtml(rule.deviceName)}.</span><small>${escapeTelemetryHtml(rule.timezone || 'Zona pendiente')} · ${rule.lastRunAt ? `Ultima ejecucion: ${new Date(rule.lastRunAt).toLocaleString('es-MX')}` : 'Aun no se ha ejecutado'}</small></div><label class="switch-row automation-switch" title="Activar o pausar"><input type="checkbox" data-automation-toggle="${rule.id}"${rule.enabled ? ' checked' : ''}><i></i></label><div class="automation-row-actions"><button class="icon-button" data-automation-edit="${rule.id}" title="Editar automation"><i data-lucide="pencil"></i></button><button class="icon-button danger-icon" data-automation-delete="${rule.id}" title="Eliminar automation"><i data-lucide="trash-2"></i></button></div></article>`).join('');
   renderIcons();
 }
 
@@ -211,6 +227,7 @@ function setupAutomationsView() {
     delete form.dataset.editingTimezone;
     form.reset();
     position.hidden = true;
+    setAutomationWeekdays([0, 1, 2, 3, 4, 5, 6]);
     $('#automation-form-title').textContent = 'Nueva regla';
     $('#automation-form-copy').textContent = 'Cuando llegue la hora, Pulsegrid pondra la accion en la cola del dispositivo.';
     $('#automation-submit').innerHTML = '<i data-lucide="plus"></i> Crear automation';
@@ -218,11 +235,15 @@ function setupAutomationsView() {
     renderIcons();
   };
   action.addEventListener('change', () => { position.hidden = action.value !== 'position'; });
+  $('#automation-weekdays').addEventListener('click', (event) => {
+    const button = event.target.closest('[data-weekday]');
+    if (button) button.setAttribute('aria-pressed', String(button.getAttribute('aria-pressed') !== 'true'));
+  });
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     const status = $('#automation-status');
     const editingId = form.dataset.editingId;
-    const body = { name: $('#automation-name').value.trim(), deviceId: $('#automation-device').value, triggerTime: $('#automation-time').value, action: action.value, position: Number($('#automation-position').value), timezone: form.dataset.editingTimezone || automationTimezone() };
+    const body = { name: $('#automation-name').value.trim(), deviceId: $('#automation-device').value, triggerTime: $('#automation-time').value, weekdays: selectedAutomationWeekdays(), action: action.value, position: Number($('#automation-position').value), timezone: form.dataset.editingTimezone || automationTimezone() };
     try { await apiRequest(editingId ? `automations/${editingId}` : 'automations', { method: editingId ? 'PATCH' : 'POST', body: JSON.stringify(body) }); resetForm(); status.textContent = editingId ? 'Automation actualizada.' : 'Automation creada y lista para ejecutarse.'; await loadAutomations(); showToast(editingId ? 'Automation actualizada' : 'Automation creada'); }
     catch (error) { status.textContent = error.message; }
   });
@@ -244,6 +265,7 @@ function setupAutomationsView() {
       $('#automation-name').value = rule.name;
       $('#automation-device').value = rule.deviceId;
       $('#automation-time').value = rule.triggerTime;
+      setAutomationWeekdays(rule.weekdays);
       action.value = rule.action;
       $('#automation-position').value = rule.position == null ? 50 : rule.position;
       position.hidden = rule.action !== 'position';

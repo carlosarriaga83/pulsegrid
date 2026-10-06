@@ -4,6 +4,11 @@
 .automation-form label { display: grid; gap: 7px; color: var(--text-muted, #9ca3af); font-size: 13px; }
 .automation-form input, .automation-form select { width: 100%; }
 .automation-fields { display: grid; grid-template-columns: 1fr .7fr; gap: 12px; }
+.automation-weekdays { border: 0; margin: 0; padding: 0; display: grid; gap: 7px; color: var(--text-muted, #9ca3af); font-size: 13px; }
+.automation-weekdays legend { padding: 0; }
+#automation-weekdays { display: grid; grid-template-columns: repeat(7, minmax(32px, 1fr)); gap: 6px; }
+#automation-weekdays button { min-height: 34px; border: 1px solid var(--border, #29302d); border-radius: 6px; background: transparent; color: var(--text-muted, #9ca3af); font: inherit; font-weight: 700; cursor: pointer; }
+#automation-weekdays button[aria-pressed="true"] { border-color: #4b6c25; background: #283c16; color: #c8f76b; }
 .automation-list { min-height: 260px; }
 .automation-rows { display: grid; }
 .automation-row { display: grid; grid-template-columns: 72px minmax(0, 1fr) 44px 76px; gap: 16px; align-items: center; padding: 18px 0; border-top: 1px solid var(--border, #29302d); }
