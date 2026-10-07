@@ -283,6 +283,28 @@ async function tuyaRequest(userId, method, pathName, body) {
   return response.result;
 }
 
+function normalizeTelemetry(value) {
+  if (Array.isArray(value)) return value.map(normalizeTelemetry);
+  if (value && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort().map((key) => [key, normalizeTelemetry(value[key])]));
+  return value;
+}
+
+async function storeTelemetryIfChanged(db, deviceId, payload) {
+  const [rows] = await db.execute('SELECT payload FROM telemetry WHERE device_id = ? ORDER BY created_at DESC, id DESC LIMIT 1', [deviceId]);
+  const current = rows[0]?.payload;
+  const previous = typeof current === 'string' ? JSON.parse(current) : current;
+  if (previous && JSON.stringify(normalizeTelemetry(previous)) === JSON.stringify(normalizeTelemetry(payload))) return false;
+  await db.execute('INSERT INTO telemetry (device_id, payload) VALUES (?, ?)', [deviceId, JSON.stringify(payload)]);
+  return true;
+}
+
+function telemetryDateParameter(value, label) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) throw new Error(`${label} no es una fecha valida`);
+  return date;
+}
+
 async function tuyaAccountDevices(ownerId) {
   const config = await tuyaConfiguration(ownerId);
   if (config.tuyaUserId) return tuyaRequest(ownerId, 'GET', `/v1.0/users/${encodeURIComponent(config.tuyaUserId)}/devices`);
@@ -353,7 +375,7 @@ async function syncTuyaDevice(db, device) {
   if (!received) throw new Error(errors.filter(Boolean).join('; ') || 'Tuya no devolvio datos para este dispositivo');
   const online = typeof device.accountDevice?.online === 'boolean' ? device.accountDevice.online : null;
   const payload = { provider: 'tuya', status: values };
-  await db.execute('INSERT INTO telemetry (device_id, payload) VALUES (?, ?)', [device.id, JSON.stringify(payload)]);
+  await storeTelemetryIfChanged(db, device.id, payload);
   await db.execute("UPDATE devices SET status = COALESCE(?, status), last_seen = NOW() WHERE id = ?", [online === null ? null : online ? 'online' : 'offline', device.id]);
   return payload;
 }
@@ -586,15 +608,25 @@ app.post('/api/integrations/tuya/import', requireSession, apiReady, async (reque
 
 app.get('/api/telemetry', requireSession, apiReady, async (request, response) => {
   const deviceId = String(request.query.deviceId || '').trim();
-  const limit = Math.min(Math.max(Number.parseInt(request.query.limit, 10) || 30, 1), 100);
   if (!deviceId) return fail(response, 422, 'deviceId es obligatorio');
+  let from;
+  let to;
+  try {
+    from = telemetryDateParameter(request.query.from, 'Fecha inicial');
+    to = telemetryDateParameter(request.query.to, 'Fecha final');
+    if (from && to && from > to) throw new Error('La fecha inicial debe ser anterior a la fecha final');
+  } catch (error) { return fail(response, 422, error.message); }
   const db = database();
   const [devices] = await db.execute('SELECT id, user_id AS userId, device_id, provider FROM devices WHERE user_id = (SELECT id FROM users WHERE email = ?) AND device_id = ? LIMIT 1', [request.session.user.email, deviceId]);
   if (!devices[0]) return fail(response, 404, 'Dispositivo no encontrado');
   if (devices[0].provider === 'tuya' && request.query.refresh === 'true') {
     try { await syncTuyaDevice(db, devices[0]); } catch (error) { return fail(response, 503, error.message); }
   }
-  const [rows] = await db.execute('SELECT telemetry.payload, telemetry.created_at AS createdAt FROM telemetry WHERE telemetry.device_id = ? ORDER BY telemetry.id DESC LIMIT ?', [devices[0].id, limit]);
+  const conditions = ['telemetry.device_id = ?'];
+  const parameters = [devices[0].id];
+  if (from) { conditions.push('telemetry.created_at >= ?'); parameters.push(from); }
+  if (to) { conditions.push('telemetry.created_at <= ?'); parameters.push(to); }
+  const [rows] = await db.execute(`SELECT telemetry.payload, telemetry.created_at AS createdAt FROM telemetry WHERE ${conditions.join(' AND ')} ORDER BY telemetry.created_at DESC, telemetry.id DESC`, parameters);
   response.json({ telemetry: rows.map((row) => ({ ...row, payload: typeof row.payload === 'string' ? JSON.parse(row.payload) : row.payload })) });
 });
 
@@ -635,10 +667,10 @@ app.post('/api/telemetry', apiReady, async (request, response) => {
   if (!keyOwner) return fail(response, 401, 'Invalid API key');
   const [devices] = await db.execute('SELECT id FROM devices WHERE user_id = ? AND device_id = ? LIMIT 1', [keyOwner.user_id, String(deviceId).trim()]);
   if (!devices[0]) return fail(response, 404, 'Device not found for this API key');
-  await db.execute('INSERT INTO telemetry (device_id, payload) VALUES (?, ?)', [devices[0].id, JSON.stringify(payload)]);
+  const stored = await storeTelemetryIfChanged(db, devices[0].id, payload);
   await db.execute("UPDATE devices SET status = 'online', last_seen = NOW() WHERE id = ?", [devices[0].id]);
   await db.execute('UPDATE api_keys SET last_used_at = NOW() WHERE key_hash = ?', [hashApiKey(apiKey)]);
-  response.status(201).json({ ok: true });
+  response.status(stored ? 201 : 200).json({ ok: true, stored, unchanged: !stored });
 });
 
 app.post('/api/commands', requireSession, apiReady, async (request, response) => {
