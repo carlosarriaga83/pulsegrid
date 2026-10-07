@@ -211,6 +211,14 @@ function populateAutomationDevices() {
   populateAutomationActions();
 }
 
+function populateAutomationConditionDevices() {
+  const select = $('#automation-condition-device');
+  if (!select) return;
+  const selected = select.value;
+  select.innerHTML = `<option value="">Sin condicion de telemetria</option>${devices.map((device) => `<option value="${escapeTelemetryHtml(device.id)}">${escapeTelemetryHtml(device.name)} · ${escapeTelemetryHtml(device.id)}</option>`).join('')}`;
+  select.value = selected;
+}
+
 function populateAutomationActions() {
   const action = $('#automation-action');
   const device = devices.find((item) => item.id === $('#automation-device')?.value);
@@ -244,6 +252,8 @@ function setupAutomationsView() {
   const form = $('#automation-form');
   if (!form || form.dataset.bound) return;
   form.dataset.bound = 'true';
+  form.insertAdjacentHTML('beforeend', '<div class="automation-condition"><strong>Condicion opcional</strong><label>Dispositivo fuente<select id="automation-condition-device"><option value="">Sin condicion de telemetria</option></select></label><div class="automation-fields"><label>Lectura<input id="automation-condition-path" maxlength="120" placeholder="brightness o status.brightness"></label><label>Operador<select id="automation-condition-operator"><option value="gt">mayor que</option><option value="gte">mayor o igual</option><option value="eq">igual a</option><option value="neq">distinto de</option><option value="lt">menor que</option><option value="lte">menor o igual</option></select></label></div><label>Valor<input id="automation-condition-value" placeholder="80"></label></div>');
+  populateAutomationConditionDevices();
   const action = $('#automation-action');
   const position = $('#automation-position-field');
   const motion = $('#automation-motion-fields');
@@ -252,6 +262,10 @@ function setupAutomationsView() {
     delete form.dataset.editingId;
     delete form.dataset.editingTimezone;
     form.reset();
+    $('#automation-condition-device').value = '';
+    $('#automation-condition-path').value = '';
+    $('#automation-condition-operator').value = 'gt';
+    $('#automation-condition-value').value = '';
     position.hidden = true;
     motion.hidden = false;
     setAutomationWeekdays([0, 1, 2, 3, 4, 5, 6]);
@@ -279,7 +293,11 @@ function setupAutomationsView() {
     const choice = action.value;
     if (!choice) { status.textContent = 'Tuya no expone acciones programables para este dispositivo.'; return; }
     const tuyaAction = tuyaCommandOptions(devices.find((item) => item.id === $('#automation-device').value)).find((item) => item.value === choice);
-    const body = { name: $('#automation-name').value.trim(), deviceId: $('#automation-device').value, triggerTime: $('#automation-time').value, weekdays: selectedAutomationWeekdays(), action: tuyaAction ? 'open' : choice, position: choice === 'position' ? Number($('#automation-position').value) : null, speed: Number($('#automation-speed').value), acceleration: Number($('#automation-acceleration').value), commandName: tuyaAction ? 'tuya.set' : null, commandPayload: tuyaAction?.payload || null, timezone: form.dataset.editingTimezone || automationTimezone() };
+    const conditionDevice = $('#automation-condition-device').value;
+    const conditionPath = $('#automation-condition-path').value.trim();
+    const conditionValue = $('#automation-condition-value').value.trim();
+    const condition = conditionDevice ? { deviceId: conditionDevice, path: conditionPath, operator: $('#automation-condition-operator').value, value: conditionValue !== '' && Number.isFinite(Number(conditionValue)) ? Number(conditionValue) : conditionValue } : null;
+    const body = { name: $('#automation-name').value.trim(), deviceId: $('#automation-device').value, triggerTime: $('#automation-time').value, weekdays: selectedAutomationWeekdays(), action: tuyaAction ? 'open' : choice, position: choice === 'position' ? Number($('#automation-position').value) : null, speed: Number($('#automation-speed').value), acceleration: Number($('#automation-acceleration').value), condition, commandName: tuyaAction ? 'tuya.set' : null, commandPayload: tuyaAction?.payload || null, timezone: form.dataset.editingTimezone || automationTimezone() };
     try { await apiRequest(editingId ? `automations/${editingId}` : 'automations', { method: editingId ? 'PATCH' : 'POST', body: JSON.stringify(body) }); resetForm(); status.textContent = editingId ? 'Automation actualizada.' : 'Automation creada y lista para ejecutarse.'; await loadAutomations(); showToast(editingId ? 'Automation actualizada' : 'Automation creada'); }
     catch (error) { status.textContent = error.message; }
   });
@@ -302,6 +320,11 @@ function setupAutomationsView() {
       $('#automation-device').value = rule.deviceId;
       $('#automation-time').value = rule.triggerTime;
       setAutomationWeekdays(rule.weekdays);
+      populateAutomationConditionDevices();
+      $('#automation-condition-device').value = rule.condition?.deviceId || '';
+      $('#automation-condition-path').value = rule.condition?.path || '';
+      $('#automation-condition-operator').value = rule.condition?.operator || 'gt';
+      $('#automation-condition-value').value = rule.condition?.value ?? '';
       populateAutomationActions();
       action.value = rule.commandName === 'tuya.set' ? `tuya:${rule.commandPayload?.code}` : rule.action;
       $('#automation-position').value = rule.position == null ? 50 : rule.position;
@@ -744,10 +767,12 @@ function renderTelemetryChart(samples, metric) {
   const canvas = $('#telemetry-chart');
   if (!canvas || !window.Chart || !metric) return;
   const points = [...samples].reverse().map((sample) => ({ x: new Date(sample.createdAt).getTime(), y: telemetryValues(sample.payload)[metric] })).filter((point) => Number.isFinite(point.y));
+  const chartFrame = canvas.closest('.telemetry-chart-wrap');
+  if (chartFrame) canvas.style.width = `${Math.max(720, points.length * 72)}px`;
   telemetryChart = new Chart(canvas, {
     type: 'line',
     data: { datasets: [{ label: telemetryMetricLabel(metric), data: points, borderColor: '#c8f76b', backgroundColor: 'rgba(200,247,107,.13)', fill: true, borderWidth: 2, pointRadius: 2, pointHoverRadius: 4, tension: .28 }] },
-    options: { responsive: true, maintainAspectRatio: false, animation: false, interaction: { mode: 'nearest', axis: 'x', intersect: false }, plugins: { legend: { display: false }, tooltip: { displayColors: false, callbacks: { title: (items) => formatDateTime(items[0].parsed.x), label: (item) => `${telemetryMetricLabel(metric)}: ${item.formattedValue}` } } }, scales: { x: { type: 'time', time: { tooltipFormat: 'yyyy-MM-dd HH-mm-ss', displayFormats: { minute: 'yyyy-MM-dd HH-mm-ss', hour: 'yyyy-MM-dd HH-mm-ss', day: 'yyyy-MM-dd HH-mm-ss' } }, grid: { color: 'rgba(146,155,156,.12)' }, ticks: { color: '#929b9c', font: { size: 10 } } }, y: { grid: { color: 'rgba(146,155,156,.12)' }, ticks: { color: '#929b9c', font: { size: 10 } } } } }
+    options: { responsive: true, maintainAspectRatio: false, animation: false, interaction: { mode: 'nearest', axis: 'x', intersect: false }, plugins: { legend: { display: false }, tooltip: { displayColors: false, callbacks: { title: (items) => formatDateTime(items[0].parsed.x), label: (item) => `${telemetryMetricLabel(metric)}: ${item.formattedValue}` } } }, scales: { x: { type: 'time', time: { tooltipFormat: 'yyyy-MM-dd HH-mm-ss', displayFormats: { minute: 'yyyy-MM-dd HH-mm-ss', hour: 'yyyy-MM-dd HH-mm-ss', day: 'yyyy-MM-dd HH-mm-ss' } }, grid: { color: 'rgba(146,155,156,.12)' }, ticks: { minRotation: 90, maxRotation: 90, autoSkip: false, color: '#929b9c', font: { size: 10 } } }, y: { grid: { color: 'rgba(146,155,156,.12)' }, ticks: { color: '#929b9c', font: { size: 10 } } } } }
   });
   telemetryChart.options.scales.x.ticks.callback = (value) => formatDateTime(value);
   telemetryChart.update();
@@ -779,7 +804,13 @@ async function loadTelemetry(deviceId = $('#telemetry-device')?.value || devices
     const latestValue = selectedMetric && latest ? telemetryValues(latest.payload)[selectedMetric] : null;
     view.innerHTML = `<div class="page-heading"><div><p class="eyebrow">DATOS EN TIEMPO REAL</p><h1>Telemetria<span class="accent-dot">.</span></h1><p class="heading-copy">Series temporales de las lecturas almacenadas por tus dispositivos.</p></div><button class="secondary-button" id="telemetry-refresh"><i data-lucide="refresh-cw"></i> Actualizar</button></div><div class="telemetry-toolbar panel"><label>Dispositivo<select id="telemetry-device">${devices.map((item) => `<option value="${escapeTelemetryHtml(item.id)}"${item.id === deviceId ? ' selected' : ''}>${escapeTelemetryHtml(item.name)} · ${escapeTelemetryHtml(item.id)}</option>`).join('')}</select></label><label>Metrica<select id="telemetry-metric" ${metrics.length ? '' : 'disabled'}>${metrics.length ? metrics.map((metric) => `<option value="${escapeTelemetryHtml(metric)}"${metric === selectedMetric ? ' selected' : ''}>${escapeTelemetryHtml(telemetryMetricLabel(metric))}</option>`).join('') : '<option>Sin valores numericos</option>'}</select></label><label>Historial<select id="telemetry-limit"><option value="30"${limit === 30 ? ' selected' : ''}>30 muestras</option><option value="100"${limit === 100 ? ' selected' : ''}>100 muestras</option></select></label></div>${refreshWarning ? `<p class="telemetry-warning"><i data-lucide="triangle-alert"></i>${escapeTelemetryHtml(refreshWarning)}</p>` : ''}<div class="telemetry-overview"><article class="metric-card"><span class="metric-label"><i data-lucide="database"></i> Muestras</span><strong>${samples.length}</strong><span class="trend stable">Historial disponible</span></article><article class="metric-card"><span class="metric-label"><i data-lucide="clock-3"></i> Ultima lectura</span><strong style="font-size:18px">${latest ? formatDateTime(latest.createdAt) : '--'}</strong><span class="trend stable">${device?.status === 'online' ? 'Dispositivo en linea' : 'Sin conexion reciente'}</span></article><article class="metric-card"><span class="metric-label"><i data-lucide="activity"></i>${selectedMetric ? escapeTelemetryHtml(telemetryMetricLabel(selectedMetric)) : 'Estado reportado'}</span><strong style="font-size:18px">${Number.isFinite(latestValue) ? latestValue : '--'}</strong><span class="trend stable">${selectedMetric ? 'Valor mas reciente' : 'Sin valores numericos'}</span></article></div><article class="panel telemetry-chart-panel"><div class="panel-heading"><div><h2>Lecturas en el tiempo</h2><p>${device ? `${escapeTelemetryHtml(device.name)} · ${escapeTelemetryHtml(device.id)}` : escapeTelemetryHtml(deviceId)}</p></div>${metrics.length ? '<button class="text-button" id="telemetry-reset-zoom"><i data-lucide="scan-search"></i> Restablecer vista</button>' : ''}</div><div class="telemetry-chart-wrap">${metrics.length ? '<canvas id="telemetry-chart" aria-label="Grafica de telemetria"></canvas>' : '<p class="empty-state">No hay valores numericos que se puedan graficar todavia.</p>'}</div></article><article class="panel telemetry-history-panel"><div class="panel-heading"><div><h2>Ultimas lecturas</h2><p>Detalles sin modificar de cada muestra.</p></div></div><div class="activity-list">${samples.length ? samples.slice(0, 10).map((sample) => `<div class="activity-item" style="align-items:flex-start"><span class="activity-icon lime"><i data-lucide="radio"></i></span><div style="min-width:0;flex:1"><strong>${escapeTelemetryHtml(telemetrySummary(sample.payload))}</strong><details><summary>${new Date(sample.createdAt).toLocaleString('es-MX')} · Ver JSON</summary><pre>${prettyTelemetryJson(sample.payload)}</pre></details></div></div>`).join('') : '<p class="empty-state">Aun no hay telemetria para este dispositivo.</p>'}</div></article>`;
     $('#telemetry-limit')?.closest('label')?.remove();
-    $('.telemetry-toolbar', view).insertAdjacentHTML('beforeend', '<label>Desde<input id="telemetry-from" type="datetime-local" step="1"></label><label>Hasta<input id="telemetry-to" type="datetime-local" step="1"></label>');
+    $('.telemetry-toolbar', view).insertAdjacentHTML('beforeend', '<label>Desde<input id="telemetry-from" type="datetime-local" step="1"></label><label>Hasta<input id="telemetry-to" type="datetime-local" step="1"></label><div class="telemetry-calendar"><label>Mes<select id="telemetry-month"></select></label><div id="telemetry-days" role="group" aria-label="Dias del mes"></div></div>');
+    const monthSelect = $('#telemetry-month');
+    const days = $('#telemetry-days');
+    const calendarMonth = new Date(startValue);
+    const renderCalendar = () => { const month = new Date(`${monthSelect.value}-01T00:00:00`); days.innerHTML = ''; for (let day = 1; day <= new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate(); day += 1) { const button = document.createElement('button'); button.type = 'button'; button.textContent = day; button.addEventListener('click', () => { const from = new Date(month.getFullYear(), month.getMonth(), day); const to = new Date(month.getFullYear(), month.getMonth(), day, 23, 59, 59); $('#telemetry-from').value = formatDateTimeInput(from); $('#telemetry-to').value = formatDateTimeInput(to); loadTelemetry(deviceId); }); days.appendChild(button); } };
+    for (let offset = -6; offset <= 1; offset += 1) { const month = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + offset, 1); const value = `${month.getFullYear()}-${String(month.getMonth() + 1).padStart(2, '0')}`; monthSelect.insertAdjacentHTML('beforeend', `<option value="${value}">${value}</option>`); }
+    monthSelect.value = `${calendarMonth.getFullYear()}-${String(calendarMonth.getMonth() + 1).padStart(2, '0')}`; monthSelect.addEventListener('change', renderCalendar); renderCalendar();
     $('#telemetry-from').value = startValue;
     $('#telemetry-to').value = endValue;
     $$('.telemetry-history-panel time', view).forEach((time, index) => { time.textContent = formatDateTime(samples[index].createdAt); });
