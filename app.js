@@ -534,6 +534,11 @@ async function updateSidebarCloudVersion() {
   label.textContent = `Cloud v${cloudVersion}`;
 }
 
+function commandComposerHasFocus() {
+  const composer = $('.command-compose');
+  return Boolean(composer && composer.contains(document.activeElement));
+}
+
 async function loadDevices() {
   if (cloudRefreshInFlight) return;
   cloudRefreshInFlight = true;
@@ -547,7 +552,7 @@ async function loadDevices() {
   }
   renderDeviceRows();
   renderDeviceCards();
-  renderCommandDeviceState();
+  if (!commandComposerHasFocus()) renderCommandDeviceState();
   updateSidebarFirmwareVersion();
   void updateSidebarCloudVersion();
   updateDeviceSummary();
@@ -839,7 +844,7 @@ function updateDeviceSummary() {
   const counts = $$('.filter-button b');
   if (counts.length === 3) [devices.length, online, offline].forEach((count, index) => { counts[index].textContent = count; });
   const commandDevice = $('#command-device');
-  if (commandDevice) {
+  if (commandDevice && !commandComposerHasFocus()) {
     const selectedDeviceId = commandDevice.value;
     commandDevice.disabled = devices.length === 0;
     commandDevice.innerHTML = devices.length
