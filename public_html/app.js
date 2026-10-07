@@ -159,7 +159,7 @@ function firmwareViewMarkup() {
 }
 
 function automationsViewMarkup() {
-  return `<section class="view" id="view-automations"><div class="page-heading"><div><p class="eyebrow">IF THIS, THEN THAT</p><h1>Automations<span class="accent-dot">.</span></h1><p class="heading-copy">Programa acciones repetibles para tus dispositivos desde la nube.</p></div></div><div class="automation-layout"><form class="panel automation-form" id="automation-form"><div class="panel-heading"><div><h2 id="automation-form-title">Nueva regla</h2><p id="automation-form-copy">Cuando llegue la hora, Pulsegrid pondra la accion en la cola del dispositivo.</p></div><span class="secure-badge"><i data-lucide="workflow"></i> IFTTT</span></div><label>Nombre<input id="automation-name" maxlength="120" required placeholder="Abrir persiana por la manana"></label><label>Dispositivo<select id="automation-device" required><option value="">Selecciona un dispositivo</option></select></label><div class="automation-fields"><label>Hora<input id="automation-time" type="time" required></label></div><fieldset class="automation-weekdays"><legend>Dias de ejecucion</legend><div id="automation-weekdays" role="group" aria-label="Dias de ejecucion"><button type="button" data-weekday="1" aria-pressed="true" title="Lunes">L</button><button type="button" data-weekday="2" aria-pressed="true" title="Martes">M</button><button type="button" data-weekday="3" aria-pressed="true" title="Miercoles">X</button><button type="button" data-weekday="4" aria-pressed="true" title="Jueves">J</button><button type="button" data-weekday="5" aria-pressed="true" title="Viernes">V</button><button type="button" data-weekday="6" aria-pressed="true" title="Sabado">S</button><button type="button" data-weekday="0" aria-pressed="true" title="Domingo">D</button></div></fieldset><label>Entonces<select id="automation-action"><option value="open">Abrir cortina</option><option value="close">Cerrar cortina</option><option value="position">Mover cortina a una posicion</option></select></label><label id="automation-position-field" hidden>Posicion<input id="automation-position" type="number" min="0" max="100" value="50">%</label><div class="automation-form-actions"><button class="primary-button" id="automation-submit" type="submit"><i data-lucide="plus"></i> Crear automation</button><button class="secondary-button" id="automation-cancel-edit" type="button" hidden>Cancelar</button></div><p class="form-status" id="automation-status">Las reglas se ejecutan en tu zona horaria.</p></form><section class="panel automation-list"><div class="panel-heading"><div><h2>Reglas activas</h2><p id="automation-count">Cargando automations...</p></div><button class="icon-button" id="automation-refresh" title="Actualizar"><i data-lucide="refresh-cw"></i></button></div><div id="automation-rows" class="automation-rows"></div></section></div></section>`;
+  return `<section class="view" id="view-automations"><div class="page-heading"><div><p class="eyebrow">IF THIS, THEN THAT</p><h1>Automations<span class="accent-dot">.</span></h1><p class="heading-copy">Programa acciones repetibles para tus dispositivos desde la nube.</p></div></div><div class="automation-layout"><form class="panel automation-form" id="automation-form"><div class="panel-heading"><div><h2 id="automation-form-title">Nueva regla</h2><p id="automation-form-copy">Cuando llegue la hora, Pulsegrid pondra la accion en la cola del dispositivo.</p></div><span class="secure-badge"><i data-lucide="workflow"></i> IFTTT</span></div><label>Nombre<input id="automation-name" maxlength="120" required placeholder="Abrir persiana por la manana"></label><label>Dispositivo<select id="automation-device" required><option value="">Selecciona un dispositivo</option></select></label><div class="automation-fields"><label>Hora<input id="automation-time" type="time" required></label></div><fieldset class="automation-weekdays"><legend>Dias de ejecucion</legend><div id="automation-weekdays" role="group" aria-label="Dias de ejecucion"><button type="button" data-weekday="1" aria-pressed="true" title="Lunes">L</button><button type="button" data-weekday="2" aria-pressed="true" title="Martes">M</button><button type="button" data-weekday="3" aria-pressed="true" title="Miercoles">X</button><button type="button" data-weekday="4" aria-pressed="true" title="Jueves">J</button><button type="button" data-weekday="5" aria-pressed="true" title="Viernes">V</button><button type="button" data-weekday="6" aria-pressed="true" title="Sabado">S</button><button type="button" data-weekday="0" aria-pressed="true" title="Domingo">D</button></div></fieldset><label>Entonces<select id="automation-action"><option value="open">Abrir cortina</option><option value="close">Cerrar cortina</option><option value="position">Mover cortina a una posicion</option></select></label><label id="automation-position-field" hidden>Posicion<input id="automation-position" type="number" min="0" max="100" value="50">%</label><div class="automation-fields" id="automation-motion-fields"><label>Velocidad<input id="automation-speed" type="number" min="0" max="3073" step="1" value="800" required></label><label>Aceleracion<input id="automation-acceleration" type="number" min="0" max="150" step="1" value="50" required></label></div><div class="automation-form-actions"><button class="primary-button" id="automation-submit" type="submit"><i data-lucide="plus"></i> Crear automation</button><button class="secondary-button" id="automation-cancel-edit" type="button" hidden>Cancelar</button></div><p class="form-status" id="automation-status">Las reglas se ejecutan en tu zona horaria.</p></form><section class="panel automation-list"><div class="panel-heading"><div><h2>Reglas activas</h2><p id="automation-count">Cargando automations...</p></div><button class="icon-button" id="automation-refresh" title="Actualizar"><i data-lucide="refresh-cw"></i></button></div><div id="automation-rows" class="automation-rows"></div></section></div></section>`;
 }
 
 let automationRules = [];
@@ -235,12 +235,14 @@ function setupAutomationsView() {
   form.dataset.bound = 'true';
   const action = $('#automation-action');
   const position = $('#automation-position-field');
+  const motion = $('#automation-motion-fields');
   const cancelEdit = $('#automation-cancel-edit');
   const resetForm = () => {
     delete form.dataset.editingId;
     delete form.dataset.editingTimezone;
     form.reset();
     position.hidden = true;
+    motion.hidden = false;
     setAutomationWeekdays([0, 1, 2, 3, 4, 5, 6]);
     $('#automation-form-title').textContent = 'Nueva regla';
     $('#automation-form-copy').textContent = 'Cuando llegue la hora, Pulsegrid pondra la accion en la cola del dispositivo.';
@@ -248,7 +250,11 @@ function setupAutomationsView() {
     cancelEdit.hidden = true;
     renderIcons();
   };
-  const updateActionFields = () => { position.hidden = action.value !== 'position'; };
+  const updateActionFields = () => {
+    const isTuyaAction = action.value.startsWith('tuya:');
+    position.hidden = action.value !== 'position';
+    motion.hidden = isTuyaAction;
+  };
   action.addEventListener('change', updateActionFields);
   $('#automation-device').addEventListener('change', () => { populateAutomationActions(); updateActionFields(); });
   $('#automation-weekdays').addEventListener('click', (event) => {
@@ -262,7 +268,7 @@ function setupAutomationsView() {
     const choice = action.value;
     if (!choice) { status.textContent = 'Tuya no expone acciones programables para este dispositivo.'; return; }
     const tuyaAction = tuyaCommandOptions(devices.find((item) => item.id === $('#automation-device').value)).find((item) => item.value === choice);
-    const body = { name: $('#automation-name').value.trim(), deviceId: $('#automation-device').value, triggerTime: $('#automation-time').value, weekdays: selectedAutomationWeekdays(), action: tuyaAction ? 'open' : choice, position: Number($('#automation-position').value), commandName: tuyaAction ? 'tuya.set' : null, commandPayload: tuyaAction?.payload || null, timezone: form.dataset.editingTimezone || automationTimezone() };
+    const body = { name: $('#automation-name').value.trim(), deviceId: $('#automation-device').value, triggerTime: $('#automation-time').value, weekdays: selectedAutomationWeekdays(), action: tuyaAction ? 'open' : choice, position: choice === 'position' ? Number($('#automation-position').value) : null, speed: Number($('#automation-speed').value), acceleration: Number($('#automation-acceleration').value), commandName: tuyaAction ? 'tuya.set' : null, commandPayload: tuyaAction?.payload || null, timezone: form.dataset.editingTimezone || automationTimezone() };
     try { await apiRequest(editingId ? `automations/${editingId}` : 'automations', { method: editingId ? 'PATCH' : 'POST', body: JSON.stringify(body) }); resetForm(); status.textContent = editingId ? 'Automation actualizada.' : 'Automation creada y lista para ejecutarse.'; await loadAutomations(); showToast(editingId ? 'Automation actualizada' : 'Automation creada'); }
     catch (error) { status.textContent = error.message; }
   });
@@ -288,7 +294,9 @@ function setupAutomationsView() {
       populateAutomationActions();
       action.value = rule.commandName === 'tuya.set' ? `tuya:${rule.commandPayload?.code}` : rule.action;
       $('#automation-position').value = rule.position == null ? 50 : rule.position;
-      position.hidden = rule.action !== 'position';
+      $('#automation-speed').value = rule.speed == null ? 800 : rule.speed;
+      $('#automation-acceleration').value = rule.acceleration == null ? 50 : rule.acceleration;
+      updateActionFields();
       $('#automation-form-title').textContent = 'Editar regla';
       $('#automation-form-copy').textContent = `Editando una regla en ${form.dataset.editingTimezone}.`;
       $('#automation-submit').innerHTML = '<i data-lucide="save"></i> Guardar cambios';

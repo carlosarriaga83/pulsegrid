@@ -60,11 +60,18 @@ function firmwareFileName(fileName) {
   return String(fileName);
 }
 
-function automationAction(action, position) {
-  if (action === 'open') return { command: 'curtain.open', payload: {} };
-  if (action === 'close') return { command: 'curtain.close', payload: {} };
-  if (action === 'position') return { command: 'curtain.move', payload: { servoId: 1, percent: position, speed: 800, acceleration: 50 } };
+function automationAction(action, position, speed, acceleration) {
+  const payload = { speed, acceleration };
+  if (action === 'open') return { command: 'curtain.open', payload };
+  if (action === 'close') return { command: 'curtain.close', payload };
+  if (action === 'position') return { command: 'curtain.move', payload: { servoId: 1, percent: position, ...payload } };
   throw new Error('Accion de automatizacion invalida');
+}
+
+function automationMotionValue(value, fallback, label, maximum) {
+  const motion = value == null || value === '' ? fallback : Number(value);
+  if (!Number.isInteger(motion) || motion < 0 || motion > maximum) throw new Error(`${label} debe estar entre 0 y ${maximum}`);
+  return motion;
 }
 
 function automationTimezone(timezone) {
@@ -100,6 +107,8 @@ function automationInput(body = {}) {
   const commandName = String(body.commandName || '').trim();
   const commandPayload = body.commandPayload;
   const position = Number(body.position);
+  const speed = automationMotionValue(body.speed, 800, 'Velocidad', 3073);
+  const acceleration = automationMotionValue(body.acceleration, 50, 'Aceleracion', 150);
   const timezone = automationTimezone(body.timezone);
   const weekdays = automationWeekdays(body.weekdays);
   if (!name || name.length > 120 || !deviceId || !/^\d{2}:\d{2}$/.test(triggerTime)) throw new Error('Nombre, dispositivo y hora HH:MM son obligatorios');
@@ -107,11 +116,11 @@ function automationInput(body = {}) {
   if (hours > 23 || minutes > 59) throw new Error('Hora de automatizacion invalida');
   if (commandName) {
     if (commandName !== 'tuya.set' || !commandPayload || typeof commandPayload !== 'object' || Array.isArray(commandPayload)) throw new Error('El comando de automatizacion no es valido');
-    return { name, deviceId, triggerTime, action: 'open', position: null, timezone, weekdays, commandName, commandPayload };
+    return { name, deviceId, triggerTime, action: 'open', position: null, speed: null, acceleration: null, timezone, weekdays, commandName, commandPayload };
   }
   if (action === 'position' && (!Number.isFinite(position) || position < 0 || position > 100)) throw new Error('La posicion debe estar entre 0 y 100');
-  automationAction(action, position);
-  return { name, deviceId, triggerTime, action, position: action === 'position' ? position : null, timezone, weekdays, commandName: null, commandPayload: null };
+  automationAction(action, position, speed, acceleration);
+  return { name, deviceId, triggerTime, action, position: action === 'position' ? position : null, speed, acceleration, timezone, weekdays, commandName: null, commandPayload: null };
 }
 
 async function runScheduledAutomations() {
@@ -120,13 +129,13 @@ async function runScheduledAutomations() {
   try {
     await ensureSchema();
     const db = database();
-    const [rules] = await db.execute('SELECT id, device_id AS deviceId, trigger_time AS triggerTime, action_name AS action, position, command_name AS commandName, command_payload AS commandPayload, timezone, weekdays FROM automations WHERE enabled = 1 AND timezone IS NOT NULL');
+    const [rules] = await db.execute('SELECT id, device_id AS deviceId, trigger_time AS triggerTime, action_name AS action, position, speed, acceleration, command_name AS commandName, command_payload AS commandPayload, timezone, weekdays FROM automations WHERE enabled = 1 AND timezone IS NOT NULL');
     for (const rule of rules) {
       const localTime = automationLocalTime(rule.timezone);
       if (localTime.time !== rule.triggerTime || !String(rule.weekdays).split(',').map(Number).includes(localTime.weekday)) continue;
       const [claimed] = await db.execute('UPDATE automations SET last_run_at = NOW(), last_run_date = ? WHERE id = ? AND enabled = 1 AND (last_run_date IS NULL OR last_run_date <> ?)', [localTime.date, rule.id, localTime.date]);
       if (!claimed.affectedRows) continue;
-      const command = rule.commandName ? { command: rule.commandName, payload: typeof rule.commandPayload === 'string' ? JSON.parse(rule.commandPayload) : rule.commandPayload } : automationAction(rule.action, rule.position);
+      const command = rule.commandName ? { command: rule.commandName, payload: typeof rule.commandPayload === 'string' ? JSON.parse(rule.commandPayload) : rule.commandPayload } : automationAction(rule.action, rule.position, rule.speed, rule.acceleration);
       const [devices] = await db.execute('SELECT id, user_id AS userId, provider, capabilities FROM devices WHERE id = ? LIMIT 1', [rule.deviceId]);
       if (devices[0]) await dispatchDeviceCommand(db, devices[0], command.command, command.payload);
     }
@@ -411,12 +420,14 @@ async function ensureSchema() {
     try { await db.execute('ALTER TABLE telemetry ADD INDEX telemetry_device_created (device_id, created_at)'); } catch (error) { if (error.code !== 'ER_DUP_KEYNAME') throw error; }
     await db.execute("CREATE TABLE IF NOT EXISTS commands (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, device_id INT UNSIGNED NOT NULL, command_name VARCHAR(80) NOT NULL, payload JSON NOT NULL, status VARCHAR(30) NOT NULL DEFAULT 'queued', error_message VARCHAR(500) NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, CONSTRAINT commands_device_fk FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE) ENGINE=InnoDB");
     try { await db.execute('ALTER TABLE commands ADD COLUMN error_message VARCHAR(500) NULL'); } catch (error) { if (error.code !== 'ER_DUP_FIELDNAME') throw error; }
-    await db.execute("CREATE TABLE IF NOT EXISTS automations (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, user_id INT UNSIGNED NOT NULL, device_id INT UNSIGNED NOT NULL, name VARCHAR(120) NOT NULL, trigger_time CHAR(5) NOT NULL, timezone VARCHAR(64) NULL, weekdays VARCHAR(13) NOT NULL DEFAULT '0,1,2,3,4,5,6', action_name ENUM('open','close','position') NOT NULL, position DECIMAL(5,2) NULL, enabled TINYINT(1) NOT NULL DEFAULT 1, last_run_at TIMESTAMP NULL, last_run_date CHAR(10) NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, INDEX automation_schedule (enabled, trigger_time, last_run_date), CONSTRAINT automations_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE, CONSTRAINT automations_device_fk FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE) ENGINE=InnoDB");
+    await db.execute("CREATE TABLE IF NOT EXISTS automations (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, user_id INT UNSIGNED NOT NULL, device_id INT UNSIGNED NOT NULL, name VARCHAR(120) NOT NULL, trigger_time CHAR(5) NOT NULL, timezone VARCHAR(64) NULL, weekdays VARCHAR(13) NOT NULL DEFAULT '0,1,2,3,4,5,6', action_name ENUM('open','close','position') NOT NULL, position DECIMAL(5,2) NULL, speed SMALLINT UNSIGNED NOT NULL DEFAULT 800, acceleration TINYINT UNSIGNED NOT NULL DEFAULT 50, enabled TINYINT(1) NOT NULL DEFAULT 1, last_run_at TIMESTAMP NULL, last_run_date CHAR(10) NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, INDEX automation_schedule (enabled, trigger_time, last_run_date), CONSTRAINT automations_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE, CONSTRAINT automations_device_fk FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE) ENGINE=InnoDB");
     try { await db.execute('ALTER TABLE automations ADD COLUMN timezone VARCHAR(64) NULL AFTER trigger_time'); } catch (error) { if (error.code !== 'ER_DUP_FIELDNAME') throw error; }
     try { await db.execute("ALTER TABLE automations ADD COLUMN weekdays VARCHAR(13) NOT NULL DEFAULT '0,1,2,3,4,5,6' AFTER timezone"); } catch (error) { if (error.code !== 'ER_DUP_FIELDNAME') throw error; }
     try { await db.execute('ALTER TABLE automations ADD COLUMN last_run_date CHAR(10) NULL AFTER last_run_at'); } catch (error) { if (error.code !== 'ER_DUP_FIELDNAME') throw error; }
     try { await db.execute('ALTER TABLE automations ADD COLUMN command_name VARCHAR(80) NULL AFTER action_name'); } catch (error) { if (error.code !== 'ER_DUP_FIELDNAME') throw error; }
     try { await db.execute('ALTER TABLE automations ADD COLUMN command_payload JSON NULL AFTER command_name'); } catch (error) { if (error.code !== 'ER_DUP_FIELDNAME') throw error; }
+    try { await db.execute('ALTER TABLE automations ADD COLUMN speed SMALLINT UNSIGNED NOT NULL DEFAULT 800 AFTER position'); } catch (error) { if (error.code !== 'ER_DUP_FIELDNAME') throw error; }
+    try { await db.execute('ALTER TABLE automations ADD COLUMN acceleration TINYINT UNSIGNED NOT NULL DEFAULT 50 AFTER speed'); } catch (error) { if (error.code !== 'ER_DUP_FIELDNAME') throw error; }
     await db.execute("CREATE TABLE IF NOT EXISTS firmware_releases (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, user_id INT UNSIGNED NOT NULL, version VARCHAR(40) NOT NULL, notes VARCHAR(280) NOT NULL DEFAULT '', is_active TINYINT(1) NOT NULL DEFAULT 0, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, UNIQUE KEY firmware_user_version (user_id, version), INDEX firmware_active (user_id, is_active), CONSTRAINT firmware_releases_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE) ENGINE=InnoDB");
     try { await db.execute("ALTER TABLE firmware_releases ADD COLUMN notes VARCHAR(280) NOT NULL DEFAULT ''"); } catch (error) { if (error.code !== 'ER_DUP_FIELDNAME') throw error; }
     await db.execute("CREATE TABLE IF NOT EXISTS firmware_files (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, release_id BIGINT UNSIGNED NOT NULL, name VARCHAR(80) NOT NULL, content MEDIUMBLOB NOT NULL, sha256 CHAR(64) NOT NULL, UNIQUE KEY firmware_release_file (release_id, name), CONSTRAINT firmware_files_release_fk FOREIGN KEY (release_id) REFERENCES firmware_releases(id) ON DELETE CASCADE) ENGINE=InnoDB");
@@ -650,7 +661,7 @@ app.get('/api/commands', requireSession, apiReady, async (request, response) => 
 app.get('/api/automations', requireSession, apiReady, async (request, response) => {
   const timezone = request.query.timezone ? automationTimezone(request.query.timezone) : null;
   if (timezone) await database().execute('UPDATE automations SET timezone = ? WHERE user_id = (SELECT id FROM users WHERE email = ?) AND timezone IS NULL', [timezone, request.session.user.email]);
-  const [rows] = await database().execute('SELECT automations.id, automations.name, devices.device_id AS deviceId, devices.name AS deviceName, devices.provider, devices.capabilities, automations.trigger_time AS triggerTime, automations.timezone, automations.weekdays, automations.action_name AS action, automations.position, automations.command_name AS commandName, automations.command_payload AS commandPayload, automations.enabled, automations.last_run_at AS lastRunAt FROM automations JOIN devices ON devices.id = automations.device_id WHERE automations.user_id = (SELECT id FROM users WHERE email = ?) ORDER BY automations.trigger_time, automations.id', [request.session.user.email]);
+  const [rows] = await database().execute('SELECT automations.id, automations.name, devices.device_id AS deviceId, devices.name AS deviceName, devices.provider, devices.capabilities, automations.trigger_time AS triggerTime, automations.timezone, automations.weekdays, automations.action_name AS action, automations.position, automations.speed, automations.acceleration, automations.command_name AS commandName, automations.command_payload AS commandPayload, automations.enabled, automations.last_run_at AS lastRunAt FROM automations JOIN devices ON devices.id = automations.device_id WHERE automations.user_id = (SELECT id FROM users WHERE email = ?) ORDER BY automations.trigger_time, automations.id', [request.session.user.email]);
   response.json({ automations: rows.map((rule) => ({ ...rule, commandPayload: typeof rule.commandPayload === 'string' ? JSON.parse(rule.commandPayload) : rule.commandPayload, weekdays: String(rule.weekdays).split(',').map(Number) })) });
 });
 
@@ -661,7 +672,7 @@ app.post('/api/automations', requireSession, apiReady, async (request, response)
     const [devices] = await db.execute('SELECT id, user_id AS userId, provider, capabilities FROM devices WHERE user_id = (SELECT id FROM users WHERE email = ?) AND device_id = ? LIMIT 1', [request.session.user.email, rule.deviceId]);
     if (!devices[0]) return fail(response, 404, 'Dispositivo no encontrado');
     if (rule.commandName) validateTuyaCommand(devices[0], rule.commandName, rule.commandPayload);
-    const [result] = await db.execute('INSERT INTO automations (user_id, device_id, name, trigger_time, timezone, weekdays, action_name, position, command_name, command_payload) VALUES ((SELECT id FROM users WHERE email = ?), ?, ?, ?, ?, ?, ?, ?, ?, ?)', [request.session.user.email, devices[0].id, rule.name, rule.triggerTime, rule.timezone, rule.weekdays.join(','), rule.action, rule.position, rule.commandName, rule.commandPayload ? JSON.stringify(rule.commandPayload) : null]);
+    const [result] = await db.execute('INSERT INTO automations (user_id, device_id, name, trigger_time, timezone, weekdays, action_name, position, speed, acceleration, command_name, command_payload) VALUES ((SELECT id FROM users WHERE email = ?), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [request.session.user.email, devices[0].id, rule.name, rule.triggerTime, rule.timezone, rule.weekdays.join(','), rule.action, rule.position, rule.speed, rule.acceleration, rule.commandName, rule.commandPayload ? JSON.stringify(rule.commandPayload) : null]);
     response.status(201).json({ ok: true, id: result.insertId });
   } catch (error) {
     fail(response, 422, error.message);
@@ -681,7 +692,7 @@ app.patch('/api/automations/:id', requireSession, apiReady, async (request, resp
     const [devices] = await db.execute('SELECT id, user_id AS userId, provider, capabilities FROM devices WHERE user_id = (SELECT id FROM users WHERE email = ?) AND device_id = ? LIMIT 1', [request.session.user.email, rule.deviceId]);
     if (!devices[0]) return fail(response, 404, 'Dispositivo no encontrado');
     if (rule.commandName) validateTuyaCommand(devices[0], rule.commandName, rule.commandPayload);
-    const [result] = await db.execute('UPDATE automations SET device_id = ?, name = ?, trigger_time = ?, timezone = ?, weekdays = ?, action_name = ?, position = ?, command_name = ?, command_payload = ?, last_run_at = NULL, last_run_date = NULL WHERE id = ? AND user_id = (SELECT id FROM users WHERE email = ?)', [devices[0].id, rule.name, rule.triggerTime, rule.timezone, rule.weekdays.join(','), rule.action, rule.position, rule.commandName, rule.commandPayload ? JSON.stringify(rule.commandPayload) : null, request.params.id, request.session.user.email]);
+    const [result] = await db.execute('UPDATE automations SET device_id = ?, name = ?, trigger_time = ?, timezone = ?, weekdays = ?, action_name = ?, position = ?, speed = ?, acceleration = ?, command_name = ?, command_payload = ?, last_run_at = NULL, last_run_date = NULL WHERE id = ? AND user_id = (SELECT id FROM users WHERE email = ?)', [devices[0].id, rule.name, rule.triggerTime, rule.timezone, rule.weekdays.join(','), rule.action, rule.position, rule.speed, rule.acceleration, rule.commandName, rule.commandPayload ? JSON.stringify(rule.commandPayload) : null, request.params.id, request.session.user.email]);
     if (!result.affectedRows) return fail(response, 404, 'Automatizacion no encontrada');
     response.json({ ok: true });
   } catch (error) {
