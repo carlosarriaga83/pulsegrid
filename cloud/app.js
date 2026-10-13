@@ -728,7 +728,13 @@ function deviceDirectionMarkup() {
 function deviceDirectionParameterMarkup(device) {
   if (device.provider === 'tuya' || !AutomationModel.curtain(device)) return '';
   const telemetry = parseTelemetry(device.telemetry);
-  const reversed = telemetry.directionReversed === true || telemetry.directionReversed === 'true';
+  const state = deviceUiState();
+  const key = `${device.id}\u0000directionReversed`;
+  const reported = telemetry.directionReversed === true || telemetry.directionReversed === 'true';
+  const optimistic = state.optimistic.get(key);
+  const reversed = optimistic && optimistic.expiresAt > Date.now() ? optimistic.value : reported;
+  if (optimistic && String(optimistic.value) === String(reported)) state.optimistic.delete(key);
+  else if (optimistic && optimistic.expiresAt <= Date.now()) state.optimistic.delete(key);
   return `<div class="device-parameter device-direction-parameter"><div class="device-parameter-heading"><strong>Sentido del motor</strong></div><div class="device-parameter-control"><label class="device-parameter-switch"><input type="checkbox" data-device-direction data-device-id="${escapeTelemetryHtml(device.id)}"${reversed ? ' checked' : ''} aria-label="Sentido del motor"><i></i></label><small data-direction-status role="status" aria-live="polite">${reversed ? 'Reversa' : 'Normal'}</small></div></div>`;
 }
 
@@ -837,10 +843,13 @@ async function sendDeviceDirection(event) {
   const device = devices.find((item) => item.id === input.dataset.deviceId);
   const status = input.closest('.device-direction-parameter')?.querySelector('[data-direction-status]');
   if (!device || !status) return;
-  const previousValue = input.checked;
+  const telemetry = parseTelemetry(device.telemetry);
+  const previousValue = telemetry.directionReversed === true || telemetry.directionReversed === 'true';
   const reversed = input.checked;
   const uiState = deviceUiState();
+  const key = `${device.id}\u0000directionReversed`;
   uiState.pending.add(device.id);
+  uiState.optimistic.set(key, { value: reversed, expiresAt: Date.now() + 15000 });
   input.disabled = true;
   status.textContent = 'Enviando...';
   try {
@@ -848,6 +857,7 @@ async function sendDeviceDirection(event) {
     status.textContent = result.status === 'succeeded' ? (reversed ? 'Reversa' : 'Normal') : 'En cola';
     if (typeof loadDevices === 'function') setTimeout(() => void loadDevices(), 2500);
   } catch (error) {
+    uiState.optimistic.delete(key);
     input.checked = previousValue;
     status.textContent = `Error: ${error.message}`;
   } finally {

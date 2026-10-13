@@ -331,3 +331,21 @@ test('backend validates Pulsegrid direction configuration', () => {
   assert.throws(() => b.validateDirectionConfiguration(curtain, 'direction.configure', {}));
   assert.throws(() => b.validateDirectionConfiguration({ provider: 'tuya' }, 'direction.configure', { reversed: true }));
 });
+
+test('direction validation uses latest telemetry for Pulsegrid actuators', async () => {
+  const server = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+  const context = { AutomationModel: model, OpenMeteo: openMeteo, console, URL, setInterval: () => {}, clearInterval: () => {} };
+  vm.createContext(context);
+  vm.runInContext(server.slice(server.indexOf('function validateTuyaCommand('), server.indexOf('async function syncTuyaDevice(')), context);
+  const calls = [];
+  const db = { execute: async (sql, args) => {
+    calls.push([sql, args]);
+    if (sql.startsWith('SELECT payload FROM telemetry')) return [[{ payload: { kind: 'curtain', firmwareTarget: 'ga25' } }]];
+    if (sql.startsWith('INSERT INTO commands')) return [{ insertId: 9 }];
+    throw new Error(sql);
+  } };
+  const result = await context.dispatchDeviceCommand(db, { id: 4, provider: 'pulsegrid', type: 'Actuador' }, 'direction.configure', { reversed: true });
+  assert.equal(result.id, 9);
+  assert.equal(result.status, 'queued');
+  assert.equal(calls.length, 2);
+});

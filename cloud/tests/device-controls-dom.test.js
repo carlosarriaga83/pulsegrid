@@ -22,14 +22,19 @@ const device = {
   ]
 };
 
-function setup(folder, requestImpl = async () => ({ status: 'succeeded' })) {
+const curtainDevice = {
+  id: 'curtain-1', name: 'Curtain', type: 'curtain', provider: 'pulsegrid', status: 'online', report: 'now', signal: 'good', icon: 'blinds', meta: [],
+  telemetry: { kind: 'curtain', firmwareTarget: 'ga25', directionReversed: false }
+};
+
+function setup(folder, requestImpl = async () => ({ status: 'succeeded' }), configuredDevice = device) {
   const dom = new JSDOM('<div id="device-card-grid"></div>', { runScripts: 'outside-only', url: 'http://localhost/' });
   const { window } = dom;
   const context = dom.getInternalVMContext();
   const requests = [];
   const escape = (value) => String(value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
   Object.assign(window, {
-    devices: [structuredClone(device)], AutomationModel: model,
+    devices: [structuredClone(configuredDevice)], AutomationModel: model,
     navigate: (view) => { window.lastView = view; },
     loadTelemetry: async (deviceId) => { window.lastTelemetryDevice = deviceId; },
     formatDateTimeInput: (value) => value.toISOString().slice(0, 16),
@@ -123,6 +128,30 @@ for (const folder of ['', 'public', 'public_html']) {
     window.devices[0].telemetry.status[0].value = true;
     vm.runInContext('renderDeviceCards()', context);
     assert.equal(window.document.querySelector('[data-code="switch_led"]').checked, false);
+  });
+
+  test(`${label}: motor direction survives stale telemetry until confirmed`, async (t) => {
+    const f = setup(folder, async () => ({ status: 'queued' }), curtainDevice); t.after(() => f.dom.window.close());
+    const { window, context } = f;
+    const toggle = window.document.querySelector('[data-device-direction]');
+    toggle.checked = true;
+    await vm.runInContext('sendDeviceDirection({ target: document.querySelector("[data-device-direction]") })', context);
+    assert.deepEqual(f.requests[0], { endpoint: 'commands', deviceId: 'curtain-1', command: 'direction.configure', payload: { reversed: true } });
+    vm.runInContext('renderDeviceCards()', context);
+    assert.equal(window.document.querySelector('[data-device-direction]').checked, true);
+    window.devices[0].telemetry.directionReversed = true;
+    vm.runInContext('renderDeviceCards()', context);
+    assert.equal(window.document.querySelector('[data-device-direction]').checked, true);
+  });
+
+  test(`${label}: motor direction returns to the previous value when command fails`, async (t) => {
+    const f = setup(folder, async () => { throw new Error('Dispositivo fuera de linea'); }, curtainDevice); t.after(() => f.dom.window.close());
+    const { window, context } = f;
+    const toggle = window.document.querySelector('[data-device-direction]');
+    toggle.checked = true;
+    await vm.runInContext('sendDeviceDirection({ target: document.querySelector("[data-device-direction]") })', context);
+    assert.equal(window.document.querySelector('[data-device-direction]').checked, false);
+    assert.match(window.document.querySelector('[data-direction-status]').textContent, /Error: Dispositivo fuera de linea/);
   });
 
   test(`${label}: card actions remain independent and open device telemetry`, async (t) => {

@@ -394,6 +394,7 @@ def execute(command):
         pending_configuration = {"wifi_ssid": WIFI_SSID, "wifi_password": WIFI_PASSWORD, "api_url": API_URL,
                                  "api_key": API_KEY, "device_id": DEVICE_ID, "full_travel_ms": FULL_TRAVEL_MS,
                                  "open_a_level": OPEN_A_LEVEL, "direction_reversed": payload["reversed"]}
+        save_configuration(pending_configuration)
     elif name == "curtain.open":
         motor.start(1, payload.get("speed", 70), 100)
     elif name == "curtain.close":

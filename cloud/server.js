@@ -583,7 +583,11 @@ async function validateAutomationDevices(db, email, target, rule) {
 async function dispatchDeviceCommand(db, device, command, payload, context = {}) {
   if (device.provider !== 'tuya') {
     if (command === 'device.configure') validateDeviceConfiguration(device, command, payload);
-    if (command === 'direction.configure') validateDirectionConfiguration(device, command, payload);
+    if (command === 'direction.configure') {
+      const [readings] = await db.execute('SELECT payload FROM telemetry WHERE device_id = ? ORDER BY created_at DESC, id DESC LIMIT 1', [device.id]);
+      const latestTelemetry = readings[0]?.payload;
+      validateDirectionConfiguration({ ...device, telemetry: latestTelemetry }, command, payload);
+    }
     const [result] = await db.execute('INSERT INTO commands (device_id, command_name, payload) VALUES (?, ?, ?)', [device.id, command, JSON.stringify(payload)]);
     return { id: result.insertId, status: 'queued' };
   }
