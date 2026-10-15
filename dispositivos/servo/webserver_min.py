@@ -177,6 +177,9 @@ def connect_wifi():
         return None
     try:
         wlan.active(True)
+        connecting = getattr(network, 'STAT_CONNECTING', None)
+        if connecting is not None and wlan.status() == connecting:
+            return wlan
         if not wlan.isconnected():
             wlan.connect(WIFI_SSID, WIFI_PASSWORD)
         return wlan if wlan.isconnected() else None

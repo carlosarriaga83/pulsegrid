@@ -957,6 +957,7 @@ app.get('/api/device-bootstrap', apiReady, async (request, response) => {
   const db = database();
   const [devices] = await db.execute('SELECT id FROM devices WHERE device_id = ? LIMIT 1', [deviceId]);
   if (!devices[0]) return fail(response, 404, 'Device not found');
+  await db.execute("UPDATE devices SET status = 'provisioning', last_seen = NOW() WHERE id = ?", [devices[0].id]);
   const [commands] = await db.execute("SELECT id, command_name AS name, payload FROM commands WHERE device_id = ? AND command_name = 'device.configure' AND status = 'queued' ORDER BY created_at ASC, id ASC LIMIT 1", [devices[0].id]);
   if (!commands[0]) return response.json({ command: null });
   const payload = typeof commands[0].payload === 'string' ? JSON.parse(commands[0].payload) : commands[0].payload;

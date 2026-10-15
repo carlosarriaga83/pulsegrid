@@ -45,6 +45,8 @@ def _unchunk(value):
     return output
 
 def _connection(timeout):
+    import gc
+    gc.collect()
     secure = API_URL.startswith('https://')
     address = API_URL.split('://', 1)[-1].split('/', 1)[0]
     parts = address.split(':', 1)
@@ -80,6 +82,8 @@ def _request(path, payload=None, api_key=None):
         return ujson.loads(body) if body else {}
     finally:
         client.close()
+        import gc
+        gc.collect()
 
 def _post(path, payload): return _request(path, payload)
 def _get(path): return _request(path)
@@ -227,7 +231,6 @@ def sync(cortina):
         if API_URL and DEVICE_ID and not API_KEY and time.ticks_diff(time.ticks_ms(), _last_presence) >= 10000:
             _last_presence = time.ticks_ms()
             try:
-                _request('/api/device-presence', {'deviceId': DEVICE_ID, 'kind': 'curtain', 'firmwareTarget': FIRMWARE_TARGET, 'apiKeyConfigured': False}, BOOTSTRAP_API_KEY)
                 result = _request('/api/device-bootstrap?deviceId=' + DEVICE_ID, None, BOOTSTRAP_API_KEY)
                 command = result.get('command') if result else None
                 if command and command.get('name') == 'device.configure':

@@ -91,6 +91,7 @@ def cloud_path(path):
 
 
 def api_socket(timeout):
+    gc.collect()
     secure = API_URL.startswith("https://")
     address = API_URL.split("://", 1)[-1].split("/", 1)[0]
     parts = address.split(":", 1)
@@ -196,12 +197,7 @@ def request(method, path, body=None):
 
 
 def send_presence():
-    if not API_URL or not DEVICE_ID:
-        return
-    try:
-        relay_request("POST", "/api/device-presence", {"deviceId": DEVICE_ID, "kind": "curtain", "firmwareTarget": FIRMWARE_TARGET, "firmwareVersion": FIRMWARE_VERSION, "apiKeyConfigured": bool(API_KEY)}, BOOTSTRAP_API_KEY)
-    except Exception as error:
-        print("Pulsegrid presence:", error)
+    return
 
 
 def poll_bootstrap():
@@ -517,7 +513,6 @@ def main():
     motor.stop()
     status_led.set(False)
     print("Pulsegrid GA25YN370 listo; firmware {}; PWM GPIO16, direccion GPIO18/GPIO33".format(FIRMWARE_VERSION))
-    captive_portal.start_background(motor)
     if ota_boot:
         ota_boot.confirm()
     if not WIFI_SSID:
@@ -531,6 +526,7 @@ def main():
         else:
             status_led.set((30, 25, 0))
             print("LED de estado: amarillo; esperando API key")
+    captive_portal.start_background(motor)
     global last_poll, last_telemetry, last_presence, next_wifi_retry
     while True:
         if ota_boot:
@@ -550,7 +546,6 @@ def main():
             poll_commands()
         if connected and not API_KEY and time.ticks_diff(now, last_presence) >= 5000:
             last_presence = now
-            send_presence()
             poll_bootstrap()
         if connected and time.ticks_diff(now, last_telemetry) >= TELEMETRY_MS:
             last_telemetry = now
