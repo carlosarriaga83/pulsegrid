@@ -16,7 +16,7 @@ TELEMETRY_PATH = '/api/telemetry'
 COMMANDS_PATH = '/api/device-commands'
 FIRMWARE_TARGET = 'servo'
 BOOTSTRAP_API_KEY = 'pg_bootstrap_v1'
-FIRMWARE_FILES = ('main.py', 'pulsegrid_min.py', 'webserver_min.py', 'cortina.py', 'stservo.py', 'ssd1306.py', 'boot.py', 'ota_boot.py')
+FIRMWARE_FILES = ('main.py', 'pulsegrid_min.py', 'pulsegrid_bootstrap.py', 'webserver_min.py', 'cortina.py', 'stservo.py', 'ssd1306.py', 'boot.py', 'ota_boot.py')
 _last_report = _last_poll = _retry_at = 0
 _last_presence = 0
 _pending_configuration = _restart_requested = None
@@ -231,7 +231,8 @@ def sync(cortina):
         if API_URL and DEVICE_ID and not API_KEY and time.ticks_diff(time.ticks_ms(), _last_presence) >= 10000:
             _last_presence = time.ticks_ms()
             try:
-                result = _request('/api/device-bootstrap?deviceId=' + DEVICE_ID, None, BOOTSTRAP_API_KEY)
+                import pulsegrid_bootstrap
+                result = pulsegrid_bootstrap.fetch(API_URL, DEVICE_ID)
                 command = result.get('command') if result else None
                 if command and command.get('name') == 'device.configure':
                     _execute(cortina, command)
