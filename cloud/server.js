@@ -1020,6 +1020,14 @@ app.get('/api/commands', requireSession, apiReady, async (request, response) => 
   response.json({ commands: rows });
 });
 
+app.delete('/api/commands/:id', requireSession, apiReady, async (request, response) => {
+  const commandId = Number(request.params.id);
+  if (!Number.isSafeInteger(commandId) || commandId <= 0) return fail(response, 422, 'ID de comando invalido');
+  const [result] = await database().execute("UPDATE commands JOIN devices ON devices.id = commands.device_id SET commands.status = 'canceled', commands.error_message = 'Cancelado por el usuario' WHERE commands.id = ? AND devices.user_id = (SELECT id FROM users WHERE email = ?) AND commands.status IN ('queued', 'delivered')", [commandId, request.session.user.email]);
+  if (!result.affectedRows) return fail(response, 409, 'El comando ya fue ejecutado, rechazado o cancelado');
+  response.json({ ok: true, commandId, status: 'canceled' });
+});
+
 app.get('/api/automations', requireSession, apiReady, async (request, response) => {
   const timezone = request.query.timezone ? automationTimezone(request.query.timezone) : null;
   if (timezone) await database().execute('UPDATE automations SET timezone = ? WHERE user_id = (SELECT id FROM users WHERE email = ?) AND timezone IS NULL', [timezone, request.session.user.email]);

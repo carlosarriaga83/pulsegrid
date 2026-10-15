@@ -656,8 +656,19 @@ async function loadCommandHistory() {
     const result = await apiRequest('commands');
     $$('.history-row, .empty-state', history).forEach((row) => row.remove());
     history.insertAdjacentHTML('beforeend', result.commands.length
-      ? result.commands.map((command) => `<div class="history-row"><span class="history-status ${command.status === 'succeeded' ? 'success' : command.status === 'failed' ? 'failed' : 'pending'}"><i data-lucide="${command.status === 'succeeded' ? 'check' : command.status === 'failed' ? 'x' : 'clock-3'}"></i></span><div><strong>${command.command}</strong><small>${command.deviceName} · ${command.deviceId}${command.errorMessage ? ` · Error: ${escapeTelemetryHtml(command.errorMessage)}` : ''}</small></div><code>${command.status}</code><time>${formatDateTime(command.createdAt)}</time></div>`).join('')
+      ? result.commands.map((command) => `<div class="history-row"><span class="history-status ${command.status === 'succeeded' ? 'success' : command.status === 'failed' ? 'failed' : command.status === 'canceled' ? 'canceled' : 'pending'}"><i data-lucide="${command.status === 'succeeded' ? 'check' : command.status === 'failed' ? 'x' : command.status === 'canceled' ? 'ban' : 'clock-3'}"></i></span><div><strong>${command.command}</strong><small>${command.deviceName} · ${command.deviceId}${command.errorMessage ? ` · Error: ${escapeTelemetryHtml(command.errorMessage)}` : ''}</small></div><code>${command.status}</code>${['queued', 'delivered'].includes(command.status) ? `<button type="button" class="history-cancel-button" data-cancel-command="${command.id}" title="Cancelar comando"><i data-lucide="x"></i> Cancelar</button>` : ''}<time>${formatDateTime(command.createdAt)}</time></div>`).join('')
       : '<p class="empty-state">Aun no hay comandos enviados.</p>');
+    $$('[data-cancel-command]', history).forEach((button) => button.addEventListener('click', async () => {
+      button.disabled = true;
+      try {
+        await apiRequest(`commands/${encodeURIComponent(button.dataset.cancelCommand)}`, { method: 'DELETE' });
+        showToast('Comando cancelado');
+        await loadCommandHistory();
+      } catch (error) {
+        button.disabled = false;
+        showToast(error.message);
+      }
+    }));
     renderIcons();
   } catch { /* The history remains unavailable until the user signs in. */ }
 }
