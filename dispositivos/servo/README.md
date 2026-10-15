@@ -1,11 +1,11 @@
 # Servo ESP32
 
-Firmware for COM6 (`ESP_Cortina_1`). OTA target: `servo`.
+Firmware para el servo ST/STS de COM6 (`PULSE_10`), con la misma arquitectura cloud que el firmware GA25: `main.py` contiene el transporte HTTPS, bootstrap, telemetria y comandos; `captive_portal.py` se carga solo durante provisionamiento o recuperacion.
 
-Cuando `API_KEY` está vacía, el firmware usa solo la clave de bootstrap `pg_bootstrap_v1` para anunciar presencia y consultar una configuración `device.configure` pendiente. No envía telemetría ni consulta comandos normales.
+El perfil usa un unico `config.py` con Wi-Fi, API URL, API key, Device ID, comandos y sentido. La API key puede quedar vacia: el dispositivo usa `pg_bootstrap_v1` para recibir un `device.configure`, y hasta entonces no envia telemetria ni acepta comandos normales.
 
-The cloud release should include the files used by `main.py`, including `pulsegrid_min.py`, `pulsegrid_bootstrap.py`, `webserver_min.py`, `cortina.py`, and their driver dependencies.
+Archivos del perfil: `main.py`, `captive_portal.py`, `cortina.py`, `stservo.py`, `boot.py`, `ota_boot.py`, `pulsegrid_ota.py` y `config.py`.
 
-OTA uses a transactional flash staging area. Files are downloaded in chunks to `.pulsegrid_ota/stage`, checked against the declared `Content-Length` and SHA-256, then activated by `boot.py`. The previous set is retained in `.pulsegrid_ota/backup` until the new firmware confirms a healthy boot; a failed boot or watchdog reset restores that backup.
+El adaptador `cortina.py` mantiene la superficie de movimiento del cloud (`curtain.open`, `curtain.close`, `curtain.stop`, `curtain.move`) sobre el bus STServo. La telemetria informa posicion y porcentaje de cada servo detectado.
 
-El portal de configuracion escucha en la IP que recibe la ESP32 dentro de la red Wi-Fi. La red abierta `Pulsegrid-Cortina` en `192.168.4.1` solo se activa como recuperacion cuando no hay conexion Wi-Fi.
+OTA usa el staging transaccional de `ota_boot.py`; los archivos se descargan por bloques, se verifican con `Content-Length` y SHA-256, y se activan después de un arranque saludable.

@@ -32,9 +32,9 @@ MODEL_PROFILES = {
     "servo": {
         "label": "Servo",
         "directory": SERVO_DIR,
-        "files": ("main.py", "pulsegrid_min.py", "pulsegrid_bootstrap.py", "webserver_min.py", "cortina.py", "stservo.py", "ssd1306.py", "boot.py", "ota_boot.py"),
-        "remove": ("config.py", "captive_portal.py", "motor_curtain.py"),
-        "config": "pulsegrid_config.py",
+        "files": ("main.py", "captive_portal.py", "cortina.py", "stservo.py", "boot.py", "ota_boot.py", "pulsegrid_ota.py"),
+        "remove": ("pulsegrid_min.py", "pulsegrid_bootstrap.py", "pulsegrid_commands.py", "webserver_min.py", "webserver_portal.py", "cloud_loop.py", "config.py", "wifi_config.py", "pulsegrid_config.py", "motor_curtain.py"),
+        "config": "config.py",
     },
     "ga25": {
         "label": "GA25",
@@ -390,13 +390,12 @@ class BurnerApp(tk.Tk):
         temporary = Path(temporary_name)
         self.temp_files.append(temporary)
         if model == "servo":
-            content = "WIFI_SSID = {!r}\nWIFI_PASSWORD = {!r}\n".format(values["ssid"], values["password"])
-            config = "API_URL = {!r}\nAPI_KEY = {!r}\nDEVICE_ID = {!r}\nCOMMANDS_ENABLED = {!r}\n".format(values["api_url"], values["api_key"], values["device_id"], settings["commands"])
-            wifi_file = temporary.with_name(temporary.name + "_wifi")
-            wifi_file.write_text(content, encoding="ascii")
-            self.temp_files.append(wifi_file)
-            temporary.write_text(config, encoding="ascii")
-            return [("wifi_config.py", wifi_file), ("pulsegrid_config.py", temporary)]
+            content = ("WIFI_SSID = {!r}\nWIFI_PASSWORD = {!r}\nAPI_URL = {!r}\nAPI_KEY = {!r}\n"
+                       "DEVICE_ID = {!r}\nCOMMANDS_ENABLED = {!r}\nDIRECTION_REVERSED = {!r}\n").format(
+                           values["ssid"], values["password"], values["api_url"], values["api_key"],
+                           values["device_id"], settings["commands"], settings["reversed"])
+            temporary.write_text(content, encoding="ascii")
+            return [("config.py", temporary)]
         content = ("WIFI_SSID = {!r}\nWIFI_PASSWORD = {!r}\nAPI_URL = {!r}\nAPI_KEY = {!r}\n"
                    "DEVICE_ID = {!r}\nFULL_TRAVEL_MS = {}\nOPEN_A_LEVEL = 1\nDIRECTION_REVERSED = {!r}\n").format(
                        values["ssid"], values["password"], values["api_url"], values["api_key"], values["device_id"], settings["full_travel"], settings["reversed"])

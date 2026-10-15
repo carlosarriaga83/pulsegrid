@@ -1,9 +1,0 @@
-# Copia este archivo como pulsegrid_config.py en la ESP32. No subas la copia
-# configurada a un repositorio porque contiene la clave de tu cuenta.
-API_URL = "https://pulse.2api2.com"
-API_KEY = "pg_live_REEMPLAZA_CON_TU_CLAVE"
-DEVICE_ID = "cortina-esp32-01"
-TELEMETRY_PATH = "/api/telemetry"
-COMMANDS_PATH = "/api/device-commands"
-# Activalo despues de desplegar las rutas de comandos de Pulsegrid.
-COMMANDS_ENABLED = False
