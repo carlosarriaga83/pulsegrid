@@ -45,7 +45,7 @@
   function commands(device, source = false) {
     if (device?.provider === 'tuya') return writable(device).map((item) => ({ ...item, commandName: 'tuya.set', commandCode: item.value, label: source ? `${item.label} · ultimo valor enviado (no confirma lectura)` : item.label }));
     if (!curtain(device)) return [];
-    return [{ value: 'open', commandName: 'curtain.open', label: 'Abrir cortina' }, { value: 'close', commandName: 'curtain.close', label: 'Cerrar cortina' }, { value: 'position', commandName: 'curtain.move', label: 'Mover cortina' }].map((item) => source ? { ...item, value: item.commandName, label: `${item.label} · estado del ultimo comando`, type: 'string', range: ['queued', 'running', 'succeeded', 'failed'] } : item);
+    return [{ value: 'open', commandName: 'curtain.open', label: 'Abrir cortina' }, { value: 'close', commandName: 'curtain.close', label: 'Cerrar cortina' }, { value: 'position', commandName: 'curtain.move', label: 'Mover cortina' }, { value: 'led', commandName: 'led.configure', label: 'LED del dispositivo' }].map((item) => source ? { ...item, value: item.commandName, label: `${item.label} · estado del ultimo comando`, type: 'string', range: ['queued', 'running', 'succeeded', 'failed'] } : item);
   }
   function typedValue(raw, option) {
     if (!option) throw new Error('Selecciona un parametro o comando disponible.');

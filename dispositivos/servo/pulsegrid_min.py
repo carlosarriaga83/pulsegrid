@@ -17,10 +17,19 @@ COMMANDS_PATH = '/api/device-commands'
 FIRMWARE_TARGET = 'servo'
 FIRMWARE_FILES = ('main.py', 'pulsegrid_min.py', 'webserver_min.py', 'cortina.py', 'stservo.py', 'ssd1306.py', 'boot.py', 'ota_boot.py')
 _last_report = _last_poll = _retry_at = 0
+_last_presence = 0
 _pending_configuration = _restart_requested = None
+LED_OVERRIDE = None
 _retry_ms = 30000
 
 def _configured(): return bool(API_URL and API_KEY and DEVICE_ID)
+
+def set_led_override(enabled):
+    global LED_OVERRIDE
+    LED_OVERRIDE = bool(enabled)
+
+def led_enabled(default):
+    return LED_OVERRIDE if LED_OVERRIDE is not None else default
 
 def _unchunk(value):
     output, offset = b'', 0
@@ -164,7 +173,7 @@ def _status(cortina):
         firmware_version = VERSION
     except (ImportError, AttributeError):
         firmware_version = 'unversioned'
-    return {'deviceId': DEVICE_ID, 'kind': 'curtain', 'firmwareTarget': FIRMWARE_TARGET, 'firmwareVersion': firmware_version, 'directionReversed': bool(cortina.direction_reversed), 'online': True, 'servos': servos}
+    return {'deviceId': DEVICE_ID, 'kind': 'curtain', 'firmwareTarget': FIRMWARE_TARGET, 'firmwareVersion': firmware_version, 'directionReversed': bool(cortina.direction_reversed), 'ledEnabled': led_enabled(bool(API_KEY)), 'online': True, 'servos': servos}
 
 
 def _ack(command_id, status, error=None):
@@ -182,6 +191,9 @@ def _execute(cortina, command):
         _pending_configuration = (str(payload.get('apiUrl', '')).strip(), str(payload.get('apiKey', '')).strip() or API_KEY, str(payload.get('deviceId', '')).strip())
         if not all(_pending_configuration): raise ValueError('Configuracion incompleta')
         if 'reversed' in payload: cortina.set_direction_reversed(bool(payload['reversed']))
+    elif name == 'led.configure':
+        if not isinstance(payload.get('enabled'), bool): raise ValueError('enabled debe ser booleano')
+        set_led_override(payload['enabled'])
     elif name == 'direction.configure':
         if not isinstance(payload.get('reversed'), bool): raise ValueError('reversed debe ser booleano')
         cortina.set_direction_reversed(payload['reversed'])
@@ -207,8 +219,14 @@ def _apply_pending():
 
 
 def sync(cortina):
-    global _last_report, _last_poll, _retry_at, _restart_requested
-    if not _configured() or time.ticks_diff(time.ticks_ms(), _retry_at) < 0:
+    global _last_report, _last_poll, _retry_at, _last_presence, _restart_requested
+    if not _configured():
+        if API_URL and DEVICE_ID and not API_KEY and time.ticks_diff(time.ticks_ms(), _last_presence) >= 10000:
+            _last_presence = time.ticks_ms()
+            try: _request('/api/device-presence', {'deviceId': DEVICE_ID, 'kind': 'curtain', 'firmwareTarget': FIRMWARE_TARGET, 'apiKeyConfigured': False})
+            except Exception as error: print('Pulsegrid presence:', error)
+        return
+    if time.ticks_diff(time.ticks_ms(), _retry_at) < 0:
         return
     now = time.ticks_ms()
     try:

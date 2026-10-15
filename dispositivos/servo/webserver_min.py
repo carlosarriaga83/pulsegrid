@@ -31,7 +31,7 @@ class StatusLed:
 
     def set(self, enabled):
         if self.rgb:
-            self.rgb[0] = (0, 30, 0) if enabled else (0, 0, 0)
+            self.rgb[0] = enabled if isinstance(enabled, tuple) else ((0, 30, 0) if enabled else (0, 0, 0))
             self.rgb.write()
         elif self.output:
             self.output.value(1 if enabled else 0)
@@ -198,9 +198,12 @@ def serve(cortina, sync_callback=None):
     ap.active(False)
     wlan = connect_wifi()
     if wlan:
-        status_led.set(True)
+        status_led.set(pulsegrid.led_enabled(True if pulsegrid.API_KEY else (30, 25, 0)))
         PORTAL_HOST = wlan.ifconfig()[0]
-        print('Wi-Fi conectado: LED fijo; portal: http://{}/'.format(PORTAL_HOST))
+        if pulsegrid.API_KEY:
+            print('Wi-Fi conectado: LED verde; portal: http://{}/'.format(PORTAL_HOST))
+        else:
+            print('Wi-Fi conectado: LED amarillo; portal: http://{}/ (esperando API key)'.format(PORTAL_HOST))
     else:
         _enable_ap(ap)
         status_led.portal_tick()
@@ -220,7 +223,7 @@ def serve(cortina, sync_callback=None):
         now = time.ticks_ms()
         connected = bool(wlan and wlan.isconnected())
         if connected:
-            status_led.set(True)
+            status_led.set(pulsegrid.led_enabled(True if pulsegrid.API_KEY else (30, 25, 0)))
             if ap.active():
                 ap.active(False)
             PORTAL_HOST = wlan.ifconfig()[0]

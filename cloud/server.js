@@ -701,7 +701,8 @@ async function ensureSchema() {
     const db = database();
     await db.execute("CREATE TABLE IF NOT EXISTS users (id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY, name VARCHAR(120) NOT NULL, email VARCHAR(190) NOT NULL UNIQUE, password_hash VARCHAR(255) NOT NULL, role ENUM('admin','operator','viewer') NOT NULL DEFAULT 'viewer', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP) ENGINE=InnoDB");
     await db.execute("CREATE TABLE IF NOT EXISTS api_keys (id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY, user_id INT UNSIGNED NOT NULL UNIQUE, key_hash CHAR(64) NOT NULL UNIQUE, key_hint VARCHAR(16) NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, last_used_at TIMESTAMP NULL, CONSTRAINT api_keys_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE) ENGINE=InnoDB");
-    await db.execute("CREATE TABLE IF NOT EXISTS devices (id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY, user_id INT UNSIGNED NOT NULL, device_id VARCHAR(80) NOT NULL, name VARCHAR(120) NOT NULL, type VARCHAR(60) NOT NULL, provider VARCHAR(20) NOT NULL DEFAULT 'pulsegrid', capabilities JSON NULL, status ENUM('online','offline') NOT NULL DEFAULT 'offline', last_seen TIMESTAMP NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, UNIQUE KEY user_device (user_id, device_id), CONSTRAINT devices_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE) ENGINE=InnoDB");
+    await db.execute("CREATE TABLE IF NOT EXISTS devices (id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY, user_id INT UNSIGNED NOT NULL, device_id VARCHAR(80) NOT NULL, name VARCHAR(120) NOT NULL, type VARCHAR(60) NOT NULL, provider VARCHAR(20) NOT NULL DEFAULT 'pulsegrid', capabilities JSON NULL, status ENUM('online','offline','provisioning') NOT NULL DEFAULT 'offline', last_seen TIMESTAMP NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, UNIQUE KEY user_device (user_id, device_id), CONSTRAINT devices_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE) ENGINE=InnoDB");
+    try { await db.execute("ALTER TABLE devices MODIFY COLUMN status ENUM('online','offline','provisioning') NOT NULL DEFAULT 'offline'"); } catch (error) { throw error; }
     try { await db.execute("ALTER TABLE devices ADD COLUMN provider VARCHAR(20) NOT NULL DEFAULT 'pulsegrid' AFTER type"); } catch (error) { if (error.code !== 'ER_DUP_FIELDNAME') throw error; }
     try { await db.execute('ALTER TABLE devices ADD COLUMN capabilities JSON NULL AFTER provider'); } catch (error) { if (error.code !== 'ER_DUP_FIELDNAME') throw error; }
     await db.execute("CREATE TABLE IF NOT EXISTS tuya_connections (user_id INT UNSIGNED PRIMARY KEY, client_id VARCHAR(120) NOT NULL, secret_ciphertext TEXT NOT NULL, endpoint VARCHAR(160) NOT NULL, tuya_user_id VARCHAR(120) NULL, reference_device_id VARCHAR(120) NULL, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, CONSTRAINT tuya_connections_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE) ENGINE=InnoDB");
@@ -796,7 +797,7 @@ app.post('/api/api-key', requireSession, apiReady, async (request, response) => 
 
 app.get('/api/devices', apiReady, async (request, response) => {
   if (!request.session.user) return fail(response, 401, 'Authentication required');
-  const [rows] = await database().execute("SELECT devices.device_id AS id, devices.name, devices.type, devices.provider, devices.capabilities, CASE WHEN devices.provider = 'tuya' THEN devices.status WHEN devices.last_seen IS NOT NULL AND devices.last_seen >= DATE_SUB(NOW(), INTERVAL 90 SECOND) THEN 'online' ELSE 'offline' END AS status, devices.last_seen AS report, (SELECT telemetry.payload FROM telemetry WHERE telemetry.device_id = devices.id ORDER BY telemetry.id DESC LIMIT 1) AS telemetry, (SELECT commands.status FROM commands WHERE commands.device_id = devices.id ORDER BY commands.id DESC LIMIT 1) AS lastCommandStatus, (SELECT commands.error_message FROM commands WHERE commands.device_id = devices.id ORDER BY commands.id DESC LIMIT 1) AS lastCommandError FROM devices WHERE devices.user_id = (SELECT id FROM users WHERE email = ?) ORDER BY devices.created_at DESC", [request.session.user.email]);
+  const [rows] = await database().execute("SELECT devices.device_id AS id, devices.name, devices.type, devices.provider, devices.capabilities, CASE WHEN devices.provider = 'tuya' THEN devices.status WHEN devices.last_seen IS NOT NULL AND devices.last_seen >= DATE_SUB(NOW(), INTERVAL 90 SECOND) THEN devices.status ELSE 'offline' END AS status, devices.last_seen AS report, (SELECT telemetry.payload FROM telemetry WHERE telemetry.device_id = devices.id ORDER BY telemetry.id DESC LIMIT 1) AS telemetry, (SELECT commands.status FROM commands WHERE commands.device_id = devices.id ORDER BY commands.id DESC LIMIT 1) AS lastCommandStatus, (SELECT commands.error_message FROM commands WHERE commands.device_id = devices.id ORDER BY commands.id DESC LIMIT 1) AS lastCommandError FROM devices WHERE devices.user_id = (SELECT id FROM users WHERE email = ?) ORDER BY devices.created_at DESC", [request.session.user.email]);
   response.json({ devices: rows });
 });
 
@@ -933,6 +934,18 @@ app.get('/api/relay/firmware/files/:version/:file', (request, response) => {
   if (!request.get('x-api-key')) return fail(response, 401, 'X-API-Key is required');
   const target = request.query.targetModel ? `?targetModel=${encodeURIComponent(request.query.targetModel)}` : '';
   relayCloud(request, response, 'GET', `/api/firmware/files/${encodeURIComponent(request.params.version)}/${encodeURIComponent(request.params.file)}${target}`);
+});
+
+app.post('/api/device-presence', apiReady, async (request, response) => {
+  const body = request.body || {};
+  const deviceId = String(body.deviceId || '').trim();
+  const apiKeyConfigured = body.apiKeyConfigured === true;
+  if (!deviceId) return fail(response, 422, 'deviceId es obligatorio');
+  const db = database();
+  const [devices] = await db.execute('SELECT id FROM devices WHERE device_id = ? LIMIT 1', [deviceId]);
+  if (!devices[0]) return fail(response, 404, 'Device not found');
+  await db.execute("UPDATE devices SET status = ?, last_seen = NOW() WHERE id = ?", [apiKeyConfigured ? 'online' : 'provisioning', devices[0].id]);
+  response.json({ ok: true, status: apiKeyConfigured ? 'online' : 'provisioning' });
 });
 
 app.post('/api/telemetry', apiReady, async (request, response) => {

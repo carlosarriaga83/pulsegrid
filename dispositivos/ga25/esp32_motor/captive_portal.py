@@ -67,7 +67,7 @@ def _page(message=""):
 <form method=post action=/save><label>Red Wi-Fi</label><input name=ssid required value='{ssid}'>
 <label>Contrasena Wi-Fi</label><input name=password type=password value='{password}'>
 <label>API URL</label><input name=api_url required value='{api_url}'>
-<label>API key</label><input name=api_key type=password value='{api_key}'>
+<label>API key</label><input name=api_key type=password value='{api_key}' placeholder='Opcional; esperando API key si queda vacía'>
 <label>Device ID</label><input name=device_id required value='{device_id}'>
 <label>Recorrido completo en milisegundos</label><input name=travel type=number min=1000 value='{travel}'><label>Sentido del motor</label><select name=direction_reversed><option value=0{direction_normal}>Normal</option><option value=1{direction_reverse}>Reversa</option></select><button type=submit>Guardar configuracion</button><a href=/ style="display:block;margin-top:12px">Cancelar</a></form>
 <section class=motor-test><h2>Probar motor</h2><p class=muted>Cada prueba activa ENABLE al 100% durante 1500 ms y se detiene automaticamente.</p>
@@ -154,9 +154,11 @@ def run(motor=None):
         import config
         wifi_ssid = str(getattr(config, "WIFI_SSID", "")).strip()
         wifi_password = str(getattr(config, "WIFI_PASSWORD", ""))
+        api_key_configured = bool(str(getattr(config, "API_KEY", "")).strip())
     except ImportError:
         wifi_ssid = ""
         wifi_password = ""
+        api_key_configured = False
     station = network.WLAN(network.STA_IF)
     try:
         if wifi_ssid:
@@ -233,7 +235,10 @@ def run(motor=None):
                     dns = None
                 PORTAL_HOST = station.ifconfig()[0]
                 if portal_mode != "station":
-                    print("Portal de configuracion en Wi-Fi: http://{}/".format(PORTAL_HOST))
+                    if not api_key_configured:
+                        print("Portal de configuracion en Wi-Fi: http://{}/ (esperando API key)".format(PORTAL_HOST))
+                    else:
+                        print("Portal de configuracion en Wi-Fi: http://{}/".format(PORTAL_HOST))
                     portal_mode = "station"
             else:
                 if not ap.active():

@@ -601,6 +601,7 @@ function curtainMeta(telemetry, diagnostic = null) {
 function devicePresentation(device) {
   const telemetry = parseTelemetry(device.telemetry);
   const diagnostic = device.status === 'online' ? null : device.lastCommandStatus === 'failed' && device.lastCommandError ? `Ultimo comando fallo: ${device.lastCommandError}` : device.report ? 'Sin telemetria reciente: verifica Wi-Fi y API key' : 'Sin telemetria: verifica Wi-Fi, API key y Device ID';
+  if (device.status === 'provisioning') return { icon: 'cpu', meta: [{ icon: 'wifi', text: 'Wi-Fi conectado' }, { icon: 'key-round', text: 'Esperando API key' }, { icon: 'cpu', text: telemetry.firmwareVersion ? `Firmware ${telemetry.firmwareVersion}` : 'Firmware sin confirmar' }] };
   if (telemetry.kind === 'curtain') return curtainMeta(telemetry, diagnostic);
   if (device.provider === 'tuya') return { icon: 'cloud', meta: [{ icon: 'cloud', text: 'Tuya Cloud' }, { icon: 'radio', text: device.status === 'online' ? 'Estado sincronizable' : 'Sin conexion' }, { icon: 'sliders-horizontal', text: `${parseCapabilities(device.capabilities).length} funciones disponibles` }] };
   return { icon: 'cpu', meta: [{ icon: 'radio', text: device.status === 'online' ? 'Telemetria activa' : 'Sin conexion' }, { icon: diagnostic ? 'triangle-alert' : 'circle-dot', text: diagnostic || (device.report ? 'Ultimo estado recibido' : 'Sin telemetria') }, { icon: 'cpu', text: telemetry.firmwareVersion ? `Firmware ${telemetry.firmwareVersion}` : 'Firmware sin confirmar' }] };
@@ -667,7 +668,8 @@ function renderIcons() {
 }
 
 function deviceStatus(device) {
-  return `<span class="device-status ${device.status}"><i class="status-dot"></i>${device.status === 'online' ? 'En linea' : 'Fuera de linea'}</span>`;
+  const label = device.status === 'online' ? 'En linea' : device.status === 'provisioning' ? 'Esperando API key' : 'Fuera de linea';
+  return `<span class="device-status ${device.status}"><i class="status-dot"></i>${label}</span>`;
 }
 
 function signalMarkup(signal) {
@@ -738,11 +740,25 @@ function deviceDirectionParameterMarkup(device) {
   return `<div class="device-parameter device-direction-parameter"><div class="device-parameter-heading"><strong>Sentido del motor</strong></div><div class="device-parameter-control"><label class="device-parameter-switch"><input type="checkbox" data-device-direction data-device-id="${escapeTelemetryHtml(device.id)}"${reversed ? ' checked' : ''} aria-label="Sentido del motor"><i></i></label><small data-direction-status role="status" aria-live="polite">${reversed ? 'Reversa' : 'Normal'}</small></div></div>`;
 }
 
+function deviceLedParameterMarkup(device) {
+  if (device.provider === 'tuya' || !AutomationModel.curtain(device)) return '';
+  const telemetry = parseTelemetry(device.telemetry);
+  const state = deviceUiState();
+  const key = `${device.id}\u0000ledEnabled`;
+  const reported = telemetry.ledEnabled === true || telemetry.ledEnabled === 'true';
+  const optimistic = state.optimistic.get(key);
+  const enabled = optimistic && optimistic.expiresAt > Date.now() ? optimistic.value : reported;
+  if (optimistic && String(optimistic.value) === String(reported)) state.optimistic.delete(key);
+  else if (optimistic && optimistic.expiresAt <= Date.now()) state.optimistic.delete(key);
+  return `<div class="device-parameter device-led-parameter"><div class="device-parameter-heading"><strong>LED del dispositivo</strong></div><div class="device-parameter-control"><label class="device-parameter-switch"><input type="checkbox" data-device-led data-device-id="${escapeTelemetryHtml(device.id)}"${enabled ? ' checked' : ''} aria-label="LED del dispositivo"><i></i></label><small data-led-status role="status" aria-live="polite">${enabled ? 'Encendido' : 'Apagado'}</small></div></div>`;
+}
+
 function deviceParameterMarkup(device) {
   const writable = new Map(AutomationModel.writable(device).map((item) => [item.value, item]));
   const rows = deviceParameterEntries(device);
   const direction = deviceDirectionParameterMarkup(device);
-  if (!rows.length && !direction) return '';
+  const led = deviceLedParameterMarkup(device);
+  if (!rows.length && !direction && !led) return '';
   return `<div class="device-parameters" aria-label="Parametros del dispositivo">${rows.map(([code, sourceValue]) => {
     const value = deviceParameterValue(device, code, sourceValue);
     const option = writable.get(code);
@@ -765,7 +781,7 @@ function deviceParameterMarkup(device) {
       control = `<input type="text" maxlength="1000" data-device-control data-device-id="${escapeTelemetryHtml(device.id)}" data-code="${escapeTelemetryHtml(code)}" value="${escapeTelemetryHtml(value ?? '')}" aria-label="${escapeTelemetryHtml(label)}">`;
     }
     return `<div class="device-parameter"><div class="device-parameter-heading"><strong title="${escapeTelemetryHtml(code)}">${escapeTelemetryHtml(label)}</strong>${option ? '' : '<span class="device-parameter-lock" aria-label="Solo lectura">Lectura</span>'}</div><div class="device-parameter-control">${control}<small data-control-status role="status" aria-live="polite">${option ? (value == null ? 'Sin lectura' : 'Actual') : escapeTelemetryHtml(current)}</small></div></div>`;
-  }).join('')}${direction}</div>`;
+  }).join('')}${direction}${led}</div>`;
 }
 
 function deviceQuickCommandMarkup(device) {
@@ -866,12 +882,41 @@ async function sendDeviceDirection(event) {
   }
 }
 
+async function sendDeviceLed(event) {
+  event.preventDefault?.();
+  event.stopPropagation?.();
+  const input = event.target.closest('[data-device-led]');
+  if (!input) return;
+  const device = devices.find((item) => item.id === input.dataset.deviceId);
+  const status = input.closest('.device-led-parameter')?.querySelector('[data-led-status]');
+  if (!device || !status) return;
+  const enabled = input.checked;
+  const uiState = deviceUiState();
+  const key = `${device.id}\u0000ledEnabled`;
+  uiState.pending.add(device.id);
+  uiState.optimistic.set(key, { value: enabled, expiresAt: Date.now() + 15000 });
+  input.disabled = true;
+  status.textContent = 'Enviando...';
+  try {
+    const result = await apiRequest('commands', { method: 'POST', body: JSON.stringify({ deviceId: device.id, command: 'led.configure', payload: { enabled } }) });
+    status.textContent = result.status === 'succeeded' ? (enabled ? 'Encendido' : 'Apagado') : 'En cola';
+    if (typeof loadDevices === 'function') setTimeout(() => void loadDevices(), 2500);
+  } catch (error) {
+    uiState.optimistic.delete(key);
+    input.checked = !enabled;
+    status.textContent = `Error: ${error.message}`;
+  } finally {
+    uiState.pending.delete(device.id);
+    if (input.isConnected) input.disabled = false;
+  }
+}
+
 function bindDeviceCardControls() {
   const grid = $('#device-card-grid');
   if (!grid || grid.dataset.controlsBound) return;
   grid.dataset.controlsBound = 'true';
   grid.addEventListener('input', updateDeviceParameterValue);
-  grid.addEventListener('change', (event) => { if (event.target.matches('[data-device-direction]')) sendDeviceDirection(event); else if (event.target.matches('[data-device-control]')) sendDeviceParameter(event); });
+  grid.addEventListener('change', (event) => { if (event.target.matches('[data-device-direction]')) sendDeviceDirection(event); else if (event.target.matches('[data-device-led]')) sendDeviceLed(event); else if (event.target.matches('[data-device-control]')) sendDeviceParameter(event); });
   grid.addEventListener('click', (event) => {
     const telemetryToday = event.target.closest('[data-device-telemetry-today]');
     if (telemetryToday) {

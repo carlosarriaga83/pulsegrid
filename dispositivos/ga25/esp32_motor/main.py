@@ -60,7 +60,7 @@ class StatusLed:
 
     def set(self, enabled):
         if self.rgb:
-            self.rgb[0] = (0, 30, 0) if enabled else (0, 0, 0)
+            self.rgb[0] = enabled if isinstance(enabled, tuple) else ((0, 30, 0) if enabled else (0, 0, 0))
             self.rgb.write()
         elif self.output:
             self.output.value(1 if enabled else 0)
@@ -72,8 +72,10 @@ motor = CurtainMotor(ENABLE_PIN, DIRECTION_A_PIN, DIRECTION_B_PIN, FULL_TRAVEL_M
 status_led = StatusLed(STATUS_LED_PIN)
 last_poll = 0
 last_telemetry = 0
+last_presence = 0
 pending_configuration = None
 restart_requested = False
+led_override = None
 FIRMWARE_TARGET = "ga25"
 FIRMWARE_FILES = ("main.py", "captive_portal.py", "motor_curtain.py", "boot.py", "ota_boot.py")
 
@@ -189,6 +191,15 @@ def request(method, path, body=None):
         return None
     finally:
         gc.collect()
+
+
+def send_presence():
+    if not API_URL or not DEVICE_ID:
+        return
+    try:
+        relay_request("POST", "/api/device-presence", {"deviceId": DEVICE_ID, "kind": "curtain", "firmwareTarget": FIRMWARE_TARGET, "firmwareVersion": FIRMWARE_VERSION, "apiKeyConfigured": bool(API_KEY)})
+    except Exception as error:
+        print("Pulsegrid presence:", error)
 
 
 def acknowledge(command_id, status, error=None):
@@ -400,11 +411,15 @@ def update_firmware(version):
 
 
 def execute(command):
-    global pending_configuration, restart_requested
+    global pending_configuration, restart_requested, led_override
     name = command.get("name") or command.get("command")
     payload = command.get("payload") or {}
     if name == "device.configure":
         pending_configuration = configure_from_command(payload)
+    elif name == "led.configure":
+        if not isinstance(payload.get("enabled"), bool):
+            raise ValueError("enabled debe ser booleano")
+        led_override = payload["enabled"]
     elif name == "direction.configure":
         if not isinstance(payload.get("reversed"), bool):
             raise ValueError("reversed debe ser booleano")
@@ -464,6 +479,7 @@ def send_telemetry():
     state["deviceId"] = DEVICE_ID
     state["kind"] = "curtain"
     state["firmwareTarget"] = FIRMWARE_TARGET
+    state["ledEnabled"] = led_override if led_override is not None else bool(API_KEY)
     state["directionReversed"] = bool(motor.direction_reversed)
     try:
         from pulsegrid_firmware import VERSION
@@ -485,8 +501,13 @@ def main():
     if not wifi_connect():
         print("Wi-Fi no disponible: el portal continua activo; LED parpadeando 1 Hz")
     else:
-        print("LED de estado: encendido fijo")
-    global last_poll, last_telemetry, next_wifi_retry
+        if API_KEY:
+            status_led.set(True)
+            print("LED de estado: verde; Pulsegrid configurado")
+        else:
+            status_led.set((30, 25, 0))
+            print("LED de estado: amarillo; esperando API key")
+    global last_poll, last_telemetry, last_presence, next_wifi_retry
     while True:
         if ota_boot:
             ota_boot.feed()
@@ -494,7 +515,7 @@ def main():
         motor.tick()
         connected = bool(wifi_station and wifi_station.isconnected())
         if connected:
-            status_led.set(True)
+            status_led.set(led_override if led_override is not None else (True if API_KEY else (30, 25, 0)))
         else:
             status_led.portal_tick()
             if time.ticks_diff(now, next_wifi_retry) >= 0:
@@ -503,6 +524,9 @@ def main():
         if connected and time.ticks_diff(now, last_poll) >= POLL_MS:
             last_poll = now
             poll_commands()
+        if connected and not API_KEY and time.ticks_diff(now, last_presence) >= 10000:
+            last_presence = now
+            send_presence()
         if connected and time.ticks_diff(now, last_telemetry) >= TELEMETRY_MS:
             last_telemetry = now
             send_telemetry()
