@@ -1,7 +1,7 @@
 # Renombra este archivo a config.py y completa tus valores antes de usar Pulsegrid.
 WIFI_SSID = "TU_RED_WIFI"
 WIFI_PASSWORD = "TU_CONTRASENA_WIFI"
-API_URL = "https://pulsegrid.2api2.com"
+API_URL = "https://pulse.2api2.com"
 API_KEY = "pg_live_TU_API_KEY"
 DEVICE_ID = "cortina-ga25-01"
 

@@ -15,7 +15,8 @@ _restart_requested = False
 AP_IP = '192.168.4.1'
 AP_SSID_PREFIX = 'Pulsegrid-Cortina'
 STATUS_LED_PIN = 23
-DEFAULT_API_URL = 'https://pulsegrid.2api2.com'
+DEFAULT_API_URL = 'https://pulse.2api2.com'
+PORTAL_HOST = AP_IP
 
 
 class StatusLed:
@@ -41,8 +42,8 @@ class StatusLed:
 try:
     from wifi_config import WIFI_SSID, WIFI_PASSWORD
 except ImportError:
-    WIFI_SSID = '8a'
-    WIFI_PASSWORD = '12345678a'
+    WIFI_SSID = ''
+    WIFI_PASSWORD = ''
 
 
 def esc(value):
@@ -108,7 +109,7 @@ def page(title, content):
             'input,select,button{{box-sizing:border-box;min-height:36px;width:100%;padding:7px;border:1px solid #b9c7ca;border-radius:5px;background:white;color:#17212b}}'
             'button{{margin-top:10px;background:#087f8c;color:white;border:0;font-weight:700}}.muted{{color:#526473;font-size:13px}}</style>'
             '<header><h1>{}</h1><p>Pulsegrid - Servo ESP32 - portal local {}</p></header>'
-            '<nav><a href=/wifi>Wi-Fi</a> | <a href=/pulsegrid>Pulsegrid</a> | <a href=/control>Control</a> | <a href=/config>Servo</a> | <a href=/status>Estado</a></nav>{}').format(title, title, AP_IP, content)
+            '<nav><a href=/wifi>Wi-Fi</a> | <a href=/pulsegrid>Pulsegrid</a> | <a href=/control>Control</a> | <a href=/config>Servo</a> | <a href=/status>Estado</a></nav>{}').format(title, PORTAL_HOST, content)
 
 
 def pulsegrid_page():
@@ -163,36 +164,49 @@ def action(path, cortina):
 
 
 def connect_wifi():
-    ap = network.WLAN(network.AP_IF)
-    ap.active(True)
-    mac_suffix = ''.join('{:02X}'.format(value) for value in ap.config('mac')[-2:])
-    ap.config(essid='Pulsegrid-Cortina-' + mac_suffix, authmode=network.AUTH_OPEN, max_clients=2)
-    ap.ifconfig((AP_IP, '255.255.255.0', AP_IP, AP_IP))
     wlan = network.WLAN(network.STA_IF)
-    wlan.active(True)
+    if not str(WIFI_SSID or '').strip():
+        try:
+            wlan.disconnect()
+        except Exception:
+            pass
+        try:
+            wlan.active(False)
+        except Exception:
+            pass
+        return None
     try:
+        wlan.active(True)
         if not wlan.isconnected():
             wlan.connect(WIFI_SSID, WIFI_PASSWORD)
         return wlan if wlan.isconnected() else None
-    except OSError:
-        return wlan if wlan.isconnected() else None
+    except Exception as error:
+        print('Wi-Fi no conectado: {}'.format(error))
+        try:
+            wlan.disconnect()
+        except Exception:
+            pass
+        return None
 
 
 def serve(cortina, sync_callback=None):
-    global _started, _restart_requested
+    global _started, _restart_requested, PORTAL_HOST
     if _started:
         return
     status_led = StatusLed()
+    ap = network.WLAN(network.AP_IF)
+    ap.active(False)
     wlan = connect_wifi()
     if wlan:
         status_led.set(True)
-        print('Wi-Fi conectado: LED fijo')
+        PORTAL_HOST = wlan.ifconfig()[0]
+        print('Wi-Fi conectado: LED fijo; portal: http://{}/'.format(PORTAL_HOST))
     else:
+        _enable_ap(ap)
         status_led.portal_tick()
-        print('Wi-Fi no disponible: portal activo y LED parpadeando 1 Hz')
-    print('Portal local: http://{}/'.format(AP_IP))
+        print('Wi-Fi no disponible: portal AP activo en http://{}/ y LED parpadeando 1 Hz'.format(AP_IP))
     _started = True
-    address = socket.getaddrinfo('192.168.4.1', HTTP_PORT)[0][-1]
+    address = socket.getaddrinfo('0.0.0.0', HTTP_PORT)[0][-1]
     server = socket.socket()
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.bind(address)
@@ -207,8 +221,13 @@ def serve(cortina, sync_callback=None):
         connected = bool(wlan and wlan.isconnected())
         if connected:
             status_led.set(True)
+            if ap.active():
+                ap.active(False)
+            PORTAL_HOST = wlan.ifconfig()[0]
         else:
             status_led.portal_tick()
+            if not ap.active():
+                _enable_ap(ap)
             if time.ticks_diff(now, next_wifi_retry) >= 0:
                 next_wifi_retry = time.ticks_add(now, 15000)
                 wlan = connect_wifi()
@@ -272,3 +291,12 @@ def serve(cortina, sync_callback=None):
             print('HTTP error:', error)
         finally:
             client.close()
+
+
+def _enable_ap(ap):
+    global PORTAL_HOST
+    ap.active(True)
+    mac_suffix = ''.join('{:02X}'.format(value) for value in ap.config('mac')[-2:])
+    ap.config(essid='Pulsegrid-Cortina-' + mac_suffix, authmode=network.AUTH_OPEN, max_clients=2)
+    ap.ifconfig((AP_IP, '255.255.255.0', AP_IP, AP_IP))
+    PORTAL_HOST = AP_IP

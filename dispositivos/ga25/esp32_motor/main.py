@@ -9,6 +9,14 @@ from motor_curtain import CurtainMotor
 import captive_portal
 
 try:
+    import ussl as tls
+except ImportError:
+    try:
+        import ssl as tls
+    except ImportError:
+        tls = None
+
+try:
     import ota_boot
 except ImportError:
     ota_boot = None
@@ -37,7 +45,6 @@ next_request_at = 0
 wifi_station = None
 next_wifi_retry = 0
 WIFI_RETRY_MS = 15000
-RELAY_URL = "http://192.168.86.129:3013"
 
 
 class StatusLed:
@@ -70,9 +77,31 @@ restart_requested = False
 FIRMWARE_TARGET = "ga25"
 FIRMWARE_FILES = ("main.py", "captive_portal.py", "motor_curtain.py", "boot.py", "ota_boot.py")
 
+try:
+    from pulsegrid_firmware import VERSION as FIRMWARE_VERSION
+except (ImportError, AttributeError):
+    FIRMWARE_VERSION = "unversioned"
+
 
 def cloud_path(path):
-    return "/api/relay" + path[4:] if path.startswith("/api/") else path
+    return path
+
+
+def api_socket(timeout):
+    secure = API_URL.startswith("https://")
+    address = API_URL.split("://", 1)[-1].split("/", 1)[0]
+    parts = address.split(":", 1)
+    host = parts[0]
+    port = int(parts[1]) if len(parts) > 1 else (443 if secure else 80)
+    client = socket.socket()
+    client.settimeout(timeout)
+    client.connect((host, port))
+    if secure:
+        if tls is None:
+            client.close()
+            raise RuntimeError("TLS no disponible en este firmware")
+        client = tls.wrap_socket(client, server_hostname=host)
+    return client, host
 
 
 def wifi_connect():
@@ -117,12 +146,8 @@ def _unchunk(value):
 
 
 def relay_request(method, path, body=None):
-    address = RELAY_URL.split("://", 1)[-1]
-    host, port = (address.split(":", 1) + ["80"])[:2]
-    client = socket.socket()
+    client, host = api_socket(REQUEST_TIMEOUT)
     try:
-        client.settimeout(REQUEST_TIMEOUT)
-        client.connect((host, int(port)))
         content = json.dumps(body) if body is not None else ""
         request = "{} {} HTTP/1.1\r\nHost: {}\r\nX-API-Key: {}\r\nConnection: close\r\n".format(method, path, host, API_KEY)
         if content:
@@ -155,11 +180,11 @@ def request(method, path, body=None):
     try:
         return relay_request(method, path, body)
     except Exception as error:
-        print("Pulsegrid:", error)
-        if wifi_station and wifi_station.isconnected():
-            wifi_station.disconnect()
-            time.sleep_ms(100)
-            wifi_station.connect(WIFI_SSID, WIFI_PASSWORD)
+        error_text = str(error)
+        if "MBEDTLS_ERR_SSL" in error_text or "SSL" in error_text:
+            print("Pulsegrid TLS incompatible con el servidor: {}".format(error_text))
+        else:
+            print("Pulsegrid:", error_text)
         next_request_at = time.ticks_add(time.ticks_ms(), RETRY_MS)
         return None
     finally:
@@ -190,7 +215,7 @@ def save_configuration(values):
 
 def configure_from_command(payload):
     api_url = str(payload.get("apiUrl", "")).strip().rstrip("/")
-    api_key = str(payload.get("apiKey", "")).strip()
+    api_key = str(payload.get("apiKey", "")).strip() or API_KEY
     device_id = str(payload.get("deviceId", "")).strip()
     if not api_url or not api_key or not device_id:
         raise ValueError("API URL, API key y device ID son obligatorios")
@@ -229,11 +254,7 @@ def _legacy_update_firmware(version):
         client = None
         try:
             path = cloud_path("/api/firmware/files/{}/{}?targetModel={}".format(version, name, FIRMWARE_TARGET))
-            address = RELAY_URL.split("://", 1)[-1]
-            host, port = (address.split(":", 1) + ["80"])[:2]
-            client = socket.socket()
-            client.settimeout(REQUEST_TIMEOUT)
-            client.connect((host, int(port)))
+            client, host = api_socket(REQUEST_TIMEOUT)
             client.send("GET {} HTTP/1.1\r\nHost: {}\r\nX-API-Key: {}\r\nConnection: close\r\n\r\n".format(path, host, API_KEY).encode())
             header = b""
             while b"\r\n\r\n" not in header:
@@ -308,11 +329,7 @@ def update_firmware(version):
         client = None
         try:
             path = cloud_path("/api/firmware/files/{}/{}?targetModel={}".format(version, name, FIRMWARE_TARGET))
-            address = RELAY_URL.split("://", 1)[-1]
-            host, port = (address.split(":", 1) + ["80"])[:2]
-            client = socket.socket()
-            client.settimeout(REQUEST_TIMEOUT)
-            client.connect((host, int(port)))
+            client, host = api_socket(REQUEST_TIMEOUT)
             client.send("GET {} HTTP/1.1\r\nHost: {}\r\nX-API-Key: {}\r\nConnection: close\r\n\r\n".format(path, host, API_KEY).encode())
             header = b""
             while b"\r\n\r\n" not in header:
@@ -459,7 +476,7 @@ def send_telemetry():
 def main():
     motor.stop()
     status_led.set(False)
-    print("Pulsegrid GA25YN370 listo; PWM GPIO16, direccion GPIO18/GPIO33")
+    print("Pulsegrid GA25YN370 listo; firmware {}; PWM GPIO16, direccion GPIO18/GPIO33".format(FIRMWARE_VERSION))
     captive_portal.start_background(motor)
     if ota_boot:
         ota_boot.confirm()

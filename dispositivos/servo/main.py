@@ -5,6 +5,11 @@ from webserver_min import serve
 import pulsegrid_min as pulsegrid
 import ota_boot
 
+try:
+	from pulsegrid_firmware import VERSION as FIRMWARE_VERSION
+except (ImportError, AttributeError):
+	FIRMWARE_VERSION = "unversioned"
+
 
 if not hasattr(cortina_module, "_controller"):
 	uart = UART(1, baudrate=1000000, bits=8, parity=None, stop=1, rx=18, tx=19)
@@ -15,6 +20,6 @@ cortina = cortina_module._controller
 
 ota_boot.confirm()
 
-print("Cortina lista")
+print("Cortina lista; firmware {}".format(FIRMWARE_VERSION))
 print("Usar: cortina.abrir(), cortina.cerrar(), cortina.parar()")
 serve(cortina, pulsegrid.sync)

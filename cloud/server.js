@@ -541,7 +541,7 @@ function validateTuyaCommand(device, command, payload, valueSource = null) {
 
 function validateDeviceConfiguration(device, command, payload) {
   if (command !== 'device.configure' || device.provider === 'tuya') throw new Error('La configuracion remota solo aplica a dispositivos Pulsegrid');
-  if (!payload || typeof payload.apiUrl !== 'string' || !/^https?:\/\/[^\s]+$/i.test(payload.apiUrl.trim()) || typeof payload.apiKey !== 'string' || !/^[A-Za-z0-9_.:-]{8,200}$/.test(payload.apiKey.trim()) || typeof payload.deviceId !== 'string' || !/^[A-Za-z0-9_.:-]{1,100}$/.test(payload.deviceId.trim())) throw new Error('API URL, API key y device ID no son validos');
+  if (!payload || typeof payload.apiUrl !== 'string' || !/^https?:\/\/[^\s]+$/i.test(payload.apiUrl.trim()) || typeof payload.apiKey !== 'string' || (payload.apiKey.trim() && !/^[A-Za-z0-9_.:-]{8,200}$/.test(payload.apiKey.trim())) || typeof payload.deviceId !== 'string' || !/^[A-Za-z0-9_.:-]{1,100}$/.test(payload.deviceId.trim())) throw new Error('API URL, API key y device ID no son validos');
   if (Object.hasOwn(payload, 'reversed') && typeof payload.reversed !== 'boolean') throw new Error('reversed debe ser booleano');
 }
 

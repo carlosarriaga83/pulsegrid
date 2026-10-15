@@ -1,11 +1,19 @@
 import os, socket, time, ujson
 try:
+    import ota_boot
+except ImportError:
+    ota_boot = None
+try:
+    import ussl as tls
+except ImportError:
+    try: import ssl as tls
+    except ImportError: tls = None
+try:
     from pulsegrid_config import API_URL, API_KEY, DEVICE_ID, COMMANDS_ENABLED
 except ImportError:
     API_URL, API_KEY, DEVICE_ID, COMMANDS_ENABLED = '', '', '', False
-RELAY_URL = 'http://192.168.86.129:3013'
-TELEMETRY_PATH = '/api/relay/telemetry'
-COMMANDS_PATH = '/api/relay/device-commands'
+TELEMETRY_PATH = '/api/telemetry'
+COMMANDS_PATH = '/api/device-commands'
 FIRMWARE_TARGET = 'servo'
 FIRMWARE_FILES = ('main.py', 'pulsegrid_min.py', 'webserver_min.py', 'cortina.py', 'stservo.py', 'ssd1306.py', 'boot.py', 'ota_boot.py')
 _last_report = _last_poll = _retry_at = 0
@@ -26,12 +34,23 @@ def _unchunk(value):
         offset = start + size + 2
     return output
 
-def _request(path, payload=None):
-    host, port = (RELAY_URL.split('://', 1)[-1].split(':', 1) + ['80'])[:2]
+def _connection(timeout):
+    secure = API_URL.startswith('https://')
+    address = API_URL.split('://', 1)[-1].split('/', 1)[0]
+    parts = address.split(':', 1)
+    host = parts[0]
+    port = int(parts[1]) if len(parts) > 1 else (443 if secure else 80)
     client = socket.socket()
+    client.settimeout(timeout)
+    client.connect((host, port))
+    if secure:
+        if tls is None: raise RuntimeError('TLS no disponible en este firmware')
+        client = tls.wrap_socket(client, server_hostname=host)
+    return client, host
+
+def _request(path, payload=None):
+    client, host = _connection(5)
     try:
-        client.settimeout(5)
-        client.connect((host, int(port)))
         body = ujson.dumps(payload) if payload is not None else ''
         method = 'POST' if payload is not None else 'GET'
         request = '{} {} HTTP/1.1\r\nHost: {}\r\nX-API-Key: {}\r\nConnection: close\r\n'.format(method, path, host, API_KEY)
@@ -70,13 +89,11 @@ def _download(version, info):
     import uhashlib
     name = str(info.get('name', ''))
     if name not in FIRMWARE_FILES: raise ValueError('Archivo de firmware invalido: ' + name)
-    temporary_name = name + '.ota'
-    host, port = (RELAY_URL.split('://', 1)[-1].split(':', 1) + ['80'])[:2]
-    client = socket.socket()
+    stage_name = ota_boot.stage_path(name)
+    client = None
     try:
-        path = '/api/relay/firmware/files/{}/{}?targetModel={}'.format(version, name, FIRMWARE_TARGET)
-        client.settimeout(10)
-        client.connect((host, int(port)))
+        client, host = _connection(10)
+        path = '/api/firmware/files/{}/{}?targetModel={}'.format(version, name, FIRMWARE_TARGET)
         client.send('GET {} HTTP/1.1\r\nHost: {}\r\nX-API-Key: {}\r\nConnection: close\r\n\r\n'.format(path, host, API_KEY).encode())
         header = b''
         while b'\r\n\r\n' not in header:
@@ -96,7 +113,7 @@ def _download(version, info):
             raise ValueError('Tamano OTA no coincide para ' + name)
         digest = uhashlib.sha256()
         received = 0
-        with open(temporary_name, 'wb') as target:
+        with open(stage_name, 'wb') as target:
             chunk = header[separator + 4:]
             while chunk:
                 if received + len(chunk) > expected_length:
@@ -105,21 +122,21 @@ def _download(version, info):
                 digest.update(chunk)
                 received += len(chunk)
                 chunk = client.recv(512)
-                temporary_name = ota_boot.stage_path(name)
+        if received != expected_length:
             raise ValueError('Descarga OTA incompleta para ' + name)
         actual_hash = ''.join('{:02x}'.format(value) for value in digest.digest())
         if actual_hash != info.get('sha256'): raise ValueError('Hash invalido para ' + name)
-        return temporary_name
+        return stage_name
     except Exception:
-        try: os.remove(temporary_name)
+        try: os.remove(stage_name)
         except OSError: pass
         raise
     finally:
-        client.close()
+        if client: client.close()
 
 def _update_firmware(version):
     import ota_boot
-    manifest = _get('/api/relay/firmware/manifest?version={}&targetModel={}'.format(version, FIRMWARE_TARGET))
+    manifest = _get('/api/firmware/manifest?version={}&targetModel={}'.format(version, FIRMWARE_TARGET))
     if manifest.get('version') != version or manifest.get('targetModel') not in (FIRMWARE_TARGET, 'Todos los dispositivos'): raise ValueError('Version de firmware no coincide con servo')
     files = manifest.get('files', [])
     if not files: raise ValueError('Manifest OTA vacio')
@@ -162,7 +179,7 @@ def _execute(cortina, command):
     name = command.get('name')
     payload = command.get('payload') or {}
     if name == 'device.configure':
-        _pending_configuration = (str(payload.get('apiUrl', '')).strip(), str(payload.get('apiKey', '')).strip(), str(payload.get('deviceId', '')).strip())
+        _pending_configuration = (str(payload.get('apiUrl', '')).strip(), str(payload.get('apiKey', '')).strip() or API_KEY, str(payload.get('deviceId', '')).strip())
         if not all(_pending_configuration): raise ValueError('Configuracion incompleta')
         if 'reversed' in payload: cortina.set_direction_reversed(bool(payload['reversed']))
     elif name == 'direction.configure':
@@ -220,5 +237,9 @@ def sync(cortina):
                 except Exception as error:
                     _ack(command['id'], 'failed', error)
     except Exception as error:
-        print('Pulsegrid:', error)
+        error_text = str(error)
+        if 'MBEDTLS_ERR_SSL' in error_text or 'SSL' in error_text:
+            print('Pulsegrid TLS incompatible con el servidor: ' + error_text)
+        else:
+            print('Pulsegrid:', error_text)
         _retry_at = time.ticks_add(time.ticks_ms(), _retry_ms)
