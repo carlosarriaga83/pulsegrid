@@ -78,6 +78,7 @@ restart_requested = False
 led_override = None
 FIRMWARE_TARGET = "ga25"
 FIRMWARE_FILES = ("main.py", "captive_portal.py", "motor_curtain.py", "boot.py", "ota_boot.py")
+BOOTSTRAP_API_KEY = "pg_bootstrap_v1"
 
 try:
     from pulsegrid_firmware import VERSION as FIRMWARE_VERSION
@@ -147,11 +148,12 @@ def _unchunk(value):
     return output
 
 
-def relay_request(method, path, body=None):
+def relay_request(method, path, body=None, api_key=None):
     client, host = api_socket(REQUEST_TIMEOUT)
     try:
         content = json.dumps(body) if body is not None else ""
-        request = "{} {} HTTP/1.1\r\nHost: {}\r\nX-API-Key: {}\r\nConnection: close\r\n".format(method, path, host, API_KEY)
+        request_key = API_KEY if api_key is None else api_key
+        request = "{} {} HTTP/1.1\r\nHost: {}\r\nX-API-Key: {}\r\nConnection: close\r\n".format(method, path, host, request_key)
         if content:
             request += "Content-Type: application/json\r\nContent-Length: {}\r\n".format(len(content))
         client.send((request + "\r\n" + content).encode())
@@ -197,9 +199,29 @@ def send_presence():
     if not API_URL or not DEVICE_ID:
         return
     try:
-        relay_request("POST", "/api/device-presence", {"deviceId": DEVICE_ID, "kind": "curtain", "firmwareTarget": FIRMWARE_TARGET, "firmwareVersion": FIRMWARE_VERSION, "apiKeyConfigured": bool(API_KEY)})
+        relay_request("POST", "/api/device-presence", {"deviceId": DEVICE_ID, "kind": "curtain", "firmwareTarget": FIRMWARE_TARGET, "firmwareVersion": FIRMWARE_VERSION, "apiKeyConfigured": bool(API_KEY)}, BOOTSTRAP_API_KEY)
     except Exception as error:
         print("Pulsegrid presence:", error)
+
+
+def poll_bootstrap():
+    if not API_URL or not DEVICE_ID or API_KEY:
+        return False
+    try:
+        result = relay_request("GET", "/api/device-bootstrap?deviceId=" + DEVICE_ID, None, BOOTSTRAP_API_KEY)
+        command = result.get("command") if result else None
+        if command and command.get("name") == "device.configure":
+            execute(command)
+            if pending_configuration:
+                apply_configuration(pending_configuration)
+            print("Configuracion remota recibida; API key instalada")
+            time.sleep_ms(250)
+            import machine
+            machine.reset()
+            return True
+    except Exception as error:
+        print("Pulsegrid bootstrap:", error)
+    return False
 
 
 def acknowledge(command_id, status, error=None):
@@ -446,6 +468,8 @@ def execute(command):
 
 def poll_commands():
     global pending_configuration, restart_requested
+    if not API_KEY:
+        return
     result = request("GET", cloud_path("/api/device-commands?deviceId=" + DEVICE_ID))
     command = result.get("command") if result else None
     if not command:
@@ -524,9 +548,10 @@ def main():
         if connected and time.ticks_diff(now, last_poll) >= POLL_MS:
             last_poll = now
             poll_commands()
-        if connected and not API_KEY and time.ticks_diff(now, last_presence) >= 10000:
+        if connected and not API_KEY and time.ticks_diff(now, last_presence) >= 5000:
             last_presence = now
             send_presence()
+            poll_bootstrap()
         if connected and time.ticks_diff(now, last_telemetry) >= TELEMETRY_MS:
             last_telemetry = now
             send_telemetry()

@@ -8,6 +8,8 @@ Para LOLIN S2 Mini / ESP32-S2:
 
 El firmware consulta los comandos de Pulsegrid y envia telemetria. Sin encoder o sensor, `position` es una estimacion basada en tiempo; ajusta `FULL_TRAVEL_MS` despues de medir el recorrido real.
 
+Cuando `API_KEY` está vacía, el firmware usa solo la clave de bootstrap `pg_bootstrap_v1` para anunciar presencia y consultar una configuración `device.configure` pendiente. No envía telemetría ni consulta comandos normales.
+
 ## Carga
 
 1. Instala `mpremote` y carga `captive_portal.py`, `motor_curtain.py` y `main.py`.

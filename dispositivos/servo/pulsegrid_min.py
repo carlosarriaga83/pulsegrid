@@ -15,6 +15,7 @@ except ImportError:
 TELEMETRY_PATH = '/api/telemetry'
 COMMANDS_PATH = '/api/device-commands'
 FIRMWARE_TARGET = 'servo'
+BOOTSTRAP_API_KEY = 'pg_bootstrap_v1'
 FIRMWARE_FILES = ('main.py', 'pulsegrid_min.py', 'webserver_min.py', 'cortina.py', 'stservo.py', 'ssd1306.py', 'boot.py', 'ota_boot.py')
 _last_report = _last_poll = _retry_at = 0
 _last_presence = 0
@@ -57,12 +58,13 @@ def _connection(timeout):
         client = tls.wrap_socket(client, server_hostname=host)
     return client, host
 
-def _request(path, payload=None):
+def _request(path, payload=None, api_key=None):
     client, host = _connection(5)
     try:
         body = ujson.dumps(payload) if payload is not None else ''
         method = 'POST' if payload is not None else 'GET'
-        request = '{} {} HTTP/1.1\r\nHost: {}\r\nX-API-Key: {}\r\nConnection: close\r\n'.format(method, path, host, API_KEY)
+        request_key = API_KEY if api_key is None else api_key
+        request = '{} {} HTTP/1.1\r\nHost: {}\r\nX-API-Key: {}\r\nConnection: close\r\n'.format(method, path, host, request_key)
         if body: request += 'Content-Type: application/json\r\nContent-Length: {}\r\n'.format(len(body))
         client.send((request + '\r\n' + body).encode())
         result = b''
@@ -214,7 +216,8 @@ def _execute(cortina, command):
 def _apply_pending():
     global _pending_configuration, API_URL, API_KEY, DEVICE_ID
     if _pending_configuration:
-        API_URL, API_KEY, DEVICE_ID = _pending_configuration
+        api_url, api_key, device_id = _pending_configuration
+        configure(api_url, api_key, device_id, COMMANDS_ENABLED)
         _pending_configuration = None
 
 
@@ -223,8 +226,18 @@ def sync(cortina):
     if not _configured():
         if API_URL and DEVICE_ID and not API_KEY and time.ticks_diff(time.ticks_ms(), _last_presence) >= 10000:
             _last_presence = time.ticks_ms()
-            try: _request('/api/device-presence', {'deviceId': DEVICE_ID, 'kind': 'curtain', 'firmwareTarget': FIRMWARE_TARGET, 'apiKeyConfigured': False})
-            except Exception as error: print('Pulsegrid presence:', error)
+            try:
+                _request('/api/device-presence', {'deviceId': DEVICE_ID, 'kind': 'curtain', 'firmwareTarget': FIRMWARE_TARGET, 'apiKeyConfigured': False}, BOOTSTRAP_API_KEY)
+                result = _request('/api/device-bootstrap?deviceId=' + DEVICE_ID, None, BOOTSTRAP_API_KEY)
+                command = result.get('command') if result else None
+                if command and command.get('name') == 'device.configure':
+                    _execute(cortina, command)
+                    _apply_pending()
+                    print('Configuracion remota recibida; API key instalada')
+                    time.sleep_ms(250)
+                    import machine
+                    machine.reset()
+            except Exception as error: print('Pulsegrid bootstrap:', error)
         return
     if time.ticks_diff(time.ticks_ms(), _retry_at) < 0:
         return

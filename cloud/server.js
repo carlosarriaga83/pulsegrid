@@ -23,6 +23,7 @@ const tuyaTokens = new Map();
 const automationTroubleshooting = new Map();
 const tuyaSyncIntervalMs = Math.min(Math.max(Number(process.env.TUYA_SYNC_INTERVAL_MS) || 60000, 15000), 15 * 60 * 1000);
 const automationSchedulerIntervalMs = 5000;
+const bootstrapApiKey = process.env.PULSEGRID_BOOTSTRAP_API_KEY || 'pg_bootstrap_v1';
 
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
@@ -937,6 +938,7 @@ app.get('/api/relay/firmware/files/:version/:file', (request, response) => {
 });
 
 app.post('/api/device-presence', apiReady, async (request, response) => {
+  if (request.get('x-api-key') !== bootstrapApiKey) return fail(response, 401, 'Invalid bootstrap API key');
   const body = request.body || {};
   const deviceId = String(body.deviceId || '').trim();
   const apiKeyConfigured = body.apiKeyConfigured === true;
@@ -946,6 +948,21 @@ app.post('/api/device-presence', apiReady, async (request, response) => {
   if (!devices[0]) return fail(response, 404, 'Device not found');
   await db.execute("UPDATE devices SET status = ?, last_seen = NOW() WHERE id = ?", [apiKeyConfigured ? 'online' : 'provisioning', devices[0].id]);
   response.json({ ok: true, status: apiKeyConfigured ? 'online' : 'provisioning' });
+});
+
+app.get('/api/device-bootstrap', apiReady, async (request, response) => {
+  if (request.get('x-api-key') !== bootstrapApiKey) return fail(response, 401, 'Invalid bootstrap API key');
+  const deviceId = String(request.query.deviceId || '').trim();
+  if (!/^[A-Za-z0-9_.:-]{1,100}$/.test(deviceId)) return fail(response, 422, 'deviceId no es valido');
+  const db = database();
+  const [devices] = await db.execute('SELECT id FROM devices WHERE device_id = ? LIMIT 1', [deviceId]);
+  if (!devices[0]) return fail(response, 404, 'Device not found');
+  const [commands] = await db.execute("SELECT id, command_name AS name, payload FROM commands WHERE device_id = ? AND command_name = 'device.configure' AND status = 'queued' ORDER BY created_at ASC, id ASC LIMIT 1", [devices[0].id]);
+  if (!commands[0]) return response.json({ command: null });
+  const payload = typeof commands[0].payload === 'string' ? JSON.parse(commands[0].payload) : commands[0].payload;
+  if (!payload || typeof payload.apiKey !== 'string' || !payload.apiKey.trim()) return response.json({ command: null });
+  await db.execute("UPDATE commands SET status = 'succeeded' WHERE id = ? AND status = 'queued'", [commands[0].id]);
+  response.json({ command: { id: commands[0].id, name: commands[0].name, payload } });
 });
 
 app.post('/api/telemetry', apiReady, async (request, response) => {
