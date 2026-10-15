@@ -43,16 +43,16 @@ Toma los archivos de `dispositivos/servo`:
 
 ```text
 main.py
-pulsegrid_min.py
-webserver_min.py
+captive_portal.py
 cortina.py
 stservo.py
-ssd1306.py
 boot.py
 ota_boot.py
+pulsegrid_ota.py
 ```
 
-Genera y carga `wifi_config.py` y `pulsegrid_config.py` con los valores capturados en la GUI. Si Wi-Fi, API URL o API key quedan vacíos, se configuran después desde el portal local.
+Genera y carga un unico `config.py` con Wi-Fi, API URL, API key, Device ID, comandos y sentido. Si Wi-Fi o API key quedan vacíos, se configuran después desde el portal local o mediante bootstrap remoto.
+La calibracion del servo se conserva en `blind_state.py` y `multiturn_state.py`; el quemador no elimina esos archivos al actualizar el firmware.
 El `Device ID` se asigna automáticamente como `PULSE_XX`, donde `XX` es el último byte de la MAC de la ESP32.
 
 ### GA25

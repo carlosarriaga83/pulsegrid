@@ -277,6 +277,27 @@ def execute(command, cortina):
         }
         save_configuration(values)
         cortina.set_direction_reversed(payload['reversed'])
+    elif name == 'blind.setMotorSide':
+        cortina.set_motor_side(int(payload.get('servoId', 1)), str(payload.get('side', '')))
+    elif name == 'blind.beginCalibration':
+        cortina.begin_blind_calibration(int(payload.get('servoId', 1)))
+    elif name == 'blind.markDeployed':
+        cortina.mark_deployed(int(payload.get('servoId', 1)))
+    elif name == 'blind.markRolled':
+        cortina.mark_rolled(int(payload.get('servoId', 1)))
+    elif name == 'blind.jog':
+        cortina.jog_blind(int(payload.get('servoId', 1)), str(payload.get('direction', '')), int(payload.get('speed', 800)), int(payload.get('acceleration', 50)))
+    elif name == 'blind.configure':
+        servo_id = int(payload.get('servoId', 1))
+        rolled = float(payload['rolledTurns'])
+        unrolled = float(payload['unrolledTurns'])
+        if servo_id not in cortina.servo_ids or rolled == unrolled or abs(rolled) > cortina.MAX_LONG_TURNS or abs(unrolled) > cortina.MAX_LONG_TURNS:
+            raise ValueError('extremos de calibracion invalidos')
+        cortina.blind_config[servo_id]['rolled_turns'] = rolled
+        cortina.blind_config[servo_id]['unrolled_turns'] = unrolled
+        cortina.blind_config[servo_id]['calibrated'] = True
+        cortina.position_recovery_required[servo_id] = False
+        cortina._save_persistent_state()
     elif name == 'curtain.open':
         cortina.abrir(int(payload.get('speed', 800)), int(payload.get('acceleration', 50)))
     elif name == 'curtain.close':
