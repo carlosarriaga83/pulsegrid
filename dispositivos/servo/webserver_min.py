@@ -114,7 +114,7 @@ def page(title, content):
 
 def pulsegrid_page():
     api_url = pulsegrid.API_URL if pulsegrid.API_URL.startswith('https://') else DEFAULT_API_URL
-    content = '<form action=/api/pulsegrid_configure>API URL <input name=api_url value="{}" required><br>API key <input name=api_key type=password value="{}" required><br>Device ID <input name=device_id value="{}" required><br>Comandos <select name=commands_enabled><option value=0{}>No</option><option value=1{}>Si</option></select><br><button>Guardar Pulsegrid</button></form>'.format(esc(api_url), esc(pulsegrid.API_KEY), esc(pulsegrid.DEVICE_ID), '' if pulsegrid.COMMANDS_ENABLED else ' selected', ' selected' if pulsegrid.COMMANDS_ENABLED else '')
+    content = '<form action=/api/pulsegrid_configure>API URL <input name=api_url value="{}" required><br>API key <input name=api_key type=password value="{}" placeholder="Opcional"><br>Device ID <input name=device_id value="{}" required><br>Comandos <select name=commands_enabled><option value=0{}>No</option><option value=1{}>Si</option></select><br><button>Guardar Pulsegrid</button></form>'.format(esc(api_url), esc(pulsegrid.API_KEY), esc(pulsegrid.DEVICE_ID), '' if pulsegrid.COMMANDS_ENABLED else ' selected', ' selected' if pulsegrid.COMMANDS_ENABLED else '')
     return page('Pulsegrid', content)
 
 

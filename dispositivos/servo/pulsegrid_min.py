@@ -76,7 +76,7 @@ def _get(path): return _request(path)
 def configure(api_url, api_key, device_id, commands_enabled=False):
     global API_URL, API_KEY, DEVICE_ID, COMMANDS_ENABLED
     api_url, api_key, device_id = str(api_url or '').strip().rstrip('/'), str(api_key or '').strip(), str(device_id or '').strip()
-    if not api_url or not api_key or not device_id: raise ValueError('URL, API key y device ID son obligatorios')
+    if not api_url or not device_id: raise ValueError('URL y device ID son obligatorios')
     content = "API_URL={!r}\nAPI_KEY={!r}\nDEVICE_ID={!r}\nCOMMANDS_ENABLED={!r}\n".format(api_url, api_key, device_id, bool(commands_enabled))
     with open('pulsegrid_config.py.tmp', 'w') as target: target.write(content)
     try: os.remove('pulsegrid_config.py')

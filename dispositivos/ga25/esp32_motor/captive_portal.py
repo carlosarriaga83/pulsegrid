@@ -67,7 +67,7 @@ def _page(message=""):
 <form method=post action=/save><label>Red Wi-Fi</label><input name=ssid required value='{ssid}'>
 <label>Contrasena Wi-Fi</label><input name=password type=password value='{password}'>
 <label>API URL</label><input name=api_url required value='{api_url}'>
-<label>API key</label><input name=api_key required type=password value='{api_key}'>
+<label>API key</label><input name=api_key type=password value='{api_key}'>
 <label>Device ID</label><input name=device_id required value='{device_id}'>
 <label>Recorrido completo en milisegundos</label><input name=travel type=number min=1000 value='{travel}'><label>Sentido del motor</label><select name=direction_reversed><option value=0{direction_normal}>Normal</option><option value=1{direction_reverse}>Reversa</option></select><button type=submit>Guardar configuracion</button><a href=/ style="display:block;margin-top:12px">Cancelar</a></form>
 <section class=motor-test><h2>Probar motor</h2><p class=muted>Cada prueba activa ENABLE al 100% durante 1500 ms y se detiene automaticamente.</p>
@@ -84,8 +84,8 @@ def _write_config(values):
         travel = max(1000, int(values.get("travel", "15000")))
     except ValueError:
         travel = 15000
-    if not ssid or not api_url or not api_key or not device_id:
-        raise ValueError("SSID, API URL, API key y Device ID son obligatorios")
+    if not ssid or not api_url or not device_id:
+        raise ValueError("SSID, API URL y Device ID son obligatorios")
     with open(CONFIG_FILE, "w") as config:
         config.write("WIFI_SSID = {!r}\n".format(ssid))
         config.write("WIFI_PASSWORD = {!r}\n".format(password))

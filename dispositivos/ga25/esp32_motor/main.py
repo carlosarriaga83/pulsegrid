@@ -480,11 +480,8 @@ def main():
     captive_portal.start_background(motor)
     if ota_boot:
         ota_boot.confirm()
-    if not WIFI_SSID or not API_URL or not API_KEY or not DEVICE_ID:
+    if not WIFI_SSID:
         print("Portal de configuracion: LED parpadeando 1 Hz")
-        while True:
-            status_led.portal_tick()
-            time.sleep_ms(100)
     if not wifi_connect():
         print("Wi-Fi no disponible: el portal continua activo; LED parpadeando 1 Hz")
     else:
