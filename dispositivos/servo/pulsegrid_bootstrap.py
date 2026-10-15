@@ -70,3 +70,33 @@ def fetch(api_url, device_id, timeout=8):
         if client:
             client.close()
         gc.collect()
+
+
+def acknowledge(api_url, device_id, command_id, status='succeeded', error=''):
+    gc.collect()
+    secure = api_url.startswith('https://')
+    address = api_url.split('://', 1)[-1].split('/', 1)[0]
+    parts = address.split(':', 1)
+    host = parts[0]
+    port = int(parts[1]) if len(parts) > 1 else (443 if secure else 80)
+    client = None
+    try:
+        client = socket.socket()
+        client.settimeout(8)
+        client.connect((host, port))
+        if secure:
+            if tls is None:
+                raise RuntimeError('TLS no disponible en este firmware')
+            client = tls.wrap_socket(client, server_hostname=host)
+        body = json.dumps({'deviceId': device_id, 'status': status, 'error': error})
+        path = '/api/device-bootstrap/{}/ack'.format(command_id)
+        request = 'POST {} HTTP/1.1\r\nHost: {}\r\nX-API-Key: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}'.format(path, host, BOOTSTRAP_API_KEY, len(body), body)
+        client.send(request.encode())
+        response = client.recv(128)
+        code = int(response[9:12]) if len(response) >= 12 else 0
+        if code < 200 or code >= 300:
+            raise ValueError('Bootstrap ACK HTTP {}'.format(code))
+    finally:
+        if client:
+            client.close()
+        gc.collect()

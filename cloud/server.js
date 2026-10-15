@@ -958,12 +958,21 @@ app.get('/api/device-bootstrap', apiReady, async (request, response) => {
   const [devices] = await db.execute('SELECT id FROM devices WHERE device_id = ? LIMIT 1', [deviceId]);
   if (!devices[0]) return fail(response, 404, 'Device not found');
   await db.execute("UPDATE devices SET status = 'provisioning', last_seen = NOW() WHERE id = ?", [devices[0].id]);
-  const [commands] = await db.execute("SELECT id, command_name AS name, payload FROM commands WHERE device_id = ? AND command_name = 'device.configure' AND status = 'queued' ORDER BY created_at ASC, id ASC LIMIT 1", [devices[0].id]);
+  const [commands] = await db.execute("SELECT id, command_name AS name, payload FROM commands WHERE device_id = ? AND command_name = 'device.configure' AND status IN ('queued', 'delivered') ORDER BY created_at ASC, id ASC LIMIT 1", [devices[0].id]);
   if (!commands[0]) return response.json({ command: null });
   const payload = typeof commands[0].payload === 'string' ? JSON.parse(commands[0].payload) : commands[0].payload;
   if (!payload || typeof payload.apiKey !== 'string' || !payload.apiKey.trim()) return response.json({ command: null });
-  await db.execute("UPDATE commands SET status = 'succeeded' WHERE id = ? AND status = 'queued'", [commands[0].id]);
+  await db.execute("UPDATE commands SET status = 'delivered' WHERE id = ? AND status = 'queued'", [commands[0].id]);
   response.json({ command: { id: commands[0].id, name: commands[0].name, payload } });
+});
+
+app.post('/api/device-bootstrap/:commandId/ack', apiReady, async (request, response) => {
+  if (request.get('x-api-key') !== bootstrapApiKey) return fail(response, 401, 'Invalid bootstrap API key');
+  const deviceId = String((request.body || {}).deviceId || '').trim();
+  if (!deviceId || !['succeeded', 'failed'].includes((request.body || {}).status)) return fail(response, 422, 'deviceId y estado valido son obligatorios');
+  const [result] = await database().execute('UPDATE commands SET status = ?, error_message = ? WHERE id = ? AND command_name = \'device.configure\' AND status = \'delivered\' AND device_id = (SELECT id FROM devices WHERE device_id = ? LIMIT 1)', [(request.body || {}).status, String((request.body || {}).error || '').slice(0, 500) || null, request.params.commandId, deviceId]);
+  if (!result.affectedRows) return fail(response, 404, 'Bootstrap command not found');
+  response.json({ ok: true });
 });
 
 app.post('/api/telemetry', apiReady, async (request, response) => {

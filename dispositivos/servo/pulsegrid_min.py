@@ -19,6 +19,7 @@ BOOTSTRAP_API_KEY = 'pg_bootstrap_v1'
 FIRMWARE_FILES = ('main.py', 'pulsegrid_min.py', 'pulsegrid_bootstrap.py', 'webserver_min.py', 'cortina.py', 'stservo.py', 'ssd1306.py', 'boot.py', 'ota_boot.py')
 _last_report = _last_poll = _retry_at = 0
 _last_presence = 0
+_bootstrap_retry_at = 0
 _pending_configuration = _restart_requested = None
 LED_OVERRIDE = None
 _retry_ms = 30000
@@ -226,10 +227,12 @@ def _apply_pending():
 
 
 def sync(cortina):
-    global _last_report, _last_poll, _retry_at, _last_presence, _restart_requested
+    global _last_report, _last_poll, _retry_at, _last_presence, _bootstrap_retry_at, _restart_requested
     if not _configured():
-        if API_URL and DEVICE_ID and not API_KEY and time.ticks_diff(time.ticks_ms(), _last_presence) >= 10000:
-            _last_presence = time.ticks_ms()
+        now = time.ticks_ms()
+        if API_URL and DEVICE_ID and not API_KEY and time.ticks_diff(now, _bootstrap_retry_at) >= 0:
+            _last_presence = now
+            _bootstrap_retry_at = time.ticks_add(now, 60000)
             try:
                 import pulsegrid_bootstrap
                 result = pulsegrid_bootstrap.fetch(API_URL, DEVICE_ID)
@@ -237,11 +240,16 @@ def sync(cortina):
                 if command and command.get('name') == 'device.configure':
                     _execute(cortina, command)
                     _apply_pending()
+                    import pulsegrid_bootstrap
+                    pulsegrid_bootstrap.acknowledge(API_URL, DEVICE_ID, command.get('id'))
                     print('Configuracion remota recibida; API key instalada')
                     time.sleep_ms(250)
                     import machine
                     machine.reset()
-            except Exception as error: print('Pulsegrid bootstrap:', error)
+            except Exception as error:
+                import gc
+                gc.collect()
+                print('Pulsegrid bootstrap:', error)
         return
     if time.ticks_diff(time.ticks_ms(), _retry_at) < 0:
         return

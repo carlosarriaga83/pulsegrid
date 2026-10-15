@@ -73,6 +73,7 @@ status_led = StatusLed(STATUS_LED_PIN)
 last_poll = 0
 last_telemetry = 0
 last_presence = 0
+bootstrap_retry_at = 0
 pending_configuration = None
 restart_requested = False
 led_override = None
@@ -201,8 +202,10 @@ def send_presence():
 
 
 def poll_bootstrap():
-    if not API_URL or not DEVICE_ID or API_KEY:
+    global bootstrap_retry_at
+    if not API_URL or not DEVICE_ID or API_KEY or time.ticks_diff(time.ticks_ms(), bootstrap_retry_at) < 0:
         return False
+    bootstrap_retry_at = time.ticks_add(time.ticks_ms(), 60000)
     try:
         result = relay_request("GET", "/api/device-bootstrap?deviceId=" + DEVICE_ID, None, BOOTSTRAP_API_KEY)
         command = result.get("command") if result else None
@@ -210,6 +213,7 @@ def poll_bootstrap():
             execute(command)
             if pending_configuration:
                 apply_configuration(pending_configuration)
+            relay_request("POST", "/api/device-bootstrap/{}/ack".format(command.get("id")), {"deviceId": DEVICE_ID, "status": "succeeded"}, BOOTSTRAP_API_KEY)
             print("Configuracion remota recibida; API key instalada")
             time.sleep_ms(250)
             import machine
