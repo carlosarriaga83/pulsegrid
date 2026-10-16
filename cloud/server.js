@@ -61,8 +61,15 @@ function newFirmwareVersion(version) {
 }
 
 function firmwareFileName(fileName) {
-  if (!firmwareFiles.has(String(fileName || ''))) throw new Error('Archivo de firmware no permitido');
-  return String(fileName);
+  const safeName = safeFirmwareFileName(fileName);
+  if (!firmwareFiles.has(safeName)) throw new Error('Archivo de firmware no permitido');
+  return safeName;
+}
+
+function safeFirmwareFileName(fileName) {
+  const safeName = String(fileName || '');
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(safeName) || safeName === '.' || safeName === '..') throw new Error('Nombre de archivo de firmware invalido');
+  return safeName;
 }
 
 function automationAction(action, position, speed, acceleration) {
@@ -335,7 +342,7 @@ async function readFirmwareManifest(userId, version, targetModel) {
   if (!releases[0]) return null;
   const [files] = await database().execute('SELECT name, OCTET_LENGTH(content) AS size, sha256 FROM firmware_files WHERE release_id = ? ORDER BY name', [releases[0].id]);
   if (!files.length) throw new Error('El manifiesto no contiene archivos');
-  files.forEach((file) => firmwareFileName(file.name));
+  files.forEach((file) => safeFirmwareFileName(file.name));
   return { ...releases[0], files };
 }
 
@@ -1114,7 +1121,7 @@ app.delete('/api/firmware/releases/:version', requireSession, apiReady, async (r
 
 app.post('/api/firmware/releases', requireSession, apiReady, async (request, response) => {
   try {
-    const { version, targetModel, whatsNew, files } = request.body || {};
+    const { version, targetModel, whatsNew, files, bypassFileRestriction = false } = request.body || {};
     const safeVersion = newFirmwareVersion(version);
     const safeTargetModel = String(targetModel || 'Todos los dispositivos').trim();
     const safeWhatsNew = String(whatsNew || '').trim();
@@ -1123,7 +1130,8 @@ app.post('/api/firmware/releases', requireSession, apiReady, async (request, res
     if (!Array.isArray(files) || files.length === 0 || files.length > 20) return fail(response, 422, 'files debe contener entre 1 y 20 archivos');
     const userId = await sessionUserId(request.session.user.email);
     const preparedFiles = files.map((file) => {
-      const name = firmwareFileName(file.name);
+      if (typeof bypassFileRestriction !== 'boolean') throw new Error('bypassFileRestriction debe ser booleano');
+      const name = bypassFileRestriction ? safeFirmwareFileName(file.name) : firmwareFileName(file.name);
       if (typeof file.content !== 'string' || file.content.length > 500000) throw new Error('Contenido de firmware invalido');
       const content = file.encoding === 'base64' ? Buffer.from(file.content, 'base64') : Buffer.from(file.content, 'utf8');
       if (!content.length || content.length > 500000) throw new Error('Contenido de firmware invalido');
@@ -1169,7 +1177,7 @@ app.get('/api/firmware/files/:version/:file', apiReady, async (request, response
   if (!keyOwner) return fail(response, 401, 'Invalid API key');
   try {
     const version = firmwareVersion(request.params.version);
-    const fileName = firmwareFileName(request.params.file);
+    const fileName = safeFirmwareFileName(request.params.file);
     const manifest = await readFirmwareManifest(keyOwner.user_id, version, request.query.targetModel);
     if (!manifest) return fail(response, 404, 'Firmware release not found');
     if (!manifest.files.some((file) => file.name === fileName)) return fail(response, 404, 'Firmware file not found');

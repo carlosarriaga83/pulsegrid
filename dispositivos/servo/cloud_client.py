@@ -19,6 +19,7 @@ class CloudClient:
         self.last_poll = 0
         self.last_telemetry = 0
         self.retry_ms = 5000
+        self.firmware_update_requested = False
 
     def _socket(self):
         gc.collect()
@@ -113,6 +114,11 @@ class CloudClient:
                 cortina.parar()
             elif name == 'curtain.move':
                 cortina.move_blind(int(payload.get('servoId', 1)), float(payload.get('percent', payload.get('position'))), int(payload.get('speed', 800)), int(payload.get('acceleration', 50)))
+            elif name == 'firmware.update':
+                import pulsegrid_ota
+                files = ('main.py', 'cloud_client.py', 'board_led.py', 'captive_portal.py', 'cortina.py', 'servo_calibration.py', 'stservo.py', 'boot.py', 'ota_boot.py', 'pulsegrid_ota.py')
+                pulsegrid_ota.update(self.api_url, self.api_key, str(payload.get('version', '')), 'servo', files)
+                self.firmware_update_requested = True
             elif name.startswith('blind.'):
                 import servo_calibration
                 servo_id = int(payload.get('servoId', 1))
@@ -137,4 +143,9 @@ class CloudClient:
         if error: body['error'] = str(error)[:500]
         self.request('POST', '/api/device-commands/{}/ack'.format(command.get('id')), body)
         if error: print('Comando rechazado:', error)
-        else: print('Comando ejecutado:', name)
+        else:
+            print('Comando ejecutado:', name)
+            if self.firmware_update_requested:
+                import machine
+                time.sleep_ms(250)
+                machine.reset()

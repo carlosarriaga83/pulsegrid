@@ -154,16 +154,29 @@ function bindWikiApiControls() {
   showExample('arduino');
 }
 
+function ensureFirmwareBypass(form) {
+  const input = form.querySelector('#firmware-release-files');
+  if (!input || form.querySelector('#firmware-release-bypass')) return form.querySelector('#firmware-release-bypass');
+  const label = document.createElement('label');
+  label.className = 'firmware-bypass';
+  label.innerHTML = '<input id="firmware-release-bypass" type="checkbox"> Bypass: permitir nombres de archivo fuera de la lista OTA';
+  input.insertAdjacentElement('afterend', label);
+  return label.querySelector('#firmware-release-bypass');
+}
+
 function bindFirmwareReleaseControls() {
   const form = $('#view-api #firmware-release-form');
   if (!form || form.dataset.bound) return;
   form.dataset.bound = 'true';
+  const fileInput = form.querySelector('#firmware-release-files');
+  const bypass = ensureFirmwareBypass(form); 
+  bypass?.addEventListener('change', () => { fileInput.accept = bypass.checked ? '' : '.py,text/x-python'; });
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     const files = Array.from(form.querySelector('#firmware-release-files').files || []);
     if (!files.length) return showToast('Selecciona al menos un archivo .py');
     try {
-      const payload = { version: form.querySelector('#firmware-release-version').value.trim(), targetModel: form.querySelector('#firmware-release-target').value.trim(), whatsNew: form.querySelector('#firmware-release-whats-new').value.trim(), files: await Promise.all(files.map(firmwareFilePayload)) };
+      const payload = { version: form.querySelector('#firmware-release-version').value.trim(), targetModel: form.querySelector('#firmware-release-target').value.trim(), whatsNew: form.querySelector('#firmware-release-whats-new').value.trim(), bypassFileRestriction: Boolean(bypass?.checked), files: await Promise.all(files.map(firmwareFilePayload)) };
       const result = await apiRequest('firmware/releases', { method: 'POST', body: JSON.stringify(payload) });
       form.querySelector('#firmware-release-status').textContent = `Publicado ${result.release.version} con ${result.release.files.length} archivos.`;
       showToast('Firmware publicado');
@@ -426,12 +439,15 @@ function bindFirmwareViewControls() {
   if (!form || form.dataset.bound) return;
   form.dataset.bound = 'true';
   const status = form.querySelector('#firmware-release-status') || $('#view-firmware #firmware-release-status');
+  const bypass = ensureFirmwareBypass(form);
+  const fileInput = form.querySelector('#firmware-release-files');
+  bypass?.addEventListener('change', () => { fileInput.accept = bypass.checked ? '' : '.py,text/x-python'; });
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     const files = Array.from(form.querySelector('#firmware-release-files').files || []);
     if (!files.length) return showToast('Selecciona al menos un archivo .py');
     try {
-      const payload = { version: form.querySelector('#firmware-release-version').value.trim(), targetModel: form.querySelector('#firmware-release-target').value.trim(), whatsNew: form.querySelector('#firmware-release-whats-new').value.trim(), files: await Promise.all(files.map(firmwareFilePayload)) };
+      const payload = { version: form.querySelector('#firmware-release-version').value.trim(), targetModel: form.querySelector('#firmware-release-target').value.trim(), whatsNew: form.querySelector('#firmware-release-whats-new').value.trim(), bypassFileRestriction: Boolean(bypass?.checked), files: await Promise.all(files.map(firmwareFilePayload)) };
       const result = await apiRequest('firmware/releases', { method: 'POST', body: JSON.stringify(payload) });
       status.textContent = `Publicado ${result.release.version} con ${result.release.files.length} archivos.`;
       form.reset();
