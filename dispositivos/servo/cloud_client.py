@@ -75,9 +75,10 @@ class CloudClient:
                 body = body[:content_length]
             result = ujson.loads(body) if body else {}
             self.last_success_at = time.ticks_ms()
+            self.retry_ms = 5000
             return result
         except Exception as error:
-            print('Pulsegrid:', error)
+            print('Pulsegrid (TLS/HTTP):', error)
             if getattr(error, 'errno', None) == 12:
                 gc.collect()
                 try:
@@ -85,6 +86,7 @@ class CloudClient:
                 except AttributeError:
                     pass
             self.next_request_at = time.ticks_add(time.ticks_ms(), self.retry_ms)
+            self.retry_ms = min(self.retry_ms * 2, 60000)
             return None
         finally:
             if client:

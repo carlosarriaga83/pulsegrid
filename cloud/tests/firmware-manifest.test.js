@@ -68,6 +68,8 @@ test('servo NeoPixel reflects cloud/provisioning/offline state and OTA retries t
   assert.match(main, /board_led\.set_status\('offline'\)/);
   assert.match(main, /board_led\.set_status\('online'\)/);
   assert.match(cloud, /def is_online\(self, max_age_ms=30000\)/);
+  assert.match(cloud, /self\.retry_ms = min\(self\.retry_ms \* 2, 60000\)/);
+  assert.match(cloud, /self\.retry_ms = 5000/);
   assert.match(ota, /_connection\(api_url, 30\)/);
   assert.match(ota, /for attempt in range\(2\)/);
   assert.match(ota, /OTA servo: descargando/);
