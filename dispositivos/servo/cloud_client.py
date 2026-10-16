@@ -118,6 +118,11 @@ class CloudClient:
                 import pulsegrid_ota
                 files = ('main.py', 'cloud_client.py', 'board_led.py', 'captive_portal.py', 'cortina.py', 'servo_calibration.py', 'stservo.py', 'boot.py', 'ota_boot.py', 'pulsegrid_ota.py')
                 pulsegrid_ota.update(self.api_url, self.api_key, str(payload.get('version', '')), 'servo', files)
+                del pulsegrid_ota
+                import sys
+                sys.modules.pop('pulsegrid_ota', None)
+                sys.modules.pop('ota_boot', None)
+                gc.collect()
                 self.firmware_update_requested = True
             elif name.startswith('blind.'):
                 import servo_calibration

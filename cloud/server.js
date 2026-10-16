@@ -1182,7 +1182,8 @@ app.get('/api/firmware/files/:version/:file', apiReady, async (request, response
     if (!manifest) return fail(response, 404, 'Firmware release not found');
     if (!manifest.files.some((file) => file.name === fileName)) return fail(response, 404, 'Firmware file not found');
     const [files] = await database().execute('SELECT content FROM firmware_files WHERE release_id = ? AND name = ? LIMIT 1', [manifest.id, fileName]);
-    response.type('text/plain').send(files[0].content);
+    const content = files[0].content;
+    response.type('text/plain').set('Content-Length', String(content.length)).send(content);
   } catch (error) {
     fail(response, 422, error.message);
   }

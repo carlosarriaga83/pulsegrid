@@ -47,25 +47,19 @@ next_wifi_retry = 0
 WIFI_RETRY_MS = 15000
 
 
+
+
 class StatusLed:
     def __init__(self, pin=15):
-        self.pin = pin
-        self.rgb = None
-        self.output = None
-        try:
-            import neopixel
-            self.rgb = neopixel.NeoPixel(Pin(pin), 1)
-        except (ImportError, TypeError):
-            self.output = Pin(pin, Pin.OUT, value=0)
+        # Configura el pin como salida digital con valor inicial apagado (0)
+        self.output = Pin(pin, Pin.OUT, value=0)
 
     def set(self, enabled):
-        if self.rgb:
-            self.rgb[0] = enabled if isinstance(enabled, tuple) else ((0, 30, 0) if enabled else (0, 0, 0))
-            self.rgb.write()
-        elif self.output:
-            self.output.value(1 if enabled else 0)
+        # Enciende (1) o apaga (0) el LED
+        self.output.value(1 if enabled else 0)
 
     def portal_tick(self):
+        # Parpadea el LED cada 500 ms
         self.set((time.ticks_ms() // 500) % 2 == 0)
 
 motor = CurtainMotor(ENABLE_PIN, DIRECTION_A_PIN, DIRECTION_B_PIN, FULL_TRAVEL_MS, OPEN_A_LEVEL, DIRECTION_REVERSED)
@@ -528,7 +522,7 @@ def main():
             status_led.set(True)
             print("LED de estado: verde; Pulsegrid configurado")
         else:
-            status_led.set((30, 25, 0))
+            status_led.set((255, 180, 0))
             print("LED de estado: amarillo; esperando API key")
     captive_portal.start_background(motor)
     global last_poll, last_telemetry, last_presence, next_wifi_retry
@@ -539,7 +533,7 @@ def main():
         motor.tick()
         connected = bool(wifi_station and wifi_station.isconnected())
         if connected:
-            status_led.set(led_override if led_override is not None else (True if API_KEY else (30, 25, 0)))
+            status_led.set(led_override if led_override is not None else (True if API_KEY else (255, 180, 0)))
         else:
             status_led.portal_tick()
             if time.ticks_diff(now, next_wifi_retry) >= 0:

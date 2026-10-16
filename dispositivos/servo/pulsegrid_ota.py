@@ -45,6 +45,85 @@ def _unchunk(value):
     return output
 
 
+def _write_chunked(client, buffer, target, digest, expected_length, name):
+    received = 0
+    trailer_bytes = 0
+    while True:
+        while b'\r\n' not in buffer:
+            if len(buffer) > 64:
+                raise ValueError('Tamano de bloque HTTP invalido para ' + name)
+            chunk = client.recv(128)
+            if not chunk:
+                raise ValueError('Respuesta OTA chunked incompleta para ' + name)
+            buffer += chunk
+        end = buffer.find(b'\r\n')
+        line = buffer[:end]
+        buffer = buffer[end + 2:]
+        try:
+            size = int(line.split(b';', 1)[0].strip(), 16)
+        except Exception:
+            raise ValueError('Tamano de bloque HTTP invalido para ' + name)
+        if size == 0:
+            while True:
+                while b'\r\n' not in buffer:
+                    if len(buffer) > 512:
+                        raise ValueError('Trailer HTTP demasiado grande para ' + name)
+                    chunk = client.recv(128)
+                    if not chunk:
+                        raise ValueError('Fin chunked incompleto para ' + name)
+                    buffer += chunk
+                end = buffer.find(b'\r\n')
+                trailer_bytes += end + 2
+                if trailer_bytes > 1024:
+                    raise ValueError('Trailer HTTP demasiado grande para ' + name)
+                if end == 0:
+                    return received
+                buffer = buffer[end + 2:]
+        if received + size > expected_length:
+            raise ValueError('Respuesta OTA excede el tamano declarado para ' + name)
+        remaining = size
+        while remaining:
+            if not buffer:
+                buffer = client.recv(512)
+                if not buffer:
+                    raise ValueError('Descarga OTA incompleta para ' + name)
+            count = min(remaining, len(buffer))
+            part = buffer[:count]
+            target.write(part)
+            digest.update(part)
+            received += count
+            remaining -= count
+            buffer = buffer[count:]
+        while len(buffer) < 2:
+            chunk = client.recv(128)
+            if not chunk:
+                raise ValueError('Separador chunked incompleto para ' + name)
+            buffer += chunk
+        if buffer[:2] != b'\r\n':
+            raise ValueError('Separador chunked invalido para ' + name)
+        buffer = buffer[2:]
+
+
+def _write_sized(client, buffer, target, digest, expected_length, name):
+    received = 0
+    while received < expected_length:
+        if not buffer:
+            buffer = client.recv(512)
+            if not buffer:
+                break
+        count = min(expected_length - received, len(buffer))
+        part = buffer[:count]
+        target.write(part)
+        digest.update(part)
+        received += count
+        buffer = buffer[count:]
+        if buffer and received == expected_length:
+            raise ValueError('Respuesta OTA excede el tamano declarado para ' + name)
+    if received != expected_length:
+        raise ValueError('Descarga OTA incompleta para ' + name)
+    return received
+
+
 def _request(api_url, api_key, path):
     client, host = _connection(api_url, 10)
     try:
@@ -89,27 +168,22 @@ def _download(api_url, api_key, version, info, target_model, allowed_files, ota_
         separator = header.find(b'\r\n\r\n')
         if separator < 0 or header[9:12] != b'200':
             raise ValueError('Descarga HTTP para ' + name)
-        if b'transfer-encoding: chunked' in header[:separator].lower():
-            raise ValueError('OTA requiere Content-Length')
+        response_headers = header[:separator].lower()
+        chunked = b'transfer-encoding: chunked' in response_headers
         content_length = None
-        for line in header[:separator].lower().split(b'\r\n'):
+        for line in response_headers.split(b'\r\n'):
             if line.startswith(b'content-length:'):
                 content_length = int(line.split(b':', 1)[1].strip())
-                break
-        expected_length = int(info.get('size', content_length or 0))
-        if content_length is None or content_length != expected_length:
+        expected_length = int(info.get('size', 0))
+        if expected_length < 0 or (content_length is not None and content_length != expected_length):
             raise ValueError('Tamano OTA no coincide para ' + name)
         digest = uhashlib.sha256()
-        received = 0
         with open(stage_name, 'wb') as target:
-            chunk = header[separator + 4:]
-            while chunk:
-                if received + len(chunk) > expected_length:
-                    raise ValueError('Respuesta OTA excede el tamano declarado para ' + name)
-                target.write(chunk)
-                digest.update(chunk)
-                received += len(chunk)
-                chunk = client.recv(512)
+            body = header[separator + 4:]
+            if chunked:
+                received = _write_chunked(client, body, target, digest, expected_length, name)
+            else:
+                received = _write_sized(client, body, target, digest, expected_length, name)
         if received != expected_length:
             raise ValueError('Descarga OTA incompleta para ' + name)
         actual_hash = ''.join('{:02x}'.format(value) for value in digest.digest())
@@ -141,6 +215,7 @@ def update(api_url, api_key, version, target_model, allowed_files):
     for info in files:
         _download(api_url, api_key, version, info, target_model, allowed_files, ota_boot)
         staged.append(str(info.get('name', '')))
+        gc.collect()
     version_stage = ota_boot.stage_path('pulsegrid_firmware.py')
     with open(version_stage, 'w') as version_file:
         version_file.write('VERSION = {!r}\n'.format(version))
