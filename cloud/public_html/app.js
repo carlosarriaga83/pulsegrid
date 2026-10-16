@@ -1565,8 +1565,8 @@ $('#mobile-menu').addEventListener('click', () => { const open = $('#sidebar').c
 $('#device-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   const formData = new FormData(event.currentTarget);
-  const newDevice = { name: formData.get('name'), id: formData.get('id'), type: formData.get('type'), deviceCode: formData.get('deviceCode'), status: 'provisioning', report: null, signal: 'unknown', icon: 'cpu', temp: '--', battery: '--' };
-  try { await apiRequest('devices', { method: 'POST', body: JSON.stringify(newDevice) }); delete newDevice.deviceCode; } catch (error) { if (error.message === 'Authentication required') showAuthModal('login'); else showToast(error.message); return; }
+  const newDevice = { name: formData.get('name'), type: formData.get('type'), deviceCode: formData.get('deviceCode'), status: 'provisioning', report: null, signal: 'unknown', icon: 'cpu', temp: '--', battery: '--' };
+  try { const registered = await apiRequest('devices', { method: 'POST', body: JSON.stringify(newDevice) }); newDevice.id = registered.deviceId; delete newDevice.deviceCode; } catch (error) { if (error.message === 'Authentication required') showAuthModal('login'); else showToast(error.message); return; }
   devices.unshift(newDevice);
   renderDeviceRows();
   renderDeviceCards();

@@ -278,8 +278,6 @@ class BurnerApp(tk.Tk):
             settings = self._settings_snapshot()
             if not settings["api_url"].startswith("https://"):
                 raise BurnerError("La URL cloud debe usar HTTPS")
-            settings["device_code"] = secrets.token_hex(16)
-            self.device_code.set(settings["device_code"])
         except BurnerError as error:
             messagebox.showerror("Quemador", str(error))
             return
@@ -356,6 +354,9 @@ class BurnerApp(tk.Tk):
             settings["device_id"] = self._device_id_from_mac(port)
             self.events.put(("device-id", settings["device_id"]))
             self._log("Device ID asignado: {}".format(settings["device_id"]))
+            mac_suffix = settings["device_id"].removeprefix("PULSE_")
+            settings["device_code"] = mac_suffix + secrets.token_hex(16).upper()
+            self.events.put(("device-code", settings["device_code"]))
         self._upload_profile(port, files, settings)
         if not settings["flash_micropython"]:
             self._log("Reiniciando MicroPython...")

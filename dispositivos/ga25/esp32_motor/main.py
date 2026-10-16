@@ -519,6 +519,7 @@ def execute(command):
         if not isinstance(payload.get("enabled"), bool):
             raise ValueError("enabled debe ser booleano")
         led_override = payload["enabled"]
+        status_led.set(led_override)
     elif name == "direction.configure":
         if not isinstance(payload.get("reversed"), bool):
             raise ValueError("reversed debe ser booleano")
@@ -624,7 +625,10 @@ def main():
             wifi_retry_ms = WIFI_RETRY_MIN_MS
             status_led.set(led_override if led_override is not None else (True if DEVICE_CODE else (255, 180, 0)))
         else:
-            status_led.portal_tick()
+            if led_override is False:
+                status_led.set(False)
+            else:
+                status_led.portal_tick()
             if time.ticks_diff(now, next_wifi_retry) >= 0:
                 connected = wifi_connect()
                 if connected:

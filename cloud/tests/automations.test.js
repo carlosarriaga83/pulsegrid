@@ -10,10 +10,12 @@ const server = fs.readFileSync(path.join(root, 'server.js'), 'utf8');
 // Evaluate only declarations, never server startup, dotenv, timers or a real database.
 function backend(extra = {}) {
   const context = vm.createContext({ AutomationModel: model, OpenMeteo: openMeteo, Intl, Date, console, ...extra });
+  const injectedDispatch = extra.dispatchDeviceCommand;
   vm.runInContext(server.slice(server.indexOf('function automationAction('), server.indexOf('async function readFirmwareManifest(')), context);
   vm.runInContext(server.slice(server.indexOf('function validateTuyaCommand('), server.indexOf('async function dispatchDeviceCommand(')), context);
   vm.runInContext(server.slice(server.indexOf('function validateDirectionConfiguration('), server.indexOf('async function validateAutomationDevices(')), context);
-  vm.runInContext(server.slice(server.indexOf('async function dispatchDeviceCommand('), server.indexOf('async function runScheduledAutomations(')), context);
+  vm.runInContext(server.slice(server.indexOf('async function dispatchDeviceCommand('), server.indexOf('async function syncTuyaDevice(')), context);
+  if (injectedDispatch) context.dispatchDeviceCommand = injectedDispatch;
   return context;
 }
 const power = { id: 'A', name: 'Power meter A', telemetry: JSON.stringify({ Power: 500, zero: 0, status: { Led1: false, mode: '001' } }), capabilities: [{ code: 'Power', name: 'Power', type: 'Integer' }] };
@@ -314,14 +316,24 @@ test('dynamic Tuya parameter resolves nested paths inside status arrays', async 
   assert.deepEqual(JSON.parse(JSON.stringify(dispatched[0][3])), { code: 'bright_value_1', value: 63 });
 });
 
-test('backend validates remote Pulsegrid configuration without accepting Tuya devices', () => {
+test('backend rejects remote device credential replacement', async () => {
   const b = backend();
   const pulsegrid = { provider: 'pulsegrid' };
-    assert.throws(() => b.dispatchDeviceCommand({}, pulsegrid, 'device.configure', { apiUrl: 'https://pulse.2api2.com', apiKey: 'pg_live_valid_key', deviceId: 'Cortina_2' }));
-    assert.throws(() => b.dispatchDeviceCommand({}, { provider: 'tuya' }, 'device.configure', {}));
-    assert.doesNotThrow(() => b.validateDirectionConfiguration({ ...pulsegrid, telemetry: { kind: 'curtain' } }, 'direction.configure', { reversed: true }));
-    assert.throws(() => b.validateDirectionConfiguration({ provider: 'tuya' }, 'direction.configure', { reversed: true }));
-    assert.throws(() => b.validateDirectionConfiguration({ ...pulsegrid, telemetry: { kind: 'curtain' } }, 'direction.configure', { reversed: 'true' }));
+  await assert.rejects(b.dispatchDeviceCommand({}, pulsegrid, 'device.configure', { apiUrl: 'https://pulse.2api2.com', apiKey: 'pg_live_valid_key', deviceId: 'Cortina_2' }));
+  await assert.rejects(b.dispatchDeviceCommand({}, { provider: 'tuya' }, 'device.configure', {}));
+  assert.doesNotThrow(() => b.validateDirectionConfiguration({ ...pulsegrid, telemetry: { kind: 'curtain' } }, 'direction.configure', { reversed: true }));
+  assert.throws(() => b.validateDirectionConfiguration({ provider: 'tuya' }, 'direction.configure', { reversed: true }));
+  assert.throws(() => b.validateDirectionConfiguration({ ...pulsegrid, telemetry: { kind: 'curtain' } }, 'direction.configure', { reversed: 'true' }));
+});
+
+test('backend validates LED commands as a boolean for Pulsegrid curtains', () => {
+  const b = backend();
+  const curtain = { provider: 'pulsegrid', type: 'curtain' };
+  assert.doesNotThrow(() => b.validateLedConfiguration(curtain, 'led.configure', { enabled: true }));
+  assert.doesNotThrow(() => b.validateLedConfiguration(curtain, 'led.configure', { enabled: false }));
+  assert.throws(() => b.validateLedConfiguration(curtain, 'led.configure', { enabled: 'false' }));
+  assert.throws(() => b.validateLedConfiguration(curtain, 'led.configure', {}));
+  assert.throws(() => b.validateLedConfiguration({ provider: 'tuya' }, 'led.configure', { enabled: true }));
 });
 
 test('backend validates Pulsegrid direction configuration', () => {

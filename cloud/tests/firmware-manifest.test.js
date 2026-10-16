@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const vm = require('node:vm');
 
 const root = path.join(__dirname, '..', '..');
 const burner = fs.readFileSync(path.join(root, 'quemador', 'quemador.py'), 'utf8');
@@ -62,7 +63,9 @@ test('burner and firmware use per-device codes over HTTPS while captive portals 
   const ga25Main = fs.readFileSync(path.join(root, 'dispositivos/ga25/esp32_motor/main.py'), 'utf8');
   const ga25Portal = fs.readFileSync(path.join(root, 'dispositivos/ga25/esp32_motor/captive_portal.py'), 'utf8');
   const cloudServer = fs.readFileSync(path.join(root, 'cloud/server.js'), 'utf8');
+  const ga25Led = fs.readFileSync(path.join(root, 'dispositivos/ga25/esp32_motor/main.py'), 'utf8');
   assert.match(burner, /secrets\.token_hex\(16\)/);
+  assert.match(burner, /mac_suffix \+ secrets\.token_hex\(16\)\.upper\(\)/);
   assert.match(burner, /DEVICE_CODE =/);
   assert.match(burner, /PULSE_\(\[0-9A-Fa-f\]\{12\}\)/);
   for (const source of [servoCloud, ga25Main]) {
@@ -72,7 +75,18 @@ test('burner and firmware use per-device codes over HTTPS while captive portals 
   assert.match(servoMain, /DEVICE_CODE/);
   assert.match(ga25Main, /DEVICE_CODE/);
   assert.match(cloudServer, /device_code_hash CHAR\(64\)/);
+  assert.match(cloudServer, /function deviceIdFromCode\(deviceCode\)/);
+  assert.match(cloudServer, /const deviceId = deviceIdFromCode\(deviceCode\)/);
   assert.match(cloudServer, /HTTPS is required/);
+  assert.match(ga25Led, /led_override = payload\["enabled"\]\s+status_led\.set\(led_override\)/);
+  assert.match(ga25Led, /if led_override is False:\s+status_led\.set\(False\)/);
+  assert.doesNotMatch(fs.readFileSync(path.join(root, 'cloud/public/index.html'), 'utf8'), /name="id" required/);
+  assert.match(fs.readFileSync(path.join(root, 'cloud/public/index.html'), 'utf8'), /name="deviceCode" required minlength="44"/);
+  const idContext = { crypto: require('node:crypto') };
+  const identityStart = cloudServer.indexOf('function deviceIdFromCode(');
+  const identityEnd = cloudServer.indexOf('function secureDeviceRequest(', identityStart);
+  vm.runInNewContext(cloudServer.slice(identityStart, identityEnd), idContext);
+  assert.equal(idContext.deviceIdFromCode('aabbccddeeff' + '1'.repeat(32)), 'PULSE_AABBCCDDEEFF');
   assert.doesNotMatch(servoPortal, /name=['"](?:api_key|device_id|device_code|api_url)['"]/);
   assert.doesNotMatch(ga25Portal, /name=(?:api_key|device_id|device_code|api_url|travel|direction_reversed)/);
 });

@@ -40,6 +40,12 @@ function hashDeviceCode(deviceCode) {
   return crypto.createHash('sha256').update(String(deviceCode).trim().toLowerCase()).digest('hex');
 }
 
+function deviceIdFromCode(deviceCode) {
+  const code = String(deviceCode || '').trim();
+  if (!/^[a-fA-F0-9]{44}$/.test(code)) return null;
+  return `PULSE_${code.slice(0, 12).toUpperCase()}`;
+}
+
 function secureDeviceRequest(request, response) {
   if (request.secure || request.get('x-forwarded-proto') === 'https') return true;
   fail(response, 426, 'HTTPS is required');
@@ -48,8 +54,10 @@ function secureDeviceRequest(request, response) {
 
 async function deviceForCode(deviceCode, deviceId) {
   const code = String(deviceCode || '').trim();
-  const id = String(deviceId || '').trim();
-  if (!/^[a-fA-F0-9]{32}$/.test(code) || !/^[A-Za-z0-9_.:-]{1,100}$/.test(id)) return null;
+  const derivedId = deviceIdFromCode(code);
+  const id = String(deviceId || derivedId || '').trim();
+  const legacyCode = /^[a-fA-F0-9]{32}$/.test(code);
+  if ((!derivedId && !legacyCode) || (derivedId && id !== derivedId) || !/^[A-Za-z0-9_.:-]{1,100}$/.test(id)) return null;
   const [rows] = await database().execute('SELECT id, user_id AS userId, device_id AS deviceId FROM devices WHERE device_id = ? AND device_code_hash = ? LIMIT 1', [id, hashDeviceCode(code)]);
   return rows[0] || null;
 }
@@ -569,6 +577,11 @@ function validateDirectionConfiguration(device, command, payload) {
   if (!payload || typeof payload.reversed !== 'boolean' || Object.keys(payload).some((key) => key !== 'reversed')) throw new Error('reversed debe ser booleano');
 }
 
+function validateLedConfiguration(device, command, payload) {
+  if (command !== 'led.configure' || device.provider === 'tuya' || !AutomationModel.curtain(device)) throw new Error('El LED solo aplica a cortinas Pulsegrid');
+  if (!payload || typeof payload.enabled !== 'boolean' || Object.keys(payload).some((key) => key !== 'enabled')) throw new Error('enabled debe ser booleano');
+}
+
 async function validateAutomationDevices(db, email, target, rule) {
   if (rule.commandName) validateTuyaCommand(target, rule.commandName, rule.commandPayload, rule.valueSource);
   else {
@@ -606,6 +619,11 @@ async function dispatchDeviceCommand(db, device, command, payload, context = {})
       const [readings] = await db.execute('SELECT payload FROM telemetry WHERE device_id = ? ORDER BY created_at DESC, id DESC LIMIT 1', [device.id]);
       const latestTelemetry = readings[0]?.payload;
       validateDirectionConfiguration({ ...device, telemetry: latestTelemetry }, command, payload);
+    }
+    if (command === 'led.configure') {
+      const [readings] = await db.execute('SELECT payload FROM telemetry WHERE device_id = ? ORDER BY created_at DESC, id DESC LIMIT 1', [device.id]);
+      const latestTelemetry = readings[0]?.payload;
+      validateLedConfiguration({ ...device, telemetry: latestTelemetry }, command, payload);
     }
     const [result] = await db.execute('INSERT INTO commands (device_id, command_name, payload) VALUES (?, ?, ?)', [device.id, command, JSON.stringify(payload)]);
     return { id: result.insertId, status: 'queued' };
@@ -824,23 +842,23 @@ app.get('/api/devices', apiReady, async (request, response) => {
 
 app.post('/api/devices', apiReady, async (request, response) => {
   if (!request.session.user) return fail(response, 401, 'Authentication required');
-  const { id, name, type, deviceCode } = request.body || {};
-  const deviceId = String(id || '').trim();
+  const { name, type, deviceCode } = request.body || {};
+  const deviceId = deviceIdFromCode(deviceCode);
   const deviceName = String(name || '').trim();
   const deviceType = String(type || '').trim();
   const code = String(deviceCode || '').trim();
-  if (!/^[A-Za-z0-9_.:-]{1,80}$/.test(deviceId) || !deviceName || deviceName.length > 120 || !deviceType || deviceType.length > 60 || !/^[a-fA-F0-9]{32}$/.test(code)) return fail(response, 422, 'Device ID, nombre, tipo y codigo de dispositivo valido son obligatorios');
+  if (!deviceId || !deviceName || deviceName.length > 120 || !deviceType || deviceType.length > 60) return fail(response, 422, 'Nombre, tipo y codigo unico valido son obligatorios');
   try {
     const db = database();
     const [existing] = await db.execute('SELECT id, provider FROM devices WHERE user_id = (SELECT id FROM users WHERE email = ?) AND device_id = ? LIMIT 1', [request.session.user.email, deviceId]);
     if (existing[0]?.provider === 'tuya') return fail(response, 409, 'No se puede registrar un codigo Pulsegrid en un dispositivo Tuya');
     if (existing[0]) {
       await db.execute("UPDATE devices SET name = ?, type = ?, device_code_hash = ?, status = 'provisioning', last_seen = NULL WHERE id = ?", [deviceName, deviceType, hashDeviceCode(code), existing[0].id]);
-      response.status(200).json({ ok: true, id: existing[0].id, status: 'provisioning' });
+      response.status(200).json({ ok: true, id: existing[0].id, deviceId, status: 'provisioning' });
       return;
     }
     const [result] = await db.execute("INSERT INTO devices (user_id, device_id, name, type, device_code_hash, status) VALUES ((SELECT id FROM users WHERE email = ?), ?, ?, ?, ?, 'provisioning')", [request.session.user.email, deviceId, deviceName, deviceType, hashDeviceCode(code)]);
-    response.status(201).json({ ok: true, id: result.insertId, status: 'provisioning' });
+    response.status(201).json({ ok: true, id: result.insertId, deviceId, status: 'provisioning' });
   } catch (error) { fail(response, error.code === 'ER_DUP_ENTRY' ? 409 : 500, error.code === 'ER_DUP_ENTRY' ? 'El codigo ya esta vinculado a otro dispositivo' : 'No fue posible crear el dispositivo'); }
 });
 

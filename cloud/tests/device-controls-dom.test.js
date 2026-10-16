@@ -24,7 +24,7 @@ const device = {
 
 const curtainDevice = {
   id: 'curtain-1', name: 'Curtain', type: 'curtain', provider: 'pulsegrid', status: 'online', report: 'now', signal: 'good', icon: 'blinds', meta: [],
-  telemetry: { kind: 'curtain', firmwareTarget: 'ga25', directionReversed: false }
+  telemetry: { kind: 'curtain', firmwareTarget: 'ga25', directionReversed: false, ledEnabled: false }
 };
 
 function setup(folder, requestImpl = async () => ({ status: 'succeeded' }), configuredDevice = device) {
@@ -165,6 +165,18 @@ for (const folder of ['', 'public', 'public_html']) {
     await vm.runInContext('sendDeviceDirection({ target: document.querySelector("[data-device-direction]") })', context);
     assert.equal(window.document.querySelector('[data-device-direction]').checked, false);
     assert.match(window.document.querySelector('[data-direction-status]').textContent, /Error: Dispositivo fuera de linea/);
+  });
+
+  test(`${label}: LED switch sends an explicit boolean command and keeps the optimistic state`, async (t) => {
+    const f = setup(folder, async () => ({ status: 'queued' }), curtainDevice); t.after(() => f.dom.window.close());
+    const { window, context } = f;
+    const toggle = window.document.querySelector('[data-device-led]');
+    assert.equal(toggle.checked, false);
+    toggle.checked = true;
+    await vm.runInContext('sendDeviceLed({ target: document.querySelector("[data-device-led]") })', context);
+    assert.deepEqual(f.requests[0], { endpoint: 'commands', deviceId: 'curtain-1', command: 'led.configure', payload: { enabled: true } });
+    vm.runInContext('renderDeviceCards()', context);
+    assert.equal(window.document.querySelector('[data-device-led]').checked, true);
   });
 
   test(`${label}: card actions remain independent and open device telemetry`, async (t) => {

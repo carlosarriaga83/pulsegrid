@@ -55,7 +55,7 @@ pulsegrid_ota.py
 
 Genera y carga un unico `config.py` con Wi-Fi, API URL HTTPS, código único, Device ID, comandos y sentido. Tras cargar, registra el Device ID y el código mostrado por el quemador en el cloud; el código no se imprime en el registro. El portal local solo cambia Wi-Fi.
 La calibracion del servo se conserva en `blind_state.py` y `multiturn_state.py`; el quemador no elimina esos archivos al actualizar el firmware.
-El `Device ID` se asigna automáticamente como `PULSE_` seguido de los 12 dígitos hexadecimales de la MAC. El código único se genera aleatoriamente con 128 bits de entropía.
+El `Device ID` se asigna automáticamente como `PULSE_` seguido de los 12 dígitos hexadecimales de la MAC. El codigo que se registra en cloud concatena ese identificador con un secreto aleatorio de 128 bits; el usuario solo tiene que introducir el código.
 
 ### GA25
 
@@ -70,7 +70,7 @@ ota_boot.py
 ```
 
 Genera y carga `config.py` con Wi-Fi, API URL HTTPS, código único, Device ID, recorrido y sentido del motor. Registra el Device ID y el código mostrado en el cloud. El portal local solo cambia Wi-Fi y conserva los ajustes del motor.
-El `Device ID` se asigna automáticamente como `PULSE_` seguido de los 12 dígitos hexadecimales de la MAC. El código único se genera aleatoriamente con 128 bits de entropía.
+El `Device ID` se asigna automáticamente como `PULSE_` seguido de los 12 dígitos hexadecimales de la MAC. El codigo que se registra en cloud concatena ese identificador con un secreto aleatorio de 128 bits; el usuario solo tiene que introducir el código.
 
 ### Otros
 
