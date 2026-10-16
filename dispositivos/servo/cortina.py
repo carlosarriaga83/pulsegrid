@@ -33,6 +33,8 @@ class Cortina:
         self.calibration_references = {servo_id: set() for servo_id in self.known_servo_ids}
         self._last_positions = {}
         self._last_saved_turns = dict(self.absolute_turns)
+        self._recover_state_file('blind_state.py')
+        self._recover_state_file('multiturn_state.py')
         self._load_persistent_state()
         self.servo_ids = tuple(servo_id for servo_id in self.known_servo_ids if self.bus.ping(servo_id))
         active_ids = set(self.servo_ids)
@@ -70,32 +72,66 @@ class Cortina:
                 self.position_recovery_required[servo_id] = bool(RECOVERY_REQUIRED.get(servo_id, True))
         except (ImportError, AttributeError, TypeError, ValueError):
             pass
-        for servo_id in self.known_servo_ids:
-            if self.blind_config[servo_id]['calibrated']:
-                self.position_recovery_required[servo_id] = False
+
+    @staticmethod
+    def _recover_state_file(filename):
+        backup = filename + '.bak'
+        try:
+            os.stat(filename)
+            exists = True
+        except OSError:
+            exists = False
+        try:
+            os.stat(backup)
+            backup_exists = True
+        except OSError:
+            backup_exists = False
+        if not exists and backup_exists:
+            os.rename(backup, filename)
+        elif exists and backup_exists:
+            os.remove(backup)
+
+    @staticmethod
+    def _write_state_file(filename, content):
+        temporary = filename + '.tmp'
+        backup = filename + '.bak'
+        with open(temporary, 'w') as state_file:
+            state_file.write(content)
+        try:
+            os.remove(backup)
+        except OSError:
+            pass
+        try:
+            os.stat(filename)
+            exists = True
+        except OSError:
+            exists = False
+        if exists:
+            os.rename(filename, backup)
+        try:
+            os.rename(temporary, filename)
+        except Exception:
+            if exists:
+                try:
+                    os.rename(backup, filename)
+                except OSError:
+                    pass
+            raise
+        try:
+            os.remove(backup)
+        except OSError:
+            pass
 
     def _save_persistent_state(self):
         blind_config = {servo_id: dict(values) for servo_id, values in self.blind_config.items()}
         blind_targets = {servo_id: dict(values) for servo_id, values in self.blind_targets.items()}
-        with open('blind_state.tmp', 'w') as state_file:
-            state_file.write('BLIND_CONFIG = {!r}\n'.format(blind_config))
-            state_file.write('BLIND_TARGETS = {!r}\n'.format(blind_targets))
-            state_file.write('DIRECTION_REVERSED = {!r}\n'.format(self.direction_reversed))
-        try:
-            os.remove('blind_state.py')
-        except OSError:
-            pass
-        os.rename('blind_state.tmp', 'blind_state.py')
+        blind_state = 'BLIND_CONFIG = {!r}\nBLIND_TARGETS = {!r}\nDIRECTION_REVERSED = {!r}\n'.format(
+            blind_config, blind_targets, self.direction_reversed)
+        self._write_state_file('blind_state.py', blind_state)
         absolute = {servo_id: round(value, 4) for servo_id, value in self.absolute_turns.items()}
         recovery = {servo_id: bool(value) for servo_id, value in self.position_recovery_required.items()}
-        with open('multiturn_state.tmp', 'w') as state_file:
-            state_file.write('ABSOLUTE_TURNS = {!r}\n'.format(absolute))
-            state_file.write('RECOVERY_REQUIRED = {!r}\n'.format(recovery))
-        try:
-            os.remove('multiturn_state.py')
-        except OSError:
-            pass
-        os.rename('multiturn_state.tmp', 'multiturn_state.py')
+        multiturn_state = 'ABSOLUTE_TURNS = {!r}\nRECOVERY_REQUIRED = {!r}\n'.format(absolute, recovery)
+        self._write_state_file('multiturn_state.py', multiturn_state)
 
     def set_direction_reversed(self, reversed_value):
         self.direction_reversed = bool(reversed_value)

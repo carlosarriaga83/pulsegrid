@@ -24,3 +24,26 @@ for (const [model, directory] of [['servo', 'dispositivos/servo'], ['ga25', 'dis
     for (const file of burnerFiles) assert.equal(fs.existsSync(path.join(root, directory, file)), true, `${model} missing ${file}`);
   });
 }
+
+test('persistent calibration/state files are never OTA payloads or burner cleanup targets', () => {
+  const servoMain = fs.readFileSync(path.join(root, 'dispositivos/servo/main.py'), 'utf8');
+  const servoCloud = fs.readFileSync(path.join(root, 'dispositivos/servo/cloud_client.py'), 'utf8');
+  const ga25Main = fs.readFileSync(path.join(root, 'dispositivos/ga25/esp32_motor/main.py'), 'utf8');
+  const ga25Portal = fs.readFileSync(path.join(root, 'dispositivos/ga25/esp32_motor/captive_portal.py'), 'utf8');
+  const servoCurtain = fs.readFileSync(path.join(root, 'dispositivos/servo/cortina.py'), 'utf8');
+  const servoProfile = burner.slice(burner.indexOf('"servo": {'));
+  const ga25Profile = burner.slice(burner.indexOf('"ga25": {'));
+  for (const file of ['blind_state.py', 'multiturn_state.py']) {
+    assert.equal(tupleAfter(servoMain, 'FIRMWARE_FILES =').includes(file), false, `servo OTA must preserve ${file}`);
+    assert.equal(tupleAfter(servoCloud, "files = (").includes(file), false, `servo OTA command must preserve ${file}`);
+    assert.equal(tupleAfter(servoProfile, '"remove":').includes(file), false, `servo burner cleanup must preserve ${file}`);
+  }
+  assert.equal(tupleAfter(ga25Main, 'FIRMWARE_FILES =').includes('config.py'), false, 'GA25 OTA must preserve calibration config');
+  assert.equal(tupleAfter(ga25Profile, '"files":').includes('config.py'), false, 'GA25 burner must keep config separately generated');
+  assert.equal(tupleAfter(ga25Profile, '"remove":').includes('config.py'), false, 'GA25 burner cleanup must preserve config');
+  assert.match(ga25Main, /FULL_TRAVEL_MS/);
+  assert.match(ga25Main, /recover_config_file\(\)/);
+  assert.match(ga25Main, /config\.py\.bak/);
+  assert.match(ga25Portal, /CONFIG_FILE \+ "\.bak"/);
+  assert.match(servoCurtain, /backup = filename \+ '\.bak'/);
+});

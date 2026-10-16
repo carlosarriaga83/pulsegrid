@@ -15,15 +15,32 @@ FIRMWARE_VERSION = '2026.10.15.servo'
 FIRMWARE_FILES = ('main.py', 'cloud_client.py', 'board_led.py', 'captive_portal.py', 'cortina.py', 'servo_calibration.py', 'stservo.py', 'boot.py', 'ota_boot.py', 'pulsegrid_ota.py')
 WIFI_RETRY_MIN_MS = 2000
 WIFI_RETRY_MAX_MS = 60000
+WIFI_CONNECT_TIMEOUT_MS = 20000
+wifi_connect_started = None
+wifi_connect_pending = False
 
 
 def connect_wifi(wlan):
+    global wifi_connect_started, wifi_connect_pending
     if not WIFI_SSID:
         return False
     try:
         wlan.active(True)
-        if not wlan.isconnected():
-            wlan.connect(WIFI_SSID, WIFI_PASSWORD)
+        if wlan.isconnected():
+            wifi_connect_started = None
+            wifi_connect_pending = False
+            return True
+        now = time.ticks_ms()
+        if wifi_connect_pending:
+            if wifi_connect_started is not None and time.ticks_diff(now, wifi_connect_started) < WIFI_CONNECT_TIMEOUT_MS:
+                return False
+            wlan.disconnect()
+            wifi_connect_started = None
+            wifi_connect_pending = False
+            return False
+        wifi_connect_started = now
+        wifi_connect_pending = True
+        wlan.connect(WIFI_SSID, WIFI_PASSWORD)
         return wlan.isconnected()
     except Exception as error:
         print('Wi-Fi reconexion:', error)
@@ -43,6 +60,7 @@ def build_controller():
 
 
 def main():
+    global wifi_connect_pending, wifi_connect_started
     controller = build_controller()
     controller.parar()
     import board_led
@@ -69,7 +87,11 @@ def main():
             connected = wlan.isconnected()
         except Exception:
             connected = False
+        if connected:
+            wifi_connect_pending = False
+            wifi_connect_started = None
         if connected and API_KEY:
+            wifi_retry_ms = WIFI_RETRY_MIN_MS
             if time.ticks_diff(now, last_poll) >= 3000:
                 last_poll = now
                 client.commands(controller, board_led.set_enabled)

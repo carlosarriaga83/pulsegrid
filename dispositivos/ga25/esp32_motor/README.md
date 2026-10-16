@@ -8,6 +8,8 @@ Para LOLIN S2 Mini / ESP32-S2:
 
 El firmware consulta los comandos de Pulsegrid y envia telemetria. Sin encoder o sensor, `position` es una estimacion basada en tiempo; ajusta `FULL_TRAVEL_MS` despues de medir el recorrido real.
 
+`FULL_TRAVEL_MS` se guarda en `config.py`, que queda fuera de los manifiestos OTA y de la limpieza del perfil GA25 del quemador. Los reinicios, las actualizaciones OTA y la pérdida de Wi-Fi no borran ese ajuste; el guardado del portal y de la configuración remota conserva un respaldo para recuperarlo si hay un reset durante la escritura. La posición física no se puede conocer con exactitud tras un corte durante el movimiento sin encoder o finales de carrera. Borrar toda la flash sí elimina `config.py`.
+
 Cuando `API_KEY` está vacía, el firmware usa solo la clave de bootstrap `pg_bootstrap_v1` para anunciar presencia y consultar una configuración `device.configure` pendiente. No envía telemetría ni consulta comandos normales.
 
 ## Carga

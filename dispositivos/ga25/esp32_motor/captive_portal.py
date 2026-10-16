@@ -2,6 +2,7 @@ import socket
 import time
 import network
 import machine
+import os
 import _thread
 
 AP_IP = "192.168.4.1"
@@ -86,7 +87,9 @@ def _write_config(values):
         travel = 15000
     if not ssid or not api_url or not device_id:
         raise ValueError("SSID, API URL y Device ID son obligatorios")
-    with open(CONFIG_FILE, "w") as config:
+    temporary = CONFIG_FILE + ".tmp"
+    backup = CONFIG_FILE + ".bak"
+    with open(temporary, "w") as config:
         config.write("WIFI_SSID = {!r}\n".format(ssid))
         config.write("WIFI_PASSWORD = {!r}\n".format(password))
         config.write("API_URL = {!r}\n".format(api_url))
@@ -94,6 +97,30 @@ def _write_config(values):
         config.write("DEVICE_ID = {!r}\n".format(device_id))
         direction_reversed = values.get("direction_reversed", "0") == "1"
         config.write("FULL_TRAVEL_MS = {}\nOPEN_A_LEVEL = 1\nDIRECTION_REVERSED = {!r}\n".format(travel, direction_reversed))
+    try:
+        os.remove(backup)
+    except OSError:
+        pass
+    try:
+        os.stat(CONFIG_FILE)
+        config_exists = True
+    except OSError:
+        config_exists = False
+    if config_exists:
+        os.rename(CONFIG_FILE, backup)
+    try:
+        os.rename(temporary, CONFIG_FILE)
+    except Exception:
+        if config_exists:
+            try:
+                os.rename(backup, CONFIG_FILE)
+            except OSError:
+                pass
+        raise
+    try:
+        os.remove(backup)
+    except OSError:
+        pass
 
 
 def _dns_response(query):
@@ -153,11 +180,9 @@ def run(motor=None):
     try:
         import config
         wifi_ssid = str(getattr(config, "WIFI_SSID", "")).strip()
-        wifi_password = str(getattr(config, "WIFI_PASSWORD", ""))
         api_key_configured = bool(str(getattr(config, "API_KEY", "")).strip())
     except ImportError:
         wifi_ssid = ""
-        wifi_password = ""
         api_key_configured = False
     station = network.WLAN(network.STA_IF)
     try:
@@ -177,23 +202,10 @@ def run(motor=None):
             station.active(False)
         except Exception:
             pass
-    if wifi_ssid and not station.isconnected():
-        try:
-            station.connect(wifi_ssid, wifi_password)
-            deadline = time.ticks_add(time.ticks_ms(), 15000)
-            while not station.isconnected() and time.ticks_diff(deadline, time.ticks_ms()) > 0:
-                time.sleep_ms(250)
-        except Exception as error:
-            print("Wi-Fi no conectado: {}".format(error))
-            try:
-                station.disconnect()
-            except Exception:
-                pass
     ap = network.WLAN(network.AP_IF)
     ap.active(False)
     dns = None
     portal_mode = None
-    next_wifi_retry = 0
     server = None
     for attempt in range(3):
         try:
@@ -253,13 +265,6 @@ def run(motor=None):
                     dns.sendto(_dns_response(data), address)
                 except OSError:
                     pass
-                now = time.ticks_ms()
-                if wifi_ssid and time.ticks_diff(now, next_wifi_retry) >= 0:
-                    next_wifi_retry = time.ticks_add(now, 15000)
-                    try:
-                        station.connect(wifi_ssid, wifi_password)
-                    except Exception as error:
-                        print("Reintento Wi-Fi fallido: {}".format(error))
             try:
                 client, _ = server.accept()
             except OSError:

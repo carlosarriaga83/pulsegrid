@@ -8,6 +8,27 @@ from machine import Pin
 from motor_curtain import CurtainMotor
 import captive_portal
 
+
+def recover_config_file():
+    backup = "config.py.bak"
+    try:
+        os.stat("config.py")
+        config_exists = True
+    except OSError:
+        config_exists = False
+    try:
+        os.stat(backup)
+        backup_exists = True
+    except OSError:
+        backup_exists = False
+    if not config_exists and backup_exists:
+        os.rename(backup, "config.py")
+    elif config_exists and backup_exists:
+        os.remove(backup)
+
+
+recover_config_file()
+
 try:
     import ussl as tls
 except ImportError:
@@ -43,9 +64,11 @@ REQUEST_TIMEOUT = 5
 RETRY_MS = 5000
 WIFI_RETRY_MIN_MS = 2000
 WIFI_RETRY_MAX_MS = 60000
+WIFI_CONNECT_TIMEOUT_MS = 20000
 next_request_at = 0
 wifi_station = None
 next_wifi_retry = 0
+wifi_connect_started = None
 
 class StatusLed:
     def __init__(self, pin=15):
@@ -102,7 +125,7 @@ def api_socket(timeout):
 
 
 def wifi_connect():
-    global wifi_station
+    global wifi_station, wifi_connect_started
     if not WIFI_SSID:
         print("Configura firmware/esp32_motor/config.py antes de conectar")
         return False
@@ -110,12 +133,29 @@ def wifi_connect():
         if wifi_station is None:
             wifi_station = network.WLAN(network.STA_IF)
         wifi_station.active(True)
-        if not wifi_station.isconnected():
-            print("Conectando WiFi...")
-            wifi_station.connect(WIFI_SSID, WIFI_PASSWORD)
         if wifi_station.isconnected():
+            wifi_connect_started = None
             print("WiFi:", wifi_station.ifconfig()[0])
             return True
+        now = time.ticks_ms()
+        try:
+            status = wifi_station.status()
+        except Exception:
+            status = None
+        connecting = getattr(network, "STAT_CONNECTING", 1)
+        if status == connecting:
+            if wifi_connect_started is None:
+                wifi_connect_started = now
+            if time.ticks_diff(now, wifi_connect_started) < WIFI_CONNECT_TIMEOUT_MS:
+                return False
+            wifi_station.disconnect()
+            wifi_connect_started = None
+            return False
+        wifi_connect_started = None
+        print("Conectando WiFi...")
+        wifi_station.connect(WIFI_SSID, WIFI_PASSWORD)
+        wifi_connect_started = time.ticks_ms()
+        return bool(wifi_station.isconnected())
     except Exception as error:
         print("WiFi no disponible:", error)
     return False
@@ -325,13 +365,33 @@ def save_configuration(values):
                    values["wifi_ssid"], values["wifi_password"], values["api_url"], values["api_key"],
                    values["device_id"], values["full_travel_ms"], values["open_a_level"], values["direction_reversed"])
     temporary = "config.py.tmp"
+    backup = "config.py.bak"
     with open(temporary, "w") as config_file:
         config_file.write(content)
     try:
-        os.remove("config.py")
+        os.remove(backup)
     except OSError:
         pass
-    os.rename(temporary, "config.py")
+    try:
+        os.stat("config.py")
+        config_exists = True
+    except OSError:
+        config_exists = False
+    if config_exists:
+        os.rename("config.py", backup)
+    try:
+        os.rename(temporary, "config.py")
+    except Exception:
+        if config_exists:
+            try:
+                os.rename(backup, "config.py")
+            except OSError:
+                pass
+        raise
+    try:
+        os.remove(backup)
+    except OSError:
+        pass
 
 
 def configure_from_command(payload):

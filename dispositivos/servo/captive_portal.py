@@ -145,10 +145,6 @@ def run(controller=None):
     station = network.WLAN(network.STA_IF)
     if values['ssid']:
         station.active(True)
-        try:
-            station.connect(values['ssid'], values['password'])
-        except Exception:
-            pass
     ap = network.WLAN(network.AP_IF)
     ap.active(False)
     server = socket.socket()
