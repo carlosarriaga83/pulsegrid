@@ -11,7 +11,7 @@ except ImportError:
     COMMANDS_ENABLED = True
     DIRECTION_REVERSED = False
 
-FIRMWARE_VERSION = '2026.10.15.servo'
+FIRMWARE_VERSION = '2026.10.16.servo'
 FIRMWARE_FILES = ('main.py', 'cloud_client.py', 'board_led.py', 'captive_portal.py', 'cortina.py', 'servo_calibration.py', 'stservo.py', 'boot.py', 'ota_boot.py', 'pulsegrid_ota.py')
 WIFI_RETRY_MIN_MS = 2000
 WIFI_RETRY_MAX_MS = 60000
@@ -78,9 +78,14 @@ def main():
         print('Servo cloud activo; firmware {}'.format(FIRMWARE_VERSION))
     from cloud_client import CloudClient
     client = CloudClient(API_URL, API_KEY, DEVICE_ID, COMMANDS_ENABLED)
+    ota_boot = sys.modules.get('ota_boot')
+    if ota_boot:
+        ota_boot.confirm()
     last_poll = 0
     last_telemetry = 0
     while True:
+        if ota_boot:
+            ota_boot.feed()
         controller.update_multiturn()
         now = time.ticks_ms()
         try:

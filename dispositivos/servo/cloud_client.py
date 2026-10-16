@@ -3,11 +3,6 @@ import socket
 import time
 import ujson
 
-try:
-    import ussl as tls
-except ImportError:
-    import ssl as tls
-
 
 class CloudClient:
     def __init__(self, api_url, api_key, device_id, commands_enabled=True):
@@ -28,8 +23,19 @@ class CloudClient:
         port = int(parts[1]) if len(parts) > 1 else 443
         client = socket.socket()
         client.settimeout(8)
-        client.connect((parts[0], port))
-        return tls.wrap_socket(client, server_hostname=parts[0]), parts[0]
+        try:
+            client.connect((parts[0], port))
+            gc.collect()
+            try:
+                import ussl as tls
+            except ImportError:
+                import ssl as tls
+            secure_client = tls.wrap_socket(client, server_hostname=parts[0])
+            return secure_client, parts[0]
+        except Exception:
+            client.close()
+            gc.collect()
+            raise
 
     def request(self, method, path, payload=None):
         if time.ticks_diff(time.ticks_ms(), self.next_request_at) < 0:
@@ -69,6 +75,12 @@ class CloudClient:
             return ujson.loads(body) if body else {}
         except Exception as error:
             print('Pulsegrid:', error)
+            if getattr(error, 'errno', None) == 12:
+                gc.collect()
+                try:
+                    print('Heap libre tras recuperar:', gc.mem_free())
+                except AttributeError:
+                    pass
             self.next_request_at = time.ticks_add(time.ticks_ms(), self.retry_ms)
             return None
         finally:

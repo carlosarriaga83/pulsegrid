@@ -47,3 +47,10 @@ test('persistent calibration/state files are never OTA payloads or burner cleanu
   assert.match(ga25Portal, /CONFIG_FILE \+ "\.bak"/);
   assert.match(servoCurtain, /backup = filename \+ '\.bak'/);
 });
+
+test('servo confirms and feeds the transactional OTA watchdog', () => {
+  const source = fs.readFileSync(path.join(root, 'dispositivos/servo/main.py'), 'utf8');
+  assert.match(source, /ota_boot = sys\.modules\.get\('ota_boot'\)/);
+  assert.match(source, /ota_boot\.confirm\(\)/);
+  assert.match(source, /ota_boot\.feed\(\)/);
+});
