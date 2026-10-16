@@ -11,7 +11,7 @@ except ImportError:
     COMMANDS_ENABLED = True
     DIRECTION_REVERSED = False
 
-FIRMWARE_VERSION = '2026.10.16.servo'
+FIRMWARE_VERSION = '2026.10.16.servo-r2'
 FIRMWARE_FILES = ('main.py', 'cloud_client.py', 'board_led.py', 'captive_portal.py', 'cortina.py', 'servo_calibration.py', 'stservo.py', 'boot.py', 'ota_boot.py', 'pulsegrid_ota.py')
 WIFI_RETRY_MIN_MS = 2000
 WIFI_RETRY_MAX_MS = 60000
@@ -64,7 +64,7 @@ def main():
     controller = build_controller()
     controller.parar()
     import board_led
-    board_led.set_enabled(bool(API_KEY))
+    board_led.set_enabled(True)
     wlan = network.WLAN(network.STA_IF)
     connected = connect_wifi(wlan)
     wifi_retry_ms = WIFI_RETRY_MIN_MS
@@ -95,6 +95,12 @@ def main():
         if connected:
             wifi_connect_pending = False
             wifi_connect_started = None
+        if not API_KEY:
+            board_led.set_status('provisioning')
+        elif not connected or not client.is_online():
+            board_led.set_status('offline')
+        else:
+            board_led.set_status('online')
         if connected and API_KEY:
             wifi_retry_ms = WIFI_RETRY_MIN_MS
             if time.ticks_diff(now, last_poll) >= 3000:
@@ -102,9 +108,8 @@ def main():
                 client.commands(controller, board_led.set_enabled)
             if time.ticks_diff(now, last_telemetry) >= 5000:
                 last_telemetry = now
-                client.telemetry(controller, FIRMWARE_VERSION, bool(API_KEY), bool(controller.direction_reversed))
+                client.telemetry(controller, FIRMWARE_VERSION, board_led.is_enabled(), bool(controller.direction_reversed))
         else:
-            board_led.set_provisioning()
             if not connected and time.ticks_diff(now, next_wifi_retry) >= 0:
                 connected = connect_wifi(wlan)
                 if connected:

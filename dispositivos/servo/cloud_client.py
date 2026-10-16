@@ -15,6 +15,7 @@ class CloudClient:
         self.last_telemetry = 0
         self.retry_ms = 5000
         self.firmware_update_requested = False
+        self.last_success_at = None
 
     def _socket(self):
         gc.collect()
@@ -72,7 +73,9 @@ class CloudClient:
                         break
                     body += chunk
                 body = body[:content_length]
-            return ujson.loads(body) if body else {}
+            result = ujson.loads(body) if body else {}
+            self.last_success_at = time.ticks_ms()
+            return result
         except Exception as error:
             print('Pulsegrid:', error)
             if getattr(error, 'errno', None) == 12:
@@ -87,6 +90,10 @@ class CloudClient:
             if client:
                 client.close()
             gc.collect()
+
+    def is_online(self, max_age_ms=30000):
+        return (self.last_success_at is not None
+                and time.ticks_diff(time.ticks_ms(), self.last_success_at) <= max_age_ms)
 
     def telemetry(self, cortina, firmware_version, led_enabled, reversed_value):
         servos = {}

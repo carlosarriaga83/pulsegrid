@@ -22,12 +22,20 @@ def _connection(api_url, timeout):
     port = int(parts[1]) if len(parts) > 1 else (443 if secure else 80)
     client = socket.socket()
     client.settimeout(timeout)
-    client.connect((host, port))
-    if secure:
-        if tls is None:
-            raise RuntimeError('TLS no disponible en este firmware')
-        client = tls.wrap_socket(client, server_hostname=host)
-    return client, host
+    try:
+        client.connect((host, port))
+        if secure:
+            if tls is None:
+                raise RuntimeError('TLS no disponible en este firmware')
+            client = tls.wrap_socket(client, server_hostname=host)
+        return client, host
+    except Exception:
+        try:
+            client.close()
+        except Exception:
+            pass
+        gc.collect()
+        raise
 
 
 def _unchunk(value):
@@ -125,7 +133,7 @@ def _write_sized(client, buffer, target, digest, expected_length, name):
 
 
 def _request(api_url, api_key, path):
-    client, host = _connection(api_url, 10)
+    client, host = _connection(api_url, 30)
     try:
         client.send('GET {} HTTP/1.1\r\nHost: {}\r\nX-API-Key: {}\r\nConnection: close\r\n\r\n'.format(path, host, api_key).encode())
         result = b''
@@ -147,6 +155,12 @@ def _request(api_url, api_key, path):
         gc.collect()
 
 
+def _is_timeout(error):
+    code = getattr(error, 'errno', None)
+    message = str(error).upper()
+    return code in (110, 116) or 'ETIMEDOUT' in message or 'TIMED OUT' in message
+
+
 def _download(api_url, api_key, version, info, target_model, allowed_files, ota_boot):
     name = str(info.get('name', ''))
     if name not in allowed_files:
@@ -154,7 +168,7 @@ def _download(api_url, api_key, version, info, target_model, allowed_files, ota_
     stage_name = ota_boot.stage_path(name)
     client = None
     try:
-        client, host = _connection(api_url, 10)
+        client, host = _connection(api_url, 30)
         path = '/api/firmware/files/{}/{}?targetModel={}'.format(version, name, target_model)
         client.send('GET {} HTTP/1.1\r\nHost: {}\r\nX-API-Key: {}\r\nConnection: close\r\n\r\n'.format(path, host, api_key).encode())
         header = b''
@@ -199,11 +213,21 @@ def _download(api_url, api_key, version, info, target_model, allowed_files, ota_
     finally:
         if client:
             client.close()
+        gc.collect()
 
 
 def update(api_url, api_key, version, target_model, allowed_files):
     import ota_boot
-    manifest = _request(api_url, api_key, '/api/firmware/manifest?version={}&targetModel={}'.format(version, target_model))
+    print('OTA servo: consultando manifiesto')
+    manifest_path = '/api/firmware/manifest?version={}&targetModel={}'.format(version, target_model)
+    for attempt in range(2):
+        try:
+            manifest = _request(api_url, api_key, manifest_path)
+            break
+        except Exception as error:
+            if attempt or not _is_timeout(error):
+                raise OSError('OTA fallo al consultar manifiesto: {}'.format(error))
+            print('OTA servo: timeout del manifiesto; reintentando una vez')
     if manifest.get('version') != version or manifest.get('targetModel') not in (target_model, 'Todos los dispositivos'):
         raise ValueError('Version de firmware no coincide con servo')
     files = manifest.get('files', [])
@@ -213,7 +237,16 @@ def update(api_url, api_key, version, target_model, allowed_files):
     ota_boot.begin(version, total_bytes)
     staged = []
     for info in files:
-        _download(api_url, api_key, version, info, target_model, allowed_files, ota_boot)
+        name = str(info.get('name', ''))
+        print('OTA servo: descargando', name)
+        for attempt in range(2):
+            try:
+                _download(api_url, api_key, version, info, target_model, allowed_files, ota_boot)
+                break
+            except Exception as error:
+                if attempt or not _is_timeout(error):
+                    raise OSError('OTA fallo en {}: {}'.format(name, error))
+                print('OTA servo: timeout en {}; reintentando una vez'.format(name))
         staged.append(str(info.get('name', '')))
         gc.collect()
     version_stage = ota_boot.stage_path('pulsegrid_firmware.py')
@@ -221,3 +254,4 @@ def update(api_url, api_key, version, target_model, allowed_files):
         version_file.write('VERSION = {!r}\n'.format(version))
     staged.append('pulsegrid_firmware.py')
     ota_boot.ready(version, staged)
+    print('OTA servo: archivos verificados; activando', version)

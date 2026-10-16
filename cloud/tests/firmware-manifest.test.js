@@ -54,3 +54,21 @@ test('servo confirms and feeds the transactional OTA watchdog', () => {
   assert.match(source, /ota_boot\.confirm\(\)/);
   assert.match(source, /ota_boot\.feed\(\)/);
 });
+
+test('servo NeoPixel reflects cloud/provisioning/offline state and OTA retries timeouts', () => {
+  const led = fs.readFileSync(path.join(root, 'dispositivos/servo/board_led.py'), 'utf8');
+  const main = fs.readFileSync(path.join(root, 'dispositivos/servo/main.py'), 'utf8');
+  const cloud = fs.readFileSync(path.join(root, 'dispositivos/servo/cloud_client.py'), 'utf8');
+  const ota = fs.readFileSync(path.join(root, 'dispositivos/servo/pulsegrid_ota.py'), 'utf8');
+  assert.match(led, /'online': \(0, 24, 0\)/);
+  assert.match(led, /'provisioning': \(24, 16, 0\)/);
+  assert.match(led, /'offline': \(24, 0, 0\)/);
+  assert.match(led, /def is_enabled\(\)/);
+  assert.match(main, /board_led\.set_status\('provisioning'\)/);
+  assert.match(main, /board_led\.set_status\('offline'\)/);
+  assert.match(main, /board_led\.set_status\('online'\)/);
+  assert.match(cloud, /def is_online\(self, max_age_ms=30000\)/);
+  assert.match(ota, /_connection\(api_url, 30\)/);
+  assert.match(ota, /for attempt in range\(2\)/);
+  assert.match(ota, /OTA servo: descargando/);
+});
