@@ -5,7 +5,7 @@ STATE_FILE = '.pulsegrid_wifi_boots'
 STATE_TEMP = STATE_FILE + '.tmp'
 RECOVERY_FILE = '.pulsegrid_wifi_recovery'
 RESET_LIMIT = 3
-STABLE_BOOT_MS = 120000
+STABLE_BOOT_MS = 30000
 
 
 def clear_boots():
@@ -24,9 +24,20 @@ def recovery_latched():
         return False
 
 
-def register_boot():
+def clear_counter():
+    for name in (STATE_FILE, STATE_TEMP):
+        try:
+            os.remove(name)
+        except OSError:
+            pass
+
+
+def register_boot(count_reset=True):
     if recovery_latched():
         return True
+    if not count_reset:
+        clear_counter()
+        return False
     count = 0
     try:
         with open(STATE_FILE, 'r') as state:

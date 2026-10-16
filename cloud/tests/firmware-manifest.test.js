@@ -68,14 +68,18 @@ test('ESP firmware supports three-boot Wi-Fi recovery and faster command polling
   for (const directory of ['dispositivos/servo', 'dispositivos/ga25/esp32_motor']) {
     const recovery = fs.readFileSync(path.join(root, directory, 'wifi_recovery.py'), 'utf8');
     assert.match(recovery, /RESET_LIMIT = 3/);
-    assert.match(recovery, /STABLE_BOOT_MS = 120000/);
-    assert.match(recovery, /def register_boot\(\)/);
+    assert.match(recovery, /STABLE_BOOT_MS = 30000/);
+    assert.match(recovery, /def clear_counter\(\)/);
+    assert.match(recovery, /def register_boot\(count_reset=True\)/);
+    assert.match(recovery, /if not count_reset:\s+clear_counter\(\)\s+return False/);
     assert.match(recovery, /RECOVERY_FILE = '\.pulsegrid_wifi_recovery'/);
     assert.match(recovery, /if recovery_latched\(\):\s+return True/);
     assert.match(recovery, /with open\(RECOVERY_FILE, 'w'\)/);
     assert.match(recovery, /STATE_FILE, STATE_TEMP, RECOVERY_FILE/);
   }
-  assert.match(servoMain, /recovery_mode = wifi_recovery\.register_boot\(\)/);
+  assert.match(servoMain, /recovery_mode = wifi_recovery\.register_boot\(count_reset\)/);
+  assert.match(servoMain, /reset_cause in \(getattr\(machine, 'PWRON_RESET', 1\), getattr\(machine, 'HARD_RESET', 2\)\)/);
+  assert.match(servoMain, /FIRMWARE_VERSION = '2026\.10\.16\.servo-r6'/);
   assert.match(servoMain, /if recovery_mode:\s+try:\s+wlan\.disconnect\(\)\s+wlan\.active\(False\)/);
   assert.match(servoMain, /COMMAND_POLL_MS = 1000/);
   assert.match(servoMain, /if recovery_mode or not WIFI_SSID:/);
@@ -86,7 +90,8 @@ test('ESP firmware supports three-boot Wi-Fi recovery and faster command polling
   assert.match(servoLed, /def tick\(\)/);
   assert.match(servoCloud, /'wifi_recovery\.py'/);
   assert.match(ga25Main, /POLL_MS = 1000/);
-  assert.match(ga25Main, /recovery_mode = wifi_recovery\.register_boot\(\)/);
+  assert.match(ga25Main, /recovery_mode = wifi_recovery\.register_boot\(count_reset\)/);
+  assert.match(ga25Main, /reset_cause in \(getattr\(machine, "PWRON_RESET", 1\), getattr\(machine, "HARD_RESET", 2\)\)/);
   assert.match(ga25Main, /if recovery_mode:\s+try:\s+if wifi_station:\s+wifi_station\.disconnect\(\)\s+wifi_station\.active\(False\)/);
   assert.match(ga25Main, /if not recovery_mode and time\.ticks_diff\(now, next_wifi_retry\) >= 0/);
   assert.match(ga25Portal, /def run\(motor=None, force_ap=False\)/);

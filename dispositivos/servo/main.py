@@ -1,4 +1,5 @@
 import gc
+import machine
 import network
 import time
 import sys
@@ -18,7 +19,7 @@ except ImportError:
     COMMANDS_ENABLED = True
     DIRECTION_REVERSED = False
 
-FIRMWARE_VERSION = '2026.10.16.servo-r5'
+FIRMWARE_VERSION = '2026.10.16.servo-r6'
 FIRMWARE_FILES = ('main.py', 'cloud_client.py', 'board_led.py', 'captive_portal.py', 'cortina.py', 'servo_calibration.py', 'stservo.py', 'boot.py', 'ota_boot.py', 'pulsegrid_ota.py', 'wifi_recovery.py')
 COMMAND_POLL_MS = 1000
 WIFI_RETRY_MIN_MS = 2000
@@ -70,7 +71,15 @@ def build_controller():
 def main():
     global wifi_connect_pending, wifi_connect_started
     import wifi_recovery
-    recovery_mode = wifi_recovery.register_boot()
+    try:
+        reset_cause = machine.reset_cause()
+        # ESP32 dev boards often report an EN/RESET button press as PWRON_RESET.
+        count_reset = reset_cause in (getattr(machine, 'PWRON_RESET', 1), getattr(machine, 'HARD_RESET', 2))
+    except Exception:
+        reset_cause = 'unknown'
+        count_reset = False
+    recovery_mode = wifi_recovery.register_boot(count_reset)
+    print('Causa de arranque: {}; reset manual contado: {}'.format(reset_cause, count_reset))
     boot_started_at = time.ticks_ms()
     controller = build_controller()
     controller.parar()

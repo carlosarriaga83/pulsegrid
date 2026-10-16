@@ -1,5 +1,6 @@
 import gc
 import json
+import machine
 import time
 import network
 import os
@@ -593,7 +594,15 @@ def send_telemetry():
 
 def main():
     import wifi_recovery
-    recovery_mode = wifi_recovery.register_boot()
+    try:
+        reset_cause = machine.reset_cause()
+        # ESP32 dev boards often report an EN/RESET button press as PWRON_RESET.
+        count_reset = reset_cause in (getattr(machine, "PWRON_RESET", 1), getattr(machine, "HARD_RESET", 2))
+    except Exception:
+        reset_cause = "unknown"
+        count_reset = False
+    recovery_mode = wifi_recovery.register_boot(count_reset)
+    print("Causa de arranque: {}; reset manual contado: {}".format(reset_cause, count_reset))
     boot_started_at = time.ticks_ms()
     recovery_counter_cleared = False
     motor.stop()
