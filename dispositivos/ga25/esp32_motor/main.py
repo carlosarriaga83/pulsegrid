@@ -603,12 +603,21 @@ def main():
         ota_boot.confirm()
     if not WIFI_SSID:
         print("Portal de configuracion: LED parpadeando 1 Hz")
-    connected = wifi_connect()
+    if recovery_mode:
+        try:
+            if wifi_station:
+                wifi_station.disconnect()
+                wifi_station.active(False)
+        except Exception as error:
+            print("Wi-Fi STA desactivada para provisionamiento: {}".format(error))
+        connected = False
+    else:
+        connected = wifi_connect()
     if recovery_mode:
         print("Recuperacion Wi-Fi: conecte a Pulsegrid-Cortina y cambie la red desde el portal")
     if not connected:
         print("Wi-Fi no disponible: el portal continua activo; LED parpadeando 1 Hz")
-    elif DEVICE_CODE:
+    elif DEVICE_CODE and not recovery_mode:
         status_led.set(True)
         print("LED de estado: verde; Pulsegrid configurado")
     else:
@@ -640,7 +649,7 @@ def main():
                 status_led.set(False)
             else:
                 status_led.portal_tick()
-            if time.ticks_diff(now, next_wifi_retry) >= 0:
+            if not recovery_mode and time.ticks_diff(now, next_wifi_retry) >= 0:
                 connected = wifi_connect()
                 if connected:
                     wifi_retry_ms = WIFI_RETRY_MIN_MS

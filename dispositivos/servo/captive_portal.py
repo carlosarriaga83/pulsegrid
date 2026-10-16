@@ -145,8 +145,14 @@ def run(controller=None, force_ap=False):
     _controller = controller
     values = _config()
     station = network.WLAN(network.STA_IF)
-    if values['ssid']:
+    if values['ssid'] and not force_ap:
         station.active(True)
+    else:
+        try:
+            station.disconnect()
+        except Exception:
+            pass
+        station.active(False)
     ap = network.WLAN(network.AP_IF)
     ap.active(False)
     server = socket.socket()

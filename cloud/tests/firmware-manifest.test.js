@@ -68,23 +68,27 @@ test('ESP firmware supports three-boot Wi-Fi recovery and faster command polling
   for (const directory of ['dispositivos/servo', 'dispositivos/ga25/esp32_motor']) {
     const recovery = fs.readFileSync(path.join(root, directory, 'wifi_recovery.py'), 'utf8');
     assert.match(recovery, /RESET_LIMIT = 3/);
-    assert.match(recovery, /STABLE_BOOT_MS = 30000/);
+    assert.match(recovery, /STABLE_BOOT_MS = 120000/);
     assert.match(recovery, /def register_boot\(\)/);
+    assert.match(recovery, /RECOVERY_FILE = '\.pulsegrid_wifi_recovery'/);
+    assert.match(recovery, /if recovery_latched\(\):\s+return True/);
+    assert.match(recovery, /with open\(RECOVERY_FILE, 'w'\)/);
+    assert.match(recovery, /STATE_FILE, STATE_TEMP, RECOVERY_FILE/);
   }
   assert.match(servoMain, /recovery_mode = wifi_recovery\.register_boot\(\)/);
-  assert.match(servoRecovery, /RECOVERY_FILE = '\.pulsegrid_wifi_recovery'/);
-  assert.match(servoRecovery, /if recovery_latched\(\):\s+return True/);
-  assert.match(servoRecovery, /with open\(RECOVERY_FILE, 'w'\)/);
-  assert.match(servoRecovery, /STATE_FILE, STATE_TEMP, RECOVERY_FILE/);
+  assert.match(servoMain, /if recovery_mode:\s+try:\s+wlan\.disconnect\(\)\s+wlan\.active\(False\)/);
   assert.match(servoMain, /COMMAND_POLL_MS = 1000/);
   assert.match(servoMain, /if recovery_mode or not WIFI_SSID:/);
   assert.match(servoMain, /time\.ticks_diff\(now, boot_started_at\) >= WIFI_CONNECT_TIMEOUT_MS/);
   assert.match(servoPortal, /def run\(controller=None, force_ap=False\)/);
+  assert.match(servoPortal, /values\['ssid'\] and not force_ap/);
   assert.match(servoLed, /'recovery': \(32, 14, 0\)/);
   assert.match(servoLed, /def tick\(\)/);
   assert.match(servoCloud, /'wifi_recovery\.py'/);
   assert.match(ga25Main, /POLL_MS = 1000/);
   assert.match(ga25Main, /recovery_mode = wifi_recovery\.register_boot\(\)/);
+  assert.match(ga25Main, /if recovery_mode:\s+try:\s+if wifi_station:\s+wifi_station\.disconnect\(\)\s+wifi_station\.active\(False\)/);
+  assert.match(ga25Main, /if not recovery_mode and time\.ticks_diff\(now, next_wifi_retry\) >= 0/);
   assert.match(ga25Portal, /def run\(motor=None, force_ap=False\)/);
   assert.match(ga25Portal, /not force_ap and wifi_ssid/);
   assert.match(cloudServer, /'wifi_recovery\.py'/);

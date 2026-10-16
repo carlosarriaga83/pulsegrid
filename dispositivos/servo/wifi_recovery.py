@@ -5,7 +5,7 @@ STATE_FILE = '.pulsegrid_wifi_boots'
 STATE_TEMP = STATE_FILE + '.tmp'
 RECOVERY_FILE = '.pulsegrid_wifi_recovery'
 RESET_LIMIT = 3
-STABLE_BOOT_MS = 30000
+STABLE_BOOT_MS = 120000
 
 
 def clear_boots():

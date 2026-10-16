@@ -190,7 +190,7 @@ def run(motor=None, force_ap=False):
         wifi_ssid = ""
     station = network.WLAN(network.STA_IF)
     try:
-        if wifi_ssid:
+        if wifi_ssid and not force_ap:
             station.active(True)
         else:
             station.disconnect()

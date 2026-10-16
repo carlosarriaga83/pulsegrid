@@ -77,7 +77,15 @@ def main():
     import board_led
     board_led.set_enabled(True)
     wlan = network.WLAN(network.STA_IF)
-    connected = connect_wifi(wlan)
+    if recovery_mode:
+        try:
+            wlan.disconnect()
+            wlan.active(False)
+        except Exception as error:
+            print('Wi-Fi STA desactivada para provisionamiento:', error)
+        connected = False
+    else:
+        connected = connect_wifi(wlan)
     wifi_retry_ms = WIFI_RETRY_MIN_MS
     next_wifi_retry = time.ticks_add(time.ticks_ms(), wifi_retry_ms)
     portal_started = False
@@ -110,7 +118,7 @@ def main():
             connected = wlan.isconnected()
         except Exception:
             connected = False
-        if not connected and not portal_started and time.ticks_diff(now, boot_started_at) >= WIFI_CONNECT_TIMEOUT_MS:
+        if not recovery_mode and not connected and not portal_started and time.ticks_diff(now, boot_started_at) >= WIFI_CONNECT_TIMEOUT_MS:
             import captive_portal
             captive_portal.start_background(controller, recovery_mode)
             portal_started = True
@@ -137,7 +145,7 @@ def main():
                 last_telemetry = now
                 client.telemetry(controller, FIRMWARE_VERSION, board_led.is_enabled(), bool(controller.direction_reversed))
         else:
-            if not connected and time.ticks_diff(now, next_wifi_retry) >= 0:
+            if not recovery_mode and not connected and time.ticks_diff(now, next_wifi_retry) >= 0:
                 connected = connect_wifi(wlan)
                 if connected:
                     wifi_retry_ms = WIFI_RETRY_MIN_MS
