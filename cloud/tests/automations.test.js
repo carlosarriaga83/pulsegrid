@@ -12,6 +12,8 @@ function backend(extra = {}) {
   const context = vm.createContext({ AutomationModel: model, OpenMeteo: openMeteo, Intl, Date, console, ...extra });
   vm.runInContext(server.slice(server.indexOf('function automationAction('), server.indexOf('async function readFirmwareManifest(')), context);
   vm.runInContext(server.slice(server.indexOf('function validateTuyaCommand('), server.indexOf('async function dispatchDeviceCommand(')), context);
+  vm.runInContext(server.slice(server.indexOf('function validateDirectionConfiguration('), server.indexOf('async function validateAutomationDevices(')), context);
+  vm.runInContext(server.slice(server.indexOf('async function dispatchDeviceCommand('), server.indexOf('async function runScheduledAutomations(')), context);
   return context;
 }
 const power = { id: 'A', name: 'Power meter A', telemetry: JSON.stringify({ Power: 500, zero: 0, status: { Led1: false, mode: '001' } }), capabilities: [{ code: 'Power', name: 'Power', type: 'Integer' }] };
@@ -315,11 +317,11 @@ test('dynamic Tuya parameter resolves nested paths inside status arrays', async 
 test('backend validates remote Pulsegrid configuration without accepting Tuya devices', () => {
   const b = backend();
   const pulsegrid = { provider: 'pulsegrid' };
-  assert.doesNotThrow(() => b.validateDeviceConfiguration(pulsegrid, 'device.configure', { apiUrl: 'https://pulse.2api2.com', apiKey: 'pg_live_valid_key', deviceId: 'Cortina_2' }));
-  assert.throws(() => b.validateDeviceConfiguration({ provider: 'tuya' }, 'device.configure', { apiUrl: 'https://pulse.2api2.com', apiKey: 'pg_live_valid_key', deviceId: 'Cortina_2' }));
-  assert.throws(() => b.validateDeviceConfiguration(pulsegrid, 'device.configure', { apiUrl: 'javascript:bad', apiKey: 'pg_live_valid_key', deviceId: 'Cortina_2' }));
-  assert.throws(() => b.validateDeviceConfiguration(pulsegrid, 'device.configure', { apiUrl: 'https://pulse.2api2.com', apiKey: 'short', deviceId: 'Cortina_2' }));
-  assert.throws(() => b.validateDeviceConfiguration(pulsegrid, 'device.configure', { apiUrl: 'https://pulse.2api2.com', apiKey: 'pg_live_valid_key', deviceId: 'bad id' }));
+    assert.throws(() => b.dispatchDeviceCommand({}, pulsegrid, 'device.configure', { apiUrl: 'https://pulse.2api2.com', apiKey: 'pg_live_valid_key', deviceId: 'Cortina_2' }));
+    assert.throws(() => b.dispatchDeviceCommand({}, { provider: 'tuya' }, 'device.configure', {}));
+    assert.doesNotThrow(() => b.validateDirectionConfiguration({ ...pulsegrid, telemetry: { kind: 'curtain' } }, 'direction.configure', { reversed: true }));
+    assert.throws(() => b.validateDirectionConfiguration({ provider: 'tuya' }, 'direction.configure', { reversed: true }));
+    assert.throws(() => b.validateDirectionConfiguration({ ...pulsegrid, telemetry: { kind: 'curtain' } }, 'direction.configure', { reversed: 'true' }));
 });
 
 test('backend validates Pulsegrid direction configuration', () => {

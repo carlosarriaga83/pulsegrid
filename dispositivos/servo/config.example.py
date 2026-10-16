@@ -1,7 +1,7 @@
 WIFI_SSID = "TU_RED_WIFI"
 WIFI_PASSWORD = "TU_CONTRASENA_WIFI"
 API_URL = "https://pulse.2api2.com"
-API_KEY = ""
+DEVICE_CODE = "00000000000000000000000000000000"  # Sustituir por el codigo de 32 caracteres que genera el quemador.
 DEVICE_ID = "PULSE_XX"
 COMMANDS_ENABLED = True
 DIRECTION_REVERSED = False

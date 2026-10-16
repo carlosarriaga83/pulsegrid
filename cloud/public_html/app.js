@@ -616,8 +616,8 @@ function curtainMeta(telemetry, diagnostic = null) {
 
 function devicePresentation(device) {
   const telemetry = parseTelemetry(device.telemetry);
-  const diagnostic = device.status === 'online' ? null : device.lastCommandStatus === 'failed' && device.lastCommandError ? `Ultimo comando fallo: ${device.lastCommandError}` : device.report ? 'Sin telemetria reciente: verifica Wi-Fi y API key' : 'Sin telemetria: verifica Wi-Fi, API key y Device ID';
-  if (device.status === 'provisioning') return { icon: 'cpu', meta: [{ icon: 'wifi', text: 'Wi-Fi conectado' }, { icon: 'key-round', text: 'Esperando API key' }, { icon: 'cpu', text: telemetry.firmwareVersion ? `Firmware ${telemetry.firmwareVersion}` : 'Firmware sin confirmar' }] };
+  const diagnostic = device.status === 'online' ? null : device.lastCommandStatus === 'failed' && device.lastCommandError ? `Ultimo comando fallo: ${device.lastCommandError}` : device.report ? 'Sin telemetria reciente: verifica Wi-Fi y el codigo unico' : 'Sin telemetria: verifica Wi-Fi, el codigo unico y el Device ID';
+  if (device.status === 'provisioning') return { icon: 'cpu', meta: [{ icon: 'wifi', text: 'Wi-Fi conectado' }, { icon: 'key-round', text: 'Esperando primera conexion' }, { icon: 'cpu', text: telemetry.firmwareVersion ? `Firmware ${telemetry.firmwareVersion}` : 'Firmware sin confirmar' }] };
   if (telemetry.kind === 'curtain') return curtainMeta(telemetry, diagnostic);
   if (device.provider === 'tuya') return { icon: 'cloud', meta: [{ icon: 'cloud', text: 'Tuya Cloud' }, { icon: 'radio', text: device.status === 'online' ? 'Estado sincronizable' : 'Sin conexion' }, { icon: 'sliders-horizontal', text: `${parseCapabilities(device.capabilities).length} funciones disponibles` }] };
   return { icon: 'cpu', meta: [{ icon: 'radio', text: device.status === 'online' ? 'Telemetria activa' : 'Sin conexion' }, { icon: diagnostic ? 'triangle-alert' : 'circle-dot', text: diagnostic || (device.report ? 'Ultimo estado recibido' : 'Sin telemetria') }, { icon: 'cpu', text: telemetry.firmwareVersion ? `Firmware ${telemetry.firmwareVersion}` : 'Firmware sin confirmar' }] };
@@ -695,7 +695,7 @@ function renderIcons() {
 }
 
 function deviceStatus(device) {
-  const label = device.status === 'online' ? 'En linea' : device.status === 'provisioning' ? 'Esperando API key' : 'Fuera de linea';
+  const label = device.status === 'online' ? 'En linea' : device.status === 'provisioning' ? 'Esperando conexion' : 'Fuera de linea';
   return `<span class="device-status ${device.status}"><i class="status-dot"></i>${label}</span>`;
 }
 
@@ -1008,7 +1008,8 @@ function closeDeviceMenu() { $('#device-actions-menu')?.remove(); }
 function openDeviceConfiguration(device) {
   const modal = document.createElement('div');
   modal.className = 'modal-backdrop open';
-  modal.innerHTML = `<div class="modal"><button type="button" class="modal-close" aria-label="Cerrar"><i data-lucide="x"></i></button><div class="modal-icon"><i data-lucide="settings-2"></i></div><p class="eyebrow">CONFIGURACION REMOTA</p><h2>${escapeTelemetryHtml(device.name)}</h2><p class="modal-copy">Deja la API key vacía para conservar la actual.</p><form><label>API URL<input name="apiUrl" required value="https://pulse.2api2.com"></label><label>Device ID<input name="deviceId" required value="${escapeTelemetryHtml(device.id)}"></label><label>API key<input name="apiKey" type="password" autocomplete="new-password" placeholder="Opcional; conserva la actual si queda vacía"></label><label>Sentido de giro<select name="reversed"><option value="false">Normal</option><option value="true">Reversa</option></select></label><div class="modal-actions"><button type="button" class="secondary-button" data-config-cancel>Cancelar</button><button class="primary-button" type="submit"><i data-lucide="send"></i> Enviar configuracion</button></div></form></div>`;
+  const reversed = Boolean(parseTelemetry(device.telemetry).directionReversed);
+  modal.innerHTML = `<div class="modal"><button type="button" class="modal-close" aria-label="Cerrar"><i data-lucide="x"></i></button><div class="modal-icon"><i data-lucide="settings-2"></i></div><p class="eyebrow">CONFIGURACION DEL MOTOR</p><h2>${escapeTelemetryHtml(device.name)}</h2><p class="modal-copy">Las credenciales del dispositivo se gestionan en el quemador; aquí puedes ajustar el sentido.</p><form><label>Sentido de giro<select name="reversed"><option value="false" ${reversed ? '' : 'selected'}>Normal</option><option value="true" ${reversed ? 'selected' : ''}>Reversa</option></select></label><div class="modal-actions"><button type="button" class="secondary-button" data-config-cancel>Cancelar</button><button class="primary-button" type="submit"><i data-lucide="send"></i> Guardar sentido</button></div></form></div>`;
   document.body.append(modal);
   const close = () => modal.remove();
   modal.querySelector('.modal-close').addEventListener('click', close);
@@ -1020,7 +1021,7 @@ function openDeviceConfiguration(device) {
     const submit = event.currentTarget.querySelector('button[type="submit"]');
     submit.disabled = true;
     try {
-      await apiRequest('commands', { method: 'POST', body: JSON.stringify({ deviceId: device.id, command: 'device.configure', payload: { apiUrl: form.get('apiUrl'), apiKey: form.get('apiKey'), deviceId: form.get('deviceId'), reversed: form.get('reversed') === 'true' } }) });
+      await apiRequest('commands', { method: 'POST', body: JSON.stringify({ deviceId: device.id, command: 'direction.configure', payload: { reversed: form.get('reversed') === 'true' } }) });
       close();
       showToast('Configuracion enviada');
       await loadCommandHistory();
@@ -1048,7 +1049,7 @@ function openDeviceMenu(button, device) {
   menu.id = 'device-actions-menu';
   menu.className = 'panel';
   menu.style.cssText = `position:fixed;z-index:30;top:${bounds.bottom + 6}px;left:${Math.max(12, bounds.right - 180)}px;padding:6px;min-width:180px;box-shadow:var(--shadow)`;
-  menu.innerHTML = '<button class="secondary-button" data-device-action="command" style="width:100%;border:0;justify-content:flex-start"><i data-lucide="send"></i> Enviar comando</button><button class="secondary-button" data-device-action="configure" style="width:100%;border:0;justify-content:flex-start"><i data-lucide="settings-2"></i> Configurar dispositivo</button><button class="secondary-button" data-device-action="firmware" style="width:100%;border:0;justify-content:flex-start"><i data-lucide="download-cloud"></i> Actualizar firmware</button><button class="secondary-button" data-device-action="refresh" style="width:100%;border:0;justify-content:flex-start"><i data-lucide="refresh-cw"></i> Actualizar estado</button><button class="secondary-button" data-device-action="delete" style="width:100%;border:0;justify-content:flex-start;color:var(--red)"><i data-lucide="trash-2"></i> Eliminar dispositivo</button>';
+  menu.innerHTML = `<button class="secondary-button" data-device-action="command" style="width:100%;border:0;justify-content:flex-start"><i data-lucide="send"></i> Enviar comando</button>${device.provider !== 'tuya' && AutomationModel.curtain(device) ? '<button class="secondary-button" data-device-action="configure" style="width:100%;border:0;justify-content:flex-start"><i data-lucide="settings-2"></i> Ajustar sentido</button>' : ''}<button class="secondary-button" data-device-action="firmware" style="width:100%;border:0;justify-content:flex-start"><i data-lucide="download-cloud"></i> Actualizar firmware</button><button class="secondary-button" data-device-action="refresh" style="width:100%;border:0;justify-content:flex-start"><i data-lucide="refresh-cw"></i> Actualizar estado</button><button class="secondary-button" data-device-action="delete" style="width:100%;border:0;justify-content:flex-start;color:var(--red)"><i data-lucide="trash-2"></i> Eliminar dispositivo</button>`;
   document.body.append(menu);
   menu.addEventListener('click', async (event) => {
     const action = event.target.closest('[data-device-action]')?.dataset.deviceAction;
@@ -1564,8 +1565,8 @@ $('#mobile-menu').addEventListener('click', () => { const open = $('#sidebar').c
 $('#device-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   const formData = new FormData(event.currentTarget);
-  const newDevice = { name: formData.get('name'), id: formData.get('id'), type: formData.get('type'), status: 'online', report: 'ahora', signal: 'good', icon: 'cpu', temp: '--', battery: '--' };
-  try { await apiRequest('devices', { method: 'POST', body: JSON.stringify(newDevice) }); } catch (error) { if (error.message === 'Authentication required') showAuthModal('login'); else showToast(error.message); return; }
+  const newDevice = { name: formData.get('name'), id: formData.get('id'), type: formData.get('type'), deviceCode: formData.get('deviceCode'), status: 'provisioning', report: null, signal: 'unknown', icon: 'cpu', temp: '--', battery: '--' };
+  try { await apiRequest('devices', { method: 'POST', body: JSON.stringify(newDevice) }); delete newDevice.deviceCode; } catch (error) { if (error.message === 'Authentication required') showAuthModal('login'); else showToast(error.message); return; }
   devices.unshift(newDevice);
   renderDeviceRows();
   renderDeviceCards();

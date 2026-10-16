@@ -5,9 +5,9 @@ import ujson
 
 
 class CloudClient:
-    def __init__(self, api_url, api_key, device_id, commands_enabled=True):
+    def __init__(self, api_url, device_code, device_id, commands_enabled=True):
         self.api_url = api_url
-        self.api_key = api_key
+        self.device_code = device_code
         self.device_id = device_id
         self.commands_enabled = commands_enabled
         self.next_request_at = 0
@@ -24,16 +24,21 @@ class CloudClient:
         port = int(parts[1]) if len(parts) > 1 else 443
         client = socket.socket()
         client.settimeout(8)
+        phase = 'TCP connect'
         try:
             client.connect((parts[0], port))
             gc.collect()
+            phase = 'TLS module import'
             try:
                 import ussl as tls
             except ImportError:
                 import ssl as tls
+            gc.collect()
+            phase = 'TLS handshake'
             secure_client = tls.wrap_socket(client, server_hostname=parts[0])
             return secure_client, parts[0]
-        except Exception:
+        except Exception as error:
+            print('Pulsegrid transporte fallo en {}: {}'.format(phase, error))
             client.close()
             gc.collect()
             raise
@@ -41,11 +46,14 @@ class CloudClient:
     def request(self, method, path, payload=None):
         if time.ticks_diff(time.ticks_ms(), self.next_request_at) < 0:
             return None
+        if not self.api_url.startswith('https://'):
+            print('Pulsegrid: HTTPS es obligatorio')
+            return None
         client = None
         try:
             client, host = self._socket()
             body = ujson.dumps(payload) if payload is not None else ''
-            request = '{} {} HTTP/1.1\r\nHost: {}\r\nX-API-Key: {}\r\nConnection: close\r\n'.format(method, path, host, self.api_key)
+            request = '{} {} HTTP/1.1\r\nHost: {}\r\nX-Device-Code: {}\r\nConnection: close\r\n'.format(method, path, host, self.device_code)
             if body:
                 request += 'Content-Type: application/json\r\nContent-Length: {}\r\n'.format(len(body))
             client.send((request + '\r\n' + body).encode())
@@ -138,7 +146,7 @@ class CloudClient:
             elif name == 'firmware.update':
                 import pulsegrid_ota
                 files = ('main.py', 'cloud_client.py', 'board_led.py', 'captive_portal.py', 'cortina.py', 'servo_calibration.py', 'stservo.py', 'boot.py', 'ota_boot.py', 'pulsegrid_ota.py')
-                pulsegrid_ota.update(self.api_url, self.api_key, str(payload.get('version', '')), 'servo', files)
+                pulsegrid_ota.update(self.api_url, self.device_code, self.device_id, str(payload.get('version', '')), 'servo', files)
                 del pulsegrid_ota
                 import sys
                 sys.modules.pop('pulsegrid_ota', None)

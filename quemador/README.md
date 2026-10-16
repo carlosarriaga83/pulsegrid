@@ -28,7 +28,7 @@ Tkinter forma parte de la instalacion normal de Python para Windows. La placa de
 8. Pulsa `Detectar y verificar` para consultar el chip y la version instalada.
 9. Si ya hay MicroPython instalado, desactiva `Actualizar MicroPython (borra la flash)`: el quemador usará `mpremote`, copiará los `.py` y hará un `soft-reset`.
 10. Mantén activada esa casilla solo si la placa es nueva o necesita otra versión; en ese caso se usará `esptool` y se borrará la flash.
-11. API URL, API key y Wi-Fi pueden dejarse vacíos: el firmware iniciará su portal de configuración.
+11. Configura Wi-Fi. El quemador genera un código secreto único por carga; cópialo junto con el Device ID y regístralos en el cloud. El portal local del ESP32 solo sirve para cambiar Wi-Fi.
 12. Pulsa `VERIFICAR Y CARGAR`.
 
 `Liberar COM` no termina procesos externos por seguridad. Si el puerto sigue ocupado, cierra Thonny, Arduino IDE, otro monitor serial o el proceso que tenga abierta la ESP32 y vuelve a pulsar el botón.
@@ -53,9 +53,9 @@ ota_boot.py
 pulsegrid_ota.py
 ```
 
-Genera y carga un unico `config.py` con Wi-Fi, API URL, API key, Device ID, comandos y sentido. Si Wi-Fi o API key quedan vacíos, se configuran después desde el portal local o mediante bootstrap remoto.
+Genera y carga un unico `config.py` con Wi-Fi, API URL HTTPS, código único, Device ID, comandos y sentido. Tras cargar, registra el Device ID y el código mostrado por el quemador en el cloud; el código no se imprime en el registro. El portal local solo cambia Wi-Fi.
 La calibracion del servo se conserva en `blind_state.py` y `multiturn_state.py`; el quemador no elimina esos archivos al actualizar el firmware.
-El `Device ID` se asigna automáticamente como `PULSE_XX`, donde `XX` es el último byte de la MAC de la ESP32.
+El `Device ID` se asigna automáticamente como `PULSE_` seguido de los 12 dígitos hexadecimales de la MAC. El código único se genera aleatoriamente con 128 bits de entropía.
 
 ### GA25
 
@@ -69,8 +69,8 @@ boot.py
 ota_boot.py
 ```
 
-Genera y carga `config.py` con Wi-Fi, API, Device ID, recorrido y sentido del motor. Si Wi-Fi, API URL o API key quedan vacíos, se configuran después desde el portal local.
-El `Device ID` se asigna automáticamente como `PULSE_XX`, donde `XX` es el último byte de la MAC de la ESP32.
+Genera y carga `config.py` con Wi-Fi, API URL HTTPS, código único, Device ID, recorrido y sentido del motor. Registra el Device ID y el código mostrado en el cloud. El portal local solo cambia Wi-Fi y conserva los ajustes del motor.
+El `Device ID` se asigna automáticamente como `PULSE_` seguido de los 12 dígitos hexadecimales de la MAC. El código único se genera aleatoriamente con 128 bits de entropía.
 
 ### Otros
 

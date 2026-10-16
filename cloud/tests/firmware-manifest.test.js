@@ -55,6 +55,28 @@ test('servo confirms and feeds the transactional OTA watchdog', () => {
   assert.match(source, /ota_boot\.feed\(\)/);
 });
 
+test('burner and firmware use per-device codes over HTTPS while captive portals save Wi-Fi only', () => {
+  const servoMain = fs.readFileSync(path.join(root, 'dispositivos/servo/main.py'), 'utf8');
+  const servoCloud = fs.readFileSync(path.join(root, 'dispositivos/servo/cloud_client.py'), 'utf8');
+  const servoPortal = fs.readFileSync(path.join(root, 'dispositivos/servo/captive_portal.py'), 'utf8');
+  const ga25Main = fs.readFileSync(path.join(root, 'dispositivos/ga25/esp32_motor/main.py'), 'utf8');
+  const ga25Portal = fs.readFileSync(path.join(root, 'dispositivos/ga25/esp32_motor/captive_portal.py'), 'utf8');
+  const cloudServer = fs.readFileSync(path.join(root, 'cloud/server.js'), 'utf8');
+  assert.match(burner, /secrets\.token_hex\(16\)/);
+  assert.match(burner, /DEVICE_CODE =/);
+  assert.match(burner, /PULSE_\(\[0-9A-Fa-f\]\{12\}\)/);
+  for (const source of [servoCloud, ga25Main]) {
+    assert.match(source, /X-Device-Code/);
+    assert.doesNotMatch(source, /X-API-Key/);
+  }
+  assert.match(servoMain, /DEVICE_CODE/);
+  assert.match(ga25Main, /DEVICE_CODE/);
+  assert.match(cloudServer, /device_code_hash CHAR\(64\)/);
+  assert.match(cloudServer, /HTTPS is required/);
+  assert.doesNotMatch(servoPortal, /name=['"](?:api_key|device_id|device_code|api_url)['"]/);
+  assert.doesNotMatch(ga25Portal, /name=(?:api_key|device_id|device_code|api_url|travel|direction_reversed)/);
+});
+
 test('servo NeoPixel reflects cloud/provisioning/offline state and OTA retries timeouts', () => {
   const led = fs.readFileSync(path.join(root, 'dispositivos/servo/board_led.py'), 'utf8');
   const main = fs.readFileSync(path.join(root, 'dispositivos/servo/main.py'), 'utf8');
@@ -70,7 +92,11 @@ test('servo NeoPixel reflects cloud/provisioning/offline state and OTA retries t
   assert.match(cloud, /def is_online\(self, max_age_ms=30000\)/);
   assert.match(cloud, /self\.retry_ms = min\(self\.retry_ms \* 2, 60000\)/);
   assert.match(cloud, /self\.retry_ms = 5000/);
+  assert.match(cloud, /gc\.collect\(\)\s+phase = 'TLS handshake'/);
   assert.match(ota, /_connection\(api_url, 30\)/);
+  assert.match(ota, /client\.connect\(\(host, port\)\)\s+if secure:\s+gc\.collect\(\)/);
+  assert.match(ota, /phase = 'TLS handshake'\s+client = tls\.wrap_socket/);
+  assert.match(ota, /OTA transporte fallo en/);
   assert.match(ota, /for attempt in range\(2\)/);
   assert.match(ota, /OTA servo: descargando/);
 });

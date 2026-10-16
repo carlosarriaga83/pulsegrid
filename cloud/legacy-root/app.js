@@ -616,7 +616,7 @@ function curtainMeta(telemetry, diagnostic = null) {
 
 function devicePresentation(device) {
   const telemetry = parseTelemetry(device.telemetry);
-  const diagnostic = device.status === 'online' ? null : device.lastCommandStatus === 'failed' && device.lastCommandError ? `Ultimo comando fallo: ${device.lastCommandError}` : device.report ? 'Sin telemetria reciente: verifica Wi-Fi y API key' : 'Sin telemetria: verifica Wi-Fi, API key y Device ID';
+  const diagnostic = device.status === 'online' ? null : device.lastCommandStatus === 'failed' && device.lastCommandError ? `Ultimo comando fallo: ${device.lastCommandError}` : device.report ? 'Sin telemetria reciente: verifica Wi-Fi y el codigo unico' : 'Sin telemetria: verifica Wi-Fi, el codigo unico y el Device ID';
   if (telemetry.kind === 'curtain') return curtainMeta(telemetry, diagnostic);
   if (device.provider === 'tuya') return { icon: 'cloud', meta: [{ icon: 'cloud', text: 'Tuya Cloud' }, { icon: 'radio', text: device.status === 'online' ? 'Estado sincronizable' : 'Sin conexion' }, { icon: 'sliders-horizontal', text: `${parseCapabilities(device.capabilities).length} funciones disponibles` }] };
   return { icon: 'cpu', meta: [{ icon: 'radio', text: device.status === 'online' ? 'Telemetria activa' : 'Sin conexion' }, { icon: diagnostic ? 'triangle-alert' : 'circle-dot', text: diagnostic || (device.report ? 'Ultimo estado recibido' : 'Sin telemetria') }, { icon: 'cpu', text: telemetry.firmwareVersion ? `Firmware ${telemetry.firmwareVersion}` : 'Firmware sin confirmar' }] };

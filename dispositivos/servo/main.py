@@ -5,13 +5,20 @@ import sys
 from machine import I2C, Pin, UART
 
 try:
-    from config import WIFI_SSID, WIFI_PASSWORD, API_URL, API_KEY, DEVICE_ID, COMMANDS_ENABLED, DIRECTION_REVERSED
+    import config as device_config
+    WIFI_SSID = getattr(device_config, 'WIFI_SSID', '')
+    WIFI_PASSWORD = getattr(device_config, 'WIFI_PASSWORD', '')
+    API_URL = getattr(device_config, 'API_URL', '')
+    DEVICE_CODE = getattr(device_config, 'DEVICE_CODE', '')
+    DEVICE_ID = getattr(device_config, 'DEVICE_ID', '')
+    COMMANDS_ENABLED = getattr(device_config, 'COMMANDS_ENABLED', True)
+    DIRECTION_REVERSED = getattr(device_config, 'DIRECTION_REVERSED', False)
 except ImportError:
-    WIFI_SSID = WIFI_PASSWORD = API_URL = API_KEY = DEVICE_ID = ''
+    WIFI_SSID = WIFI_PASSWORD = API_URL = DEVICE_CODE = DEVICE_ID = ''
     COMMANDS_ENABLED = True
     DIRECTION_REVERSED = False
 
-FIRMWARE_VERSION = '2026.10.16.servo-r3'
+FIRMWARE_VERSION = '2026.10.16.servo-r4'
 FIRMWARE_FILES = ('main.py', 'cloud_client.py', 'board_led.py', 'captive_portal.py', 'cortina.py', 'servo_calibration.py', 'stservo.py', 'boot.py', 'ota_boot.py', 'pulsegrid_ota.py')
 WIFI_RETRY_MIN_MS = 2000
 WIFI_RETRY_MAX_MS = 60000
@@ -69,15 +76,15 @@ def main():
     connected = connect_wifi(wlan)
     wifi_retry_ms = WIFI_RETRY_MIN_MS
     next_wifi_retry = time.ticks_add(time.ticks_ms(), wifi_retry_ms)
-    if not connected or not API_KEY:
+    if not connected:
         import captive_portal
         captive_portal.start_background(controller)
-    if not connected or not API_KEY:
+    if not connected:
         print('Servo en modo provisionamiento')
     else:
         print('Servo cloud activo; firmware {}'.format(FIRMWARE_VERSION))
     from cloud_client import CloudClient
-    client = CloudClient(API_URL, API_KEY, DEVICE_ID, COMMANDS_ENABLED)
+    client = CloudClient(API_URL, DEVICE_CODE, DEVICE_ID, COMMANDS_ENABLED)
     ota_boot = sys.modules.get('ota_boot')
     if ota_boot:
         ota_boot.confirm()
@@ -95,13 +102,13 @@ def main():
         if connected:
             wifi_connect_pending = False
             wifi_connect_started = None
-        if not API_KEY:
+        if not DEVICE_CODE:
             board_led.set_status('provisioning')
         elif not connected or not client.is_online():
             board_led.set_status('offline')
         else:
             board_led.set_status('online')
-        if connected and API_KEY:
+        if connected and DEVICE_CODE:
             wifi_retry_ms = WIFI_RETRY_MIN_MS
             if time.ticks_diff(now, last_poll) >= 3000:
                 last_poll = now

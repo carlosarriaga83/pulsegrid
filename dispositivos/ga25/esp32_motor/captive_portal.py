@@ -52,25 +52,22 @@ def _page(message=""):
             "ssid": getattr(config, "WIFI_SSID", ""),
             "password": getattr(config, "WIFI_PASSWORD", ""),
             "api_url": getattr(config, "API_URL", DEFAULT_API_URL) if str(getattr(config, "API_URL", "")).startswith("https://") else DEFAULT_API_URL,
-            "api_key": getattr(config, "API_KEY", ""),
+            "device_code": getattr(config, "DEVICE_CODE", ""),
             "device_id": getattr(config, "DEVICE_ID", "cortina-ga25-01"),
             "travel": getattr(config, "FULL_TRAVEL_MS", 15000),
             "direction_reversed": getattr(config, "DIRECTION_REVERSED", False),
         }
     except ImportError:
-        defaults = {"ssid": "", "password": "", "api_url": DEFAULT_API_URL, "api_key": "", "device_id": "cortina-ga25-01", "travel": 15000, "direction_reversed": False}
+        defaults = {"ssid": "", "password": "", "api_url": DEFAULT_API_URL, "device_code": "", "device_id": "cortina-ga25-01", "travel": 15000, "direction_reversed": False}
     defaults["direction_normal"] = "" if defaults["direction_reversed"] else " selected"
     defaults["direction_reverse"] = " selected" if defaults["direction_reversed"] else ""
     notice = "<p class=notice>{}</p>".format(_html(message)) if message else ""
     return """<!doctype html><html><meta name=viewport content='width=device-width'><title>Pulsegrid GA25</title>
 <style>:root{{color-scheme:light}}body{{font:15px sans-serif;max-width:680px;margin:0 auto;padding:20px 14px;background:#f3f7f7;color:#17212b}}header{{padding:18px 16px;background:#123844;color:white;border-radius:8px}}header p{{margin:5px 0 0;color:#c6e3e4;font-size:13px}}main,nav,section{{margin-top:14px;padding:14px;background:white;border:1px solid #d8e1e3;border-radius:8px}}nav a{{color:#087f8c;font-weight:700}}label{{display:block;margin:10px 0 4px;font-weight:700}}input{{box-sizing:border-box;width:100%;min-height:36px;padding:8px;border:1px solid #b9c7ca;border-radius:5px;font-size:16px}}button{{box-sizing:border-box;min-height:36px;padding:8px 12px;background:#087f8c;color:white;border:0;border-radius:5px;font-weight:bold}}.motor-test{{margin-top:14px}}.motor-test button{{margin:5px 5px 0 0}}.stop{{background:#b42318}}.notice{{padding:10px;background:#e9f7e8;border-radius:5px}}.muted{{color:#526473;font-size:13px}}</style>
-<header><h1>Configurar Pulsegrid</h1><p>Pulsegrid · Motor GA25 · portal local {portal_host}</p></header><nav><a href=/>Inicio</a> · <a href=/status>Estado</a></nav><main>{notice}<p class=muted>Configura la red Wi-Fi y la conexión cloud del motor GA25.</p>
+<header><h1>Configurar Pulsegrid</h1><p>Pulsegrid · Motor GA25 · portal local {portal_host}</p></header><nav><a href=/>Inicio</a> · <a href=/status>Estado</a></nav><main>{notice}<p class=muted>Este portal solo guarda las credenciales de Wi-Fi; los ajustes del motor y la identidad cloud se conservan.</p>
 <form method=post action=/save><label>Red Wi-Fi</label><input name=ssid required value='{ssid}'>
 <label>Contrasena Wi-Fi</label><input name=password type=password value='{password}'>
-<label>API URL</label><input name=api_url required value='{api_url}'>
-<label>API key</label><input name=api_key type=password value='{api_key}' placeholder='Opcional; esperando API key si queda vacía'>
-<label>Device ID</label><input name=device_id required value='{device_id}'>
-<label>Recorrido completo en milisegundos</label><input name=travel type=number min=1000 value='{travel}'><label>Sentido del motor</label><select name=direction_reversed><option value=0{direction_normal}>Normal</option><option value=1{direction_reverse}>Reversa</option></select><button type=submit>Guardar configuracion</button><a href=/ style="display:block;margin-top:12px">Cancelar</a></form>
+<button type=submit>Guardar Wi-Fi</button><a href=/ style="display:block;margin-top:12px">Cancelar</a></form>
 <section class=motor-test><h2>Probar motor</h2><p class=muted>Cada prueba activa ENABLE al 100% durante 1500 ms y se detiene automaticamente.</p>
 <form method=post action=/motor><button name=direction value=open>Abrir</button><button name=direction value=close>Cerrar</button><button class=stop name=direction value=stop>Detener</button></form></section></main></html>""".format(notice=notice, portal_host=PORTAL_HOST, **defaults)
 
@@ -78,25 +75,29 @@ def _page(message=""):
 def _write_config(values):
     ssid = values.get("ssid", "").strip()
     password = values.get("password", "")
-    api_url = values.get("api_url", "").strip().rstrip("/")
-    api_key = values.get("api_key", "").strip()
-    device_id = values.get("device_id", "").strip()
     try:
-        travel = max(1000, int(values.get("travel", "15000")))
-    except ValueError:
-        travel = 15000
-    if not ssid or not api_url or not device_id:
-        raise ValueError("SSID, API URL y Device ID son obligatorios")
+        import config as current
+        api_url = str(getattr(current, "API_URL", DEFAULT_API_URL)).strip().rstrip("/")
+        device_code = str(getattr(current, "DEVICE_CODE", "")).strip()
+        device_id = str(getattr(current, "DEVICE_ID", "cortina-ga25-01")).strip()
+        travel = max(1000, int(getattr(current, "FULL_TRAVEL_MS", 15000)))
+        direction_reversed = bool(getattr(current, "DIRECTION_REVERSED", False))
+        open_a_level = int(getattr(current, "OPEN_A_LEVEL", 1))
+    except (ImportError, ValueError):
+        api_url, device_code, device_id, travel, direction_reversed, open_a_level = DEFAULT_API_URL, "", "cortina-ga25-01", 15000, False, 1
+    if not ssid:
+        raise ValueError("SSID es obligatorio")
+    if not api_url.startswith("https://"):
+        api_url = DEFAULT_API_URL
     temporary = CONFIG_FILE + ".tmp"
     backup = CONFIG_FILE + ".bak"
     with open(temporary, "w") as config:
         config.write("WIFI_SSID = {!r}\n".format(ssid))
         config.write("WIFI_PASSWORD = {!r}\n".format(password))
         config.write("API_URL = {!r}\n".format(api_url))
-        config.write("API_KEY = {!r}\n".format(api_key))
+        config.write("DEVICE_CODE = {!r}\n".format(device_code))
         config.write("DEVICE_ID = {!r}\n".format(device_id))
-        direction_reversed = values.get("direction_reversed", "0") == "1"
-        config.write("FULL_TRAVEL_MS = {}\nOPEN_A_LEVEL = 1\nDIRECTION_REVERSED = {!r}\n".format(travel, direction_reversed))
+        config.write("FULL_TRAVEL_MS = {}\nOPEN_A_LEVEL = {}\nDIRECTION_REVERSED = {!r}\n".format(travel, open_a_level, direction_reversed))
     try:
         os.remove(backup)
     except OSError:
@@ -180,10 +181,8 @@ def run(motor=None):
     try:
         import config
         wifi_ssid = str(getattr(config, "WIFI_SSID", "")).strip()
-        api_key_configured = bool(str(getattr(config, "API_KEY", "")).strip())
     except ImportError:
         wifi_ssid = ""
-        api_key_configured = False
     station = network.WLAN(network.STA_IF)
     try:
         if wifi_ssid:
@@ -247,10 +246,7 @@ def run(motor=None):
                     dns = None
                 PORTAL_HOST = station.ifconfig()[0]
                 if portal_mode != "station":
-                    if not api_key_configured:
-                        print("Portal de configuracion en Wi-Fi: http://{}/ (esperando API key)".format(PORTAL_HOST))
-                    else:
-                        print("Portal de configuracion en Wi-Fi: http://{}/".format(PORTAL_HOST))
+                    print("Portal de configuracion Wi-Fi: http://{}/".format(PORTAL_HOST))
                     portal_mode = "station"
             else:
                 if not ap.active():

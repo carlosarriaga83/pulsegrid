@@ -4,32 +4,36 @@ import socket
 import ujson
 import uhashlib
 
-try:
-    import ussl as tls
-except ImportError:
-    try:
-        import ssl as tls
-    except ImportError:
-        tls = None
-
-
 def _connection(api_url, timeout):
     gc.collect()
     secure = api_url.startswith('https://')
+    if not secure:
+        raise ValueError('HTTPS es obligatorio para Pulsegrid')
     address = api_url.split('://', 1)[-1].split('/', 1)[0]
     parts = address.split(':', 1)
     host = parts[0]
     port = int(parts[1]) if len(parts) > 1 else (443 if secure else 80)
     client = socket.socket()
     client.settimeout(timeout)
+    phase = 'TCP connect'
     try:
         client.connect((host, port))
         if secure:
-            if tls is None:
-                raise RuntimeError('TLS no disponible en este firmware')
+            gc.collect()
+            phase = 'TLS module import'
+            try:
+                import ussl as tls
+            except ImportError:
+                try:
+                    import ssl as tls
+                except ImportError:
+                    raise RuntimeError('TLS no disponible en este firmware')
+            gc.collect()
+            phase = 'TLS handshake'
             client = tls.wrap_socket(client, server_hostname=host)
         return client, host
-    except Exception:
+    except Exception as error:
+        print('OTA transporte fallo en {}: {}'.format(phase, error))
         try:
             client.close()
         except Exception:
@@ -132,10 +136,10 @@ def _write_sized(client, buffer, target, digest, expected_length, name):
     return received
 
 
-def _request(api_url, api_key, path):
+def _request(api_url, device_code, path):
     client, host = _connection(api_url, 30)
     try:
-        client.send('GET {} HTTP/1.1\r\nHost: {}\r\nX-API-Key: {}\r\nConnection: close\r\n\r\n'.format(path, host, api_key).encode())
+        client.send('GET {} HTTP/1.1\r\nHost: {}\r\nX-Device-Code: {}\r\nConnection: close\r\n\r\n'.format(path, host, device_code).encode())
         result = b''
         while True:
             chunk = client.recv(512)
@@ -161,7 +165,7 @@ def _is_timeout(error):
     return code in (110, 116) or 'ETIMEDOUT' in message or 'TIMED OUT' in message
 
 
-def _download(api_url, api_key, version, info, target_model, allowed_files, ota_boot):
+def _download(api_url, device_code, device_id, version, info, target_model, allowed_files, ota_boot):
     name = str(info.get('name', ''))
     if name not in allowed_files:
         raise ValueError('Archivo de firmware invalido: ' + name)
@@ -169,8 +173,8 @@ def _download(api_url, api_key, version, info, target_model, allowed_files, ota_
     client = None
     try:
         client, host = _connection(api_url, 30)
-        path = '/api/firmware/files/{}/{}?targetModel={}'.format(version, name, target_model)
-        client.send('GET {} HTTP/1.1\r\nHost: {}\r\nX-API-Key: {}\r\nConnection: close\r\n\r\n'.format(path, host, api_key).encode())
+        path = '/api/firmware/files/{}/{}?targetModel={}&deviceId={}'.format(version, name, target_model, device_id)
+        client.send('GET {} HTTP/1.1\r\nHost: {}\r\nX-Device-Code: {}\r\nConnection: close\r\n\r\n'.format(path, host, device_code).encode())
         header = b''
         while b'\r\n\r\n' not in header:
             chunk = client.recv(256)
@@ -216,13 +220,13 @@ def _download(api_url, api_key, version, info, target_model, allowed_files, ota_
         gc.collect()
 
 
-def update(api_url, api_key, version, target_model, allowed_files):
+def update(api_url, device_code, device_id, version, target_model, allowed_files):
     import ota_boot
     print('OTA servo: consultando manifiesto')
-    manifest_path = '/api/firmware/manifest?version={}&targetModel={}'.format(version, target_model)
+    manifest_path = '/api/firmware/manifest?version={}&targetModel={}&deviceId={}'.format(version, target_model, device_id)
     for attempt in range(2):
         try:
-            manifest = _request(api_url, api_key, manifest_path)
+            manifest = _request(api_url, device_code, manifest_path)
             break
         except Exception as error:
             if attempt or not _is_timeout(error):
@@ -241,7 +245,7 @@ def update(api_url, api_key, version, target_model, allowed_files):
         print('OTA servo: descargando', name)
         for attempt in range(2):
             try:
-                _download(api_url, api_key, version, info, target_model, allowed_files, ota_boot)
+                _download(api_url, device_code, device_id, version, info, target_model, allowed_files, ota_boot)
                 break
             except Exception as error:
                 if attempt or not _is_timeout(error):

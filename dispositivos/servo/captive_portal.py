@@ -50,13 +50,13 @@ def _config():
             'ssid': getattr(config, 'WIFI_SSID', ''),
             'password': getattr(config, 'WIFI_PASSWORD', ''),
             'api_url': getattr(config, 'API_URL', DEFAULT_API_URL),
-            'api_key': getattr(config, 'API_KEY', ''),
+            'device_code': getattr(config, 'DEVICE_CODE', ''),
             'device_id': getattr(config, 'DEVICE_ID', 'PULSE_XX'),
             'commands': getattr(config, 'COMMANDS_ENABLED', True),
             'reversed': getattr(config, 'DIRECTION_REVERSED', False),
         }
     except ImportError:
-        return {'ssid': '', 'password': '', 'api_url': DEFAULT_API_URL, 'api_key': '', 'device_id': 'PULSE_XX', 'commands': True, 'reversed': False}
+        return {'ssid': '', 'password': '', 'api_url': DEFAULT_API_URL, 'device_code': '', 'device_id': 'PULSE_XX', 'commands': True, 'reversed': False}
 
 
 def _page(message=''):
@@ -68,14 +68,13 @@ def _page(message=''):
     notice = '<p class=notice>{}</p>'.format(_html(message)) if message else ''
     return """<!doctype html><meta name=viewport content='width=device-width'><title>Pulsegrid Servo</title>
 <style>body{{font:15px sans-serif;max-width:680px;margin:0 auto;padding:20px 14px;background:#f3f7f7;color:#17212b}}header{{padding:18px 16px;background:#123844;color:white;border-radius:8px}}main,nav,section{{margin-top:14px;padding:14px;background:white;border:1px solid #d8e1e3;border-radius:8px}}a{{color:#087f8c;font-weight:700}}label{{display:block;margin:10px 0 4px;font-weight:700}}input,select{{box-sizing:border-box;width:100%;min-height:36px;padding:8px;border:1px solid #b9c7ca;border-radius:5px;font-size:16px}}button{{min-height:36px;padding:8px 12px;background:#087f8c;color:white;border:0;border-radius:5px;font-weight:bold;margin:5px 5px 0 0}}.stop{{background:#b42318}}.notice{{padding:10px;background:#e9f7e8;border-radius:5px}}.muted{{color:#526473;font-size:13px}}</style>
-<header><h1>Configurar Pulsegrid</h1><p>Servo ST · portal local {portal}</p></header><nav><a href=/>Configuracion</a> · <a href=/status>Estado</a></nav><main>{notice}<p class=muted>API key opcional: si queda vacia, el servo solo consulta bootstrap.</p><form method=post action=/save>
-<label>Red Wi-Fi</label><input name=ssid value='{ssid}'><label>Contrasena Wi-Fi</label><input name=password type=password value='{password}'><label>API URL</label><input name=api_url required value='{api_url}'><label>API key</label><input name=api_key type=password value='{api_key}' placeholder='Opcional'><label>Device ID</label><input name=device_id required value='{device_id}'><label>Comandos</label><select name=commands_enabled><option value=0{commands_no}>No</option><option value=1{commands_yes}>Si</option></select><label>Sentido</label><select name=direction_reversed><option value=0{normal}>Normal</option><option value=1{reversed}>Reversa</option></select><button type=submit>Guardar configuracion</button></form><section><h2>Control local</h2><form method=post action=/control><button name=command value=open>Abrir</button><button name=command value=close>Cerrar</button><button class=stop name=command value=stop>Detener</button></form></section></main>""".format(
+<header><h1>Configurar Pulsegrid</h1><p>Servo ST · portal local {portal}</p></header><nav><a href=/>Configuracion</a> · <a href=/status>Estado</a></nav><main>{notice}<p class=muted>Este portal solo guarda las credenciales de Wi-Fi. Los datos del dispositivo se conservan.</p><form method=post action=/save>
+<label>Red Wi-Fi</label><input name=ssid required value='{ssid}'><label>Contrasena Wi-Fi</label><input name=password type=password value='{password}'><button type=submit>Guardar Wi-Fi</button></form><section><h2>Control local</h2><form method=post action=/control><button name=command value=open>Abrir</button><button name=command value=close>Cerrar</button><button class=stop name=command value=stop>Detener</button></form></section></main>""".format(
         notice=notice,
         portal=PORTAL_HOST,
         ssid=values['ssid'],
         password=values['password'],
         api_url=values['api_url'],
-        api_key=values['api_key'],
         device_id=values['device_id'],
         normal=normal,
         reversed=reversed_value,
@@ -86,13 +85,11 @@ def _page(message=''):
 
 def _write_config(values):
     ssid = values.get('ssid', '').strip()
-    api_url = values.get('api_url', '').strip().rstrip('/')
-    device_id = values.get('device_id', '').strip()
-    if not api_url or not device_id:
-        raise ValueError('API URL y Device ID son obligatorios')
-    content = "WIFI_SSID = {!r}\nWIFI_PASSWORD = {!r}\nAPI_URL = {!r}\nAPI_KEY = {!r}\nDEVICE_ID = {!r}\nCOMMANDS_ENABLED = {!r}\nDIRECTION_REVERSED = {!r}\n".format(
-        ssid, values.get('password', ''), api_url, values.get('api_key', '').strip(), device_id,
-        values.get('commands_enabled', '0') == '1', values.get('direction_reversed', '0') == '1',
+    current = _config()
+    if not ssid:
+        raise ValueError('SSID es obligatorio')
+    content = "WIFI_SSID = {!r}\nWIFI_PASSWORD = {!r}\nAPI_URL = {!r}\nDEVICE_CODE = {!r}\nDEVICE_ID = {!r}\nCOMMANDS_ENABLED = {!r}\nDIRECTION_REVERSED = {!r}\n".format(
+        ssid, values.get('password', ''), current['api_url'], current['device_code'], current['device_id'], current['commands'], current['reversed'],
     )
     with open(CONFIG_FILE, 'w') as config:
         config.write(content)

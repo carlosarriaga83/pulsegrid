@@ -10,16 +10,16 @@ El firmware consulta los comandos de Pulsegrid y envia telemetria. Sin encoder o
 
 `FULL_TRAVEL_MS` se guarda en `config.py`, que queda fuera de los manifiestos OTA y de la limpieza del perfil GA25 del quemador. Los reinicios, las actualizaciones OTA y la pérdida de Wi-Fi no borran ese ajuste; el guardado del portal y de la configuración remota conserva un respaldo para recuperarlo si hay un reset durante la escritura. La posición física no se puede conocer con exactitud tras un corte durante el movimiento sin encoder o finales de carrera. Borrar toda la flash sí elimina `config.py`.
 
-Cuando `API_KEY` está vacía, el firmware usa solo la clave de bootstrap `pg_bootstrap_v1` para anunciar presencia y consultar una configuración `device.configure` pendiente. No envía telemetría ni consulta comandos normales.
+El firmware autentica telemetría, comandos y OTA con `DEVICE_CODE`, generado por el quemador y guardado como hash en cloud. La API key de usuario se reserva para integraciones externas; no se incluye en la configuración del motor.
 
 ## Carga
 
 1. Instala `mpremote` y carga `captive_portal.py`, `motor_curtain.py` y `main.py`.
 2. Reinicia la placa. Si no existe `config.py` o no puede conectar a la red configurada, crea la red abierta `Pulsegrid-Cortina`.
-3. Conecta el telefono o PC a esa red y abre `http://192.168.4.1/`. El portal guarda Wi-Fi, API key, `DEVICE_ID` y tiempo de recorrido.
+3. Conecta el telefono o PC a esa red y abre `http://192.168.4.1/`. El portal permite guardar solo Wi-Fi y conserva el código, Device ID y ajustes del motor.
 4. La placa reinicia y se conecta a la red configurada.
 
-Cuando la placa está conectada, el portal escucha en su IP dentro de la red Wi-Fi. El AP `Pulsegrid-Cortina` queda apagado y solo se activa como portal de recuperacion si la conexión se pierde o las credenciales dejan de funcionar. Si rotas la API key y la placa sigue conectada, abre el portal en su IP LAN; si pierde la conexión, usa el AP `192.168.4.1`.
+Cuando la placa está conectada, el portal escucha en su IP dentro de la red Wi-Fi. El AP `Pulsegrid-Cortina` queda apagado y solo se activa como portal de recuperacion si la conexión se pierde o las credenciales dejan de funcionar.
 
 Tambien puedes preparar `config.py` a partir de `config.example.py` y cargarlo directamente. La red de configuracion es abierta y no debe usarse para trafico sensible; solo expone el portal local durante la configuracion.
 

@@ -43,15 +43,19 @@ except ImportError:
     ota_boot = None
 
 try:
-    from config import WIFI_SSID, WIFI_PASSWORD, API_URL, API_KEY, DEVICE_ID
-    from config import FULL_TRAVEL_MS, OPEN_A_LEVEL, DIRECTION_REVERSED
+    import config as device_config
+    WIFI_SSID = getattr(device_config, "WIFI_SSID", "")
+    WIFI_PASSWORD = getattr(device_config, "WIFI_PASSWORD", "")
+    API_URL = getattr(device_config, "API_URL", "")
+    DEVICE_CODE = getattr(device_config, "DEVICE_CODE", "")
+    DEVICE_ID = getattr(device_config, "DEVICE_ID", "")
+    FULL_TRAVEL_MS = getattr(device_config, "FULL_TRAVEL_MS", 15000)
+    OPEN_A_LEVEL = getattr(device_config, "OPEN_A_LEVEL", 1)
+    DIRECTION_REVERSED = getattr(device_config, "DIRECTION_REVERSED", False)
 except ImportError:
-    try:
-        from config import WIFI_SSID, WIFI_PASSWORD, API_URL, API_KEY, DEVICE_ID, FULL_TRAVEL_MS, OPEN_A_LEVEL
-    except ImportError:
-        WIFI_SSID = WIFI_PASSWORD = API_URL = API_KEY = DEVICE_ID = ""
-        FULL_TRAVEL_MS = 15000
-        OPEN_A_LEVEL = 1
+    WIFI_SSID = WIFI_PASSWORD = API_URL = DEVICE_CODE = DEVICE_ID = ""
+    FULL_TRAVEL_MS = 15000
+    OPEN_A_LEVEL = 1
     DIRECTION_REVERSED = False
 
 ENABLE_PIN = 16
@@ -87,14 +91,11 @@ motor = CurtainMotor(ENABLE_PIN, DIRECTION_A_PIN, DIRECTION_B_PIN, FULL_TRAVEL_M
 status_led = StatusLed(STATUS_LED_PIN)
 last_poll = 0
 last_telemetry = 0
-last_presence = 0
-bootstrap_retry_at = 0
 pending_configuration = None
 restart_requested = False
 led_override = None
 FIRMWARE_TARGET = "ga25"
 FIRMWARE_FILES = ("main.py", "captive_portal.py", "motor_curtain.py", "boot.py", "ota_boot.py")
-BOOTSTRAP_API_KEY = "pg_bootstrap_v1"
 
 try:
     from pulsegrid_firmware import VERSION as FIRMWARE_VERSION
@@ -109,6 +110,8 @@ def cloud_path(path):
 def api_socket(timeout):
     gc.collect()
     secure = API_URL.startswith("https://")
+    if not secure:
+        raise ValueError("HTTPS es obligatorio para Pulsegrid")
     address = API_URL.split("://", 1)[-1].split("/", 1)[0]
     parts = address.split(":", 1)
     host = parts[0]
@@ -159,10 +162,6 @@ def wifi_connect():
     except Exception as error:
         print("WiFi no disponible:", error)
     return False
-
-
-def headers():
-    return {"Content-Type": "application/json", "X-API-Key": API_KEY}
 
 
 def _unchunk(value):
@@ -278,12 +277,11 @@ def _write_ota_body(client, response_headers, initial_body, target, digest, expe
     return received
 
 
-def relay_request(method, path, body=None, api_key=None):
+def relay_request(method, path, body=None):
     client, host = api_socket(REQUEST_TIMEOUT)
     try:
         content = json.dumps(body) if body is not None else ""
-        request_key = API_KEY if api_key is None else api_key
-        request = "{} {} HTTP/1.1\r\nHost: {}\r\nX-API-Key: {}\r\nConnection: close\r\n".format(method, path, host, request_key)
+        request = "{} {} HTTP/1.1\r\nHost: {}\r\nX-Device-Code: {}\r\nConnection: close\r\n".format(method, path, host, DEVICE_CODE)
         if content:
             request += "Content-Type: application/json\r\nContent-Length: {}\r\n".format(len(content))
         client.send((request + "\r\n" + content).encode())
@@ -309,7 +307,7 @@ def relay_request(method, path, body=None, api_key=None):
 
 def request(method, path, body=None):
     global next_request_at
-    if not API_URL or not API_KEY or time.ticks_diff(time.ticks_ms(), next_request_at) < 0:
+    if not API_URL or not DEVICE_CODE or time.ticks_diff(time.ticks_ms(), next_request_at) < 0:
         return None
     try:
         return relay_request(method, path, body)
@@ -325,33 +323,6 @@ def request(method, path, body=None):
         gc.collect()
 
 
-def send_presence():
-    return
-
-
-def poll_bootstrap():
-    global bootstrap_retry_at
-    if not API_URL or not DEVICE_ID or API_KEY or time.ticks_diff(time.ticks_ms(), bootstrap_retry_at) < 0:
-        return False
-    bootstrap_retry_at = time.ticks_add(time.ticks_ms(), 60000)
-    try:
-        result = relay_request("GET", "/api/device-bootstrap?deviceId=" + DEVICE_ID, None, BOOTSTRAP_API_KEY)
-        command = result.get("command") if result else None
-        if command and command.get("name") == "device.configure":
-            execute(command)
-            if pending_configuration:
-                apply_configuration(pending_configuration)
-            relay_request("POST", "/api/device-bootstrap/{}/ack".format(command.get("id")), {"deviceId": DEVICE_ID, "status": "succeeded"}, BOOTSTRAP_API_KEY)
-            print("Configuracion remota recibida; API key instalada")
-            time.sleep_ms(250)
-            import machine
-            machine.reset()
-            return True
-    except Exception as error:
-        print("Pulsegrid bootstrap:", error)
-    return False
-
-
 def acknowledge(command_id, status, error=None):
     body = {"deviceId": DEVICE_ID, "status": status}
     if error:
@@ -360,9 +331,9 @@ def acknowledge(command_id, status, error=None):
 
 
 def save_configuration(values):
-    content = ("WIFI_SSID = {!r}\nWIFI_PASSWORD = {!r}\nAPI_URL = {!r}\nAPI_KEY = {!r}\n"
+    content = ("WIFI_SSID = {!r}\nWIFI_PASSWORD = {!r}\nAPI_URL = {!r}\nDEVICE_CODE = {!r}\n"
                "DEVICE_ID = {!r}\nFULL_TRAVEL_MS = {}\nOPEN_A_LEVEL = {}\nDIRECTION_REVERSED = {!r}\n").format(
-                   values["wifi_ssid"], values["wifi_password"], values["api_url"], values["api_key"],
+                   values["wifi_ssid"], values["wifi_password"], values["api_url"], values["device_code"],
                    values["device_id"], values["full_travel_ms"], values["open_a_level"], values["direction_reversed"])
     temporary = "config.py.tmp"
     backup = "config.py.bak"
@@ -394,28 +365,10 @@ def save_configuration(values):
         pass
 
 
-def configure_from_command(payload):
-    api_url = str(payload.get("apiUrl", "")).strip().rstrip("/")
-    api_key = str(payload.get("apiKey", "")).strip() or API_KEY
-    device_id = str(payload.get("deviceId", "")).strip()
-    if not api_url or not api_key or not device_id:
-        raise ValueError("API URL, API key y device ID son obligatorios")
-    reversed_value = payload.get("reversed", DIRECTION_REVERSED)
-    if isinstance(reversed_value, str):
-        reversed_value = reversed_value.strip().lower() in ("1", "true", "yes", "on")
-    elif not isinstance(reversed_value, bool):
-        raise ValueError("reversed debe ser booleano")
-    values = {"wifi_ssid": WIFI_SSID, "wifi_password": WIFI_PASSWORD, "api_url": api_url,
-              "api_key": api_key, "device_id": device_id, "full_travel_ms": FULL_TRAVEL_MS,
-              "open_a_level": OPEN_A_LEVEL, "direction_reversed": reversed_value}
-    save_configuration(values)
-    return values
-
-
 def apply_configuration(values):
-    global API_URL, API_KEY, DEVICE_ID, motor, DIRECTION_REVERSED
+    global API_URL, DEVICE_CODE, DEVICE_ID, motor, DIRECTION_REVERSED
     API_URL = values["api_url"]
-    API_KEY = values["api_key"]
+    DEVICE_CODE = values["device_code"]
     DEVICE_ID = values["device_id"]
     DIRECTION_REVERSED = values["direction_reversed"]
     motor = CurtainMotor(ENABLE_PIN, DIRECTION_A_PIN, DIRECTION_B_PIN, values["full_travel_ms"], values["open_a_level"], DIRECTION_REVERSED)
@@ -423,7 +376,7 @@ def apply_configuration(values):
 
 def _legacy_update_firmware(version):
     import uhashlib
-    manifest = request("GET", cloud_path("/api/firmware/manifest?version={}&targetModel={}".format(version, FIRMWARE_TARGET)))
+    manifest = request("GET", cloud_path("/api/firmware/manifest?version={}&targetModel={}&deviceId={}".format(version, FIRMWARE_TARGET, DEVICE_ID)))
     if not manifest or manifest.get("version") != version or manifest.get("targetModel") not in (FIRMWARE_TARGET, "Todos los dispositivos"):
         raise ValueError("Version de firmware no coincide con GA25")
     downloads = []
@@ -434,9 +387,9 @@ def _legacy_update_firmware(version):
         temporary_name = name + ".ota"
         client = None
         try:
-            path = cloud_path("/api/firmware/files/{}/{}?targetModel={}".format(version, name, FIRMWARE_TARGET))
+            path = cloud_path("/api/firmware/files/{}/{}?targetModel={}&deviceId={}".format(version, name, FIRMWARE_TARGET, DEVICE_ID))
             client, host = api_socket(REQUEST_TIMEOUT)
-            client.send("GET {} HTTP/1.1\r\nHost: {}\r\nX-API-Key: {}\r\nConnection: close\r\n\r\n".format(path, host, API_KEY).encode())
+            client.send("GET {} HTTP/1.1\r\nHost: {}\r\nX-Device-Code: {}\r\nConnection: close\r\n\r\n".format(path, host, DEVICE_CODE).encode())
             header = b""
             while b"\r\n\r\n" not in header:
                 chunk = client.recv(256)
@@ -494,7 +447,7 @@ def update_firmware(version):
             return False
     except (ImportError, AttributeError):
         pass
-    manifest = request("GET", cloud_path("/api/firmware/manifest?version={}&targetModel={}".format(version, FIRMWARE_TARGET)))
+    manifest = request("GET", cloud_path("/api/firmware/manifest?version={}&targetModel={}&deviceId={}".format(version, FIRMWARE_TARGET, DEVICE_ID)))
     if not manifest or manifest.get("version") != version or manifest.get("targetModel") not in (FIRMWARE_TARGET, "Todos los dispositivos"):
         raise ValueError("Version de firmware no coincide con GA25")
     files = manifest.get("files", [])
@@ -510,9 +463,9 @@ def update_firmware(version):
         temporary_name = ota_boot.stage_path(name)
         client = None
         try:
-            path = cloud_path("/api/firmware/files/{}/{}?targetModel={}".format(version, name, FIRMWARE_TARGET))
+            path = cloud_path("/api/firmware/files/{}/{}?targetModel={}&deviceId={}".format(version, name, FIRMWARE_TARGET, DEVICE_ID))
             client, host = api_socket(REQUEST_TIMEOUT)
-            client.send("GET {} HTTP/1.1\r\nHost: {}\r\nX-API-Key: {}\r\nConnection: close\r\n\r\n".format(path, host, API_KEY).encode())
+            client.send("GET {} HTTP/1.1\r\nHost: {}\r\nX-Device-Code: {}\r\nConnection: close\r\n\r\n".format(path, host, DEVICE_CODE).encode())
             header = b""
             while b"\r\n\r\n" not in header:
                 chunk = client.recv(256)
@@ -562,9 +515,7 @@ def execute(command):
     global pending_configuration, restart_requested, led_override
     name = command.get("name") or command.get("command")
     payload = command.get("payload") or {}
-    if name == "device.configure":
-        pending_configuration = configure_from_command(payload)
-    elif name == "led.configure":
+    if name == "led.configure":
         if not isinstance(payload.get("enabled"), bool):
             raise ValueError("enabled debe ser booleano")
         led_override = payload["enabled"]
@@ -572,7 +523,7 @@ def execute(command):
         if not isinstance(payload.get("reversed"), bool):
             raise ValueError("reversed debe ser booleano")
         pending_configuration = {"wifi_ssid": WIFI_SSID, "wifi_password": WIFI_PASSWORD, "api_url": API_URL,
-                                 "api_key": API_KEY, "device_id": DEVICE_ID, "full_travel_ms": FULL_TRAVEL_MS,
+                     "device_code": DEVICE_CODE, "device_id": DEVICE_ID, "full_travel_ms": FULL_TRAVEL_MS,
                                  "open_a_level": OPEN_A_LEVEL, "direction_reversed": payload["reversed"]}
         save_configuration(pending_configuration)
     elif name == "curtain.open":
@@ -594,7 +545,7 @@ def execute(command):
 
 def poll_commands():
     global pending_configuration, restart_requested
-    if not API_KEY:
+    if not DEVICE_CODE:
         return
     result = request("GET", cloud_path("/api/device-commands?deviceId=" + DEVICE_ID))
     command = result.get("command") if result else None
@@ -629,7 +580,7 @@ def send_telemetry():
     state["deviceId"] = DEVICE_ID
     state["kind"] = "curtain"
     state["firmwareTarget"] = FIRMWARE_TARGET
-    state["ledEnabled"] = led_override if led_override is not None else bool(API_KEY)
+    state["ledEnabled"] = led_override if led_override is not None else bool(DEVICE_CODE)
     state["directionReversed"] = bool(motor.direction_reversed)
     try:
         from pulsegrid_firmware import VERSION
@@ -650,12 +601,12 @@ def main():
     connected = wifi_connect()
     if not connected:
         print("Wi-Fi no disponible: el portal continua activo; LED parpadeando 1 Hz")
-    elif API_KEY:
+    elif DEVICE_CODE:
         status_led.set(True)
         print("LED de estado: verde; Pulsegrid configurado")
     else:
         status_led.set((255, 180, 0))
-        print("LED de estado: amarillo; esperando API key")
+        print("LED de estado: amarillo; pendiente de registro cloud")
     captive_portal.start_background(motor)
     global last_poll, last_telemetry, last_presence, next_wifi_retry
     wifi_retry_ms = WIFI_RETRY_MIN_MS
@@ -671,7 +622,7 @@ def main():
             connected = False
         if connected:
             wifi_retry_ms = WIFI_RETRY_MIN_MS
-            status_led.set(led_override if led_override is not None else (True if API_KEY else (255, 180, 0)))
+            status_led.set(led_override if led_override is not None else (True if DEVICE_CODE else (255, 180, 0)))
         else:
             status_led.portal_tick()
             if time.ticks_diff(now, next_wifi_retry) >= 0:
@@ -680,16 +631,12 @@ def main():
                     wifi_retry_ms = WIFI_RETRY_MIN_MS
                     last_poll = 0
                     last_telemetry = 0
-                    last_presence = 0
                 else:
                     wifi_retry_ms = min(wifi_retry_ms * 2, WIFI_RETRY_MAX_MS)
                 next_wifi_retry = time.ticks_add(time.ticks_ms(), wifi_retry_ms)
         if connected and time.ticks_diff(now, last_poll) >= POLL_MS:
             last_poll = now
             poll_commands()
-        if connected and not API_KEY and time.ticks_diff(now, last_presence) >= 5000:
-            last_presence = now
-            poll_bootstrap()
         if connected and time.ticks_diff(now, last_telemetry) >= TELEMETRY_MS:
             last_telemetry = now
             send_telemetry()

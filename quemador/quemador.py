@@ -2,6 +2,7 @@ import json
 import os
 import queue
 import re
+import secrets
 import shutil
 import subprocess
 import sys
@@ -67,8 +68,8 @@ class BurnerApp(tk.Tk):
         self.firmware = tk.StringVar()
         self.custom_dir = tk.StringVar()
         self.api_url = tk.StringVar(value=DEFAULT_API_URL)
-        self.api_key = tk.StringVar()
         self.device_id = tk.StringVar(value="PULSE_XX")
+        self.device_code = tk.StringVar()
         self.wifi_ssid = tk.StringVar()
         self.wifi_password = tk.StringVar()
         self.full_travel = tk.IntVar(value=15000)
@@ -128,8 +129,9 @@ class BurnerApp(tk.Tk):
         self._entry(config, "Wi-Fi", self.wifi_ssid, 0, 0)
         self._entry(config, "Contraseña Wi-Fi", self.wifi_password, 0, 2, show="*")
         self._entry(config, "API URL", self.api_url, 1, 0)
-        self._entry(config, "API key", self.api_key, 1, 2, show="*")
         self._entry(config, "Device ID (MAC)", self.device_id, 2, 0, state="readonly")
+        self._entry(config, "Codigo unico (registrar en cloud)", self.device_code, 4, 0, state="readonly")
+        ttk.Button(config, text="Copiar codigo", command=self.copy_device_code).grid(row=4, column=2, sticky="w", padx=(18, 0), pady=4)
         ttk.Checkbutton(config, text="Comandos habilitados", variable=self.commands).grid(row=2, column=2, sticky="w", padx=(5, 0), pady=4)
         ttk.Label(config, text="Recorrido GA25 (ms)").grid(row=3, column=0, sticky="w", pady=4)
         ttk.Spinbox(config, from_=1000, to=120000, textvariable=self.full_travel, width=12).grid(row=3, column=1, sticky="w", padx=(5, 0), pady=4)
@@ -162,6 +164,15 @@ class BurnerApp(tk.Tk):
         ttk.Label(parent, text=label).grid(row=row, column=column, sticky="w", pady=4, padx=(0 if column == 0 else 18, 0))
         entry = ttk.Entry(parent, textvariable=variable, show=show, state=state)
         entry.grid(row=row, column=column + 1, sticky="ew", padx=(5, 0), pady=4)
+
+    def copy_device_code(self):
+        code = self.device_code.get().strip()
+        if not code:
+            messagebox.showinfo("Quemador", "Primero carga el firmware para generar el codigo unico.")
+            return
+        self.clipboard_clear()
+        self.clipboard_append(code)
+        self.status.set("Codigo unico copiado; registralo junto con el Device ID en cloud.")
 
     def _model_changed(self, _event=None):
         if self.model.get() != "otros":
@@ -265,6 +276,10 @@ class BurnerApp(tk.Tk):
             if self.flash_micropython.get() and not self.firmware.get().strip():
                 raise BurnerError("Selecciona una imagen .bin de MicroPython")
             settings = self._settings_snapshot()
+            if not settings["api_url"].startswith("https://"):
+                raise BurnerError("La URL cloud debe usar HTTPS")
+            settings["device_code"] = secrets.token_hex(16)
+            self.device_code.set(settings["device_code"])
         except BurnerError as error:
             messagebox.showerror("Quemador", str(error))
             return
@@ -278,8 +293,8 @@ class BurnerApp(tk.Tk):
             "flash_micropython": self.flash_micropython.get(),
             "clean_files": self.clean_files.get(),
             "api_url": self.api_url.get().strip().rstrip("/"),
-            "api_key": self.api_key.get().strip(),
             "device_id": self.device_id.get().strip(),
+            "device_code": self.device_code.get().strip(),
             "ssid": self.wifi_ssid.get(),
             "password": self.wifi_password.get(),
             "full_travel": self.full_travel.get(),
@@ -355,9 +370,9 @@ class BurnerApp(tk.Tk):
     def _device_id_from_mac(self, port):
         result = self._run_tool([
             "mpremote", "connect", port, "exec",
-            "import network; w=network.WLAN(network.STA_IF); w.active(True); print('PULSE_' + ''.join('{:02X}'.format(x) for x in w.config('mac')[-1:]))",
+            "import network; w=network.WLAN(network.STA_IF); w.active(True); print('PULSE_' + ''.join('{:02X}'.format(x) for x in w.config('mac'))) ",
         ])
-        match = re.search(r"PULSE_([0-9A-Fa-f]{2})", result.output)
+        match = re.search(r"PULSE_([0-9A-Fa-f]{12})", result.output)
         if not match:
             raise BurnerError("No se pudo leer la MAC de la ESP32 para asignar el Device ID")
         return "PULSE_{}".format(match.group(1).upper())
@@ -380,7 +395,7 @@ class BurnerApp(tk.Tk):
             return []
         values = {
             "api_url": settings["api_url"],
-            "api_key": settings["api_key"],
+            "device_code": settings["device_code"],
             "device_id": settings["device_id"],
             "ssid": settings["ssid"],
             "password": settings["password"],
@@ -390,15 +405,15 @@ class BurnerApp(tk.Tk):
         temporary = Path(temporary_name)
         self.temp_files.append(temporary)
         if model == "servo":
-            content = ("WIFI_SSID = {!r}\nWIFI_PASSWORD = {!r}\nAPI_URL = {!r}\nAPI_KEY = {!r}\n"
+            content = ("WIFI_SSID = {!r}\nWIFI_PASSWORD = {!r}\nAPI_URL = {!r}\nDEVICE_CODE = {!r}\n"
                        "DEVICE_ID = {!r}\nCOMMANDS_ENABLED = {!r}\nDIRECTION_REVERSED = {!r}\n").format(
-                           values["ssid"], values["password"], values["api_url"], values["api_key"],
+                           values["ssid"], values["password"], values["api_url"], values["device_code"],
                            values["device_id"], settings["commands"], settings["reversed"])
             temporary.write_text(content, encoding="ascii")
             return [("config.py", temporary)]
-        content = ("WIFI_SSID = {!r}\nWIFI_PASSWORD = {!r}\nAPI_URL = {!r}\nAPI_KEY = {!r}\n"
+        content = ("WIFI_SSID = {!r}\nWIFI_PASSWORD = {!r}\nAPI_URL = {!r}\nDEVICE_CODE = {!r}\n"
                    "DEVICE_ID = {!r}\nFULL_TRAVEL_MS = {}\nOPEN_A_LEVEL = 1\nDIRECTION_REVERSED = {!r}\n").format(
-                       values["ssid"], values["password"], values["api_url"], values["api_key"], values["device_id"], settings["full_travel"], settings["reversed"])
+                       values["ssid"], values["password"], values["api_url"], values["device_code"], values["device_id"], settings["full_travel"], settings["reversed"])
         temporary.write_text(content, encoding="ascii")
         return [("config.py", temporary)]
 

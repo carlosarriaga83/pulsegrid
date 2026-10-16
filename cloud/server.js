@@ -23,7 +23,6 @@ const tuyaTokens = new Map();
 const automationTroubleshooting = new Map();
 const tuyaSyncIntervalMs = Math.min(Math.max(Number(process.env.TUYA_SYNC_INTERVAL_MS) || 60000, 15000), 15 * 60 * 1000);
 const automationSchedulerIntervalMs = 5000;
-const bootstrapApiKey = process.env.PULSEGRID_BOOTSTRAP_API_KEY || 'pg_bootstrap_v1';
 
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
@@ -35,6 +34,24 @@ function fail(response, status, error) {
 
 function hashApiKey(apiKey) {
   return crypto.createHash('sha256').update(apiKey).digest('hex');
+}
+
+function hashDeviceCode(deviceCode) {
+  return crypto.createHash('sha256').update(String(deviceCode).trim().toLowerCase()).digest('hex');
+}
+
+function secureDeviceRequest(request, response) {
+  if (request.secure || request.get('x-forwarded-proto') === 'https') return true;
+  fail(response, 426, 'HTTPS is required');
+  return false;
+}
+
+async function deviceForCode(deviceCode, deviceId) {
+  const code = String(deviceCode || '').trim();
+  const id = String(deviceId || '').trim();
+  if (!/^[a-fA-F0-9]{32}$/.test(code) || !/^[A-Za-z0-9_.:-]{1,100}$/.test(id)) return null;
+  const [rows] = await database().execute('SELECT id, user_id AS userId, device_id AS deviceId FROM devices WHERE device_id = ? AND device_code_hash = ? LIMIT 1', [id, hashDeviceCode(code)]);
+  return rows[0] || null;
 }
 
 async function apiKeyOwner(apiKey) {
@@ -547,12 +564,6 @@ function validateTuyaCommand(device, command, payload, valueSource = null) {
   if (!valueSource && AutomationModel.typedValue(payload.value, option) !== payload.value) throw new Error('El valor Tuya debe usar el tipo declarado');
 }
 
-function validateDeviceConfiguration(device, command, payload) {
-  if (command !== 'device.configure' || device.provider === 'tuya') throw new Error('La configuracion remota solo aplica a dispositivos Pulsegrid');
-  if (!payload || typeof payload.apiUrl !== 'string' || !/^https?:\/\/[^\s]+$/i.test(payload.apiUrl.trim()) || typeof payload.apiKey !== 'string' || (payload.apiKey.trim() && !/^[A-Za-z0-9_.:-]{8,200}$/.test(payload.apiKey.trim())) || typeof payload.deviceId !== 'string' || !/^[A-Za-z0-9_.:-]{1,100}$/.test(payload.deviceId.trim())) throw new Error('API URL, API key y device ID no son validos');
-  if (Object.hasOwn(payload, 'reversed') && typeof payload.reversed !== 'boolean') throw new Error('reversed debe ser booleano');
-}
-
 function validateDirectionConfiguration(device, command, payload) {
   if (command !== 'direction.configure' || device.provider === 'tuya' || !AutomationModel.curtain(device)) throw new Error('La configuracion de sentido solo aplica a cortinas Pulsegrid');
   if (!payload || typeof payload.reversed !== 'boolean' || Object.keys(payload).some((key) => key !== 'reversed')) throw new Error('reversed debe ser booleano');
@@ -590,7 +601,7 @@ async function validateAutomationDevices(db, email, target, rule) {
 
 async function dispatchDeviceCommand(db, device, command, payload, context = {}) {
   if (device.provider !== 'tuya') {
-    if (command === 'device.configure') validateDeviceConfiguration(device, command, payload);
+    if (command === 'device.configure') throw new Error('La identidad del dispositivo se configura con el quemador, no de forma remota');
     if (command === 'direction.configure') {
       const [readings] = await db.execute('SELECT payload FROM telemetry WHERE device_id = ? ORDER BY created_at DESC, id DESC LIMIT 1', [device.id]);
       const latestTelemetry = readings[0]?.payload;
@@ -709,9 +720,11 @@ async function ensureSchema() {
     const db = database();
     await db.execute("CREATE TABLE IF NOT EXISTS users (id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY, name VARCHAR(120) NOT NULL, email VARCHAR(190) NOT NULL UNIQUE, password_hash VARCHAR(255) NOT NULL, role ENUM('admin','operator','viewer') NOT NULL DEFAULT 'viewer', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP) ENGINE=InnoDB");
     await db.execute("CREATE TABLE IF NOT EXISTS api_keys (id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY, user_id INT UNSIGNED NOT NULL UNIQUE, key_hash CHAR(64) NOT NULL UNIQUE, key_hint VARCHAR(16) NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, last_used_at TIMESTAMP NULL, CONSTRAINT api_keys_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE) ENGINE=InnoDB");
-    await db.execute("CREATE TABLE IF NOT EXISTS devices (id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY, user_id INT UNSIGNED NOT NULL, device_id VARCHAR(80) NOT NULL, name VARCHAR(120) NOT NULL, type VARCHAR(60) NOT NULL, provider VARCHAR(20) NOT NULL DEFAULT 'pulsegrid', capabilities JSON NULL, status ENUM('online','offline','provisioning') NOT NULL DEFAULT 'offline', last_seen TIMESTAMP NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, UNIQUE KEY user_device (user_id, device_id), CONSTRAINT devices_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE) ENGINE=InnoDB");
+    await db.execute("CREATE TABLE IF NOT EXISTS devices (id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY, user_id INT UNSIGNED NOT NULL, device_id VARCHAR(80) NOT NULL, name VARCHAR(120) NOT NULL, type VARCHAR(60) NOT NULL, device_code_hash CHAR(64) NULL, provider VARCHAR(20) NOT NULL DEFAULT 'pulsegrid', capabilities JSON NULL, status ENUM('online','offline','provisioning') NOT NULL DEFAULT 'offline', last_seen TIMESTAMP NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, UNIQUE KEY user_device (user_id, device_id), UNIQUE KEY device_code_hash_unique (device_code_hash), CONSTRAINT devices_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE) ENGINE=InnoDB");
     try { await db.execute("ALTER TABLE devices MODIFY COLUMN status ENUM('online','offline','provisioning') NOT NULL DEFAULT 'offline'"); } catch (error) { throw error; }
     try { await db.execute("ALTER TABLE devices ADD COLUMN provider VARCHAR(20) NOT NULL DEFAULT 'pulsegrid' AFTER type"); } catch (error) { if (error.code !== 'ER_DUP_FIELDNAME') throw error; }
+    try { await db.execute('ALTER TABLE devices ADD COLUMN device_code_hash CHAR(64) NULL AFTER type'); } catch (error) { if (error.code !== 'ER_DUP_FIELDNAME') throw error; }
+    try { await db.execute('ALTER TABLE devices ADD UNIQUE KEY device_code_hash_unique (device_code_hash)'); } catch (error) { if (error.code !== 'ER_DUP_KEYNAME') throw error; }
     try { await db.execute('ALTER TABLE devices ADD COLUMN capabilities JSON NULL AFTER provider'); } catch (error) { if (error.code !== 'ER_DUP_FIELDNAME') throw error; }
     await db.execute("CREATE TABLE IF NOT EXISTS tuya_connections (user_id INT UNSIGNED PRIMARY KEY, client_id VARCHAR(120) NOT NULL, secret_ciphertext TEXT NOT NULL, endpoint VARCHAR(160) NOT NULL, tuya_user_id VARCHAR(120) NULL, reference_device_id VARCHAR(120) NULL, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, CONSTRAINT tuya_connections_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE) ENGINE=InnoDB");
     await db.execute("CREATE TABLE IF NOT EXISTS telemetry (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, device_id INT UNSIGNED NOT NULL, payload JSON NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, INDEX telemetry_device (device_id), CONSTRAINT telemetry_device_fk FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE) ENGINE=InnoDB");
@@ -805,18 +818,30 @@ app.post('/api/api-key', requireSession, apiReady, async (request, response) => 
 
 app.get('/api/devices', apiReady, async (request, response) => {
   if (!request.session.user) return fail(response, 401, 'Authentication required');
-  const [rows] = await database().execute("SELECT devices.device_id AS id, devices.name, devices.type, devices.provider, devices.capabilities, CASE WHEN devices.provider = 'tuya' THEN devices.status WHEN devices.last_seen IS NOT NULL AND devices.last_seen >= DATE_SUB(NOW(), INTERVAL 90 SECOND) THEN devices.status ELSE 'offline' END AS status, devices.last_seen AS report, (SELECT telemetry.payload FROM telemetry WHERE telemetry.device_id = devices.id ORDER BY telemetry.id DESC LIMIT 1) AS telemetry, (SELECT commands.status FROM commands WHERE commands.device_id = devices.id ORDER BY commands.id DESC LIMIT 1) AS lastCommandStatus, (SELECT commands.error_message FROM commands WHERE commands.device_id = devices.id ORDER BY commands.id DESC LIMIT 1) AS lastCommandError FROM devices WHERE devices.user_id = (SELECT id FROM users WHERE email = ?) ORDER BY devices.created_at DESC", [request.session.user.email]);
+  const [rows] = await database().execute("SELECT devices.device_id AS id, devices.name, devices.type, devices.provider, devices.capabilities, CASE WHEN devices.provider = 'tuya' THEN devices.status WHEN devices.status = 'provisioning' THEN 'provisioning' WHEN devices.last_seen IS NOT NULL AND devices.last_seen >= DATE_SUB(NOW(), INTERVAL 90 SECOND) THEN devices.status ELSE 'offline' END AS status, devices.last_seen AS report, (SELECT telemetry.payload FROM telemetry WHERE telemetry.device_id = devices.id ORDER BY telemetry.id DESC LIMIT 1) AS telemetry, (SELECT commands.status FROM commands WHERE commands.device_id = devices.id ORDER BY commands.id DESC LIMIT 1) AS lastCommandStatus, (SELECT commands.error_message FROM commands WHERE commands.device_id = devices.id ORDER BY commands.id DESC LIMIT 1) AS lastCommandError FROM devices WHERE devices.user_id = (SELECT id FROM users WHERE email = ?) ORDER BY devices.created_at DESC", [request.session.user.email]);
   response.json({ devices: rows });
 });
 
 app.post('/api/devices', apiReady, async (request, response) => {
   if (!request.session.user) return fail(response, 401, 'Authentication required');
-  const { id, name, type } = request.body || {};
-  if (!id || !name || !type) return fail(response, 422, 'Device ID, nombre y tipo son obligatorios');
+  const { id, name, type, deviceCode } = request.body || {};
+  const deviceId = String(id || '').trim();
+  const deviceName = String(name || '').trim();
+  const deviceType = String(type || '').trim();
+  const code = String(deviceCode || '').trim();
+  if (!/^[A-Za-z0-9_.:-]{1,80}$/.test(deviceId) || !deviceName || deviceName.length > 120 || !deviceType || deviceType.length > 60 || !/^[a-fA-F0-9]{32}$/.test(code)) return fail(response, 422, 'Device ID, nombre, tipo y codigo de dispositivo valido son obligatorios');
   try {
-    const [result] = await database().execute("INSERT INTO devices (user_id, device_id, name, type, status) VALUES ((SELECT id FROM users WHERE email = ?), ?, ?, ?, 'offline')", [request.session.user.email, String(id).trim(), String(name).trim(), String(type).trim()]);
-    response.status(201).json({ ok: true, id: result.insertId });
-  } catch (error) { fail(response, error.code === 'ER_DUP_ENTRY' ? 409 : 500, error.code === 'ER_DUP_ENTRY' ? 'El Device ID ya existe en este workspace' : 'No fue posible crear el dispositivo'); }
+    const db = database();
+    const [existing] = await db.execute('SELECT id, provider FROM devices WHERE user_id = (SELECT id FROM users WHERE email = ?) AND device_id = ? LIMIT 1', [request.session.user.email, deviceId]);
+    if (existing[0]?.provider === 'tuya') return fail(response, 409, 'No se puede registrar un codigo Pulsegrid en un dispositivo Tuya');
+    if (existing[0]) {
+      await db.execute("UPDATE devices SET name = ?, type = ?, device_code_hash = ?, status = 'provisioning', last_seen = NULL WHERE id = ?", [deviceName, deviceType, hashDeviceCode(code), existing[0].id]);
+      response.status(200).json({ ok: true, id: existing[0].id, status: 'provisioning' });
+      return;
+    }
+    const [result] = await db.execute("INSERT INTO devices (user_id, device_id, name, type, device_code_hash, status) VALUES ((SELECT id FROM users WHERE email = ?), ?, ?, ?, ?, 'provisioning')", [request.session.user.email, deviceId, deviceName, deviceType, hashDeviceCode(code)]);
+    response.status(201).json({ ok: true, id: result.insertId, status: 'provisioning' });
+  } catch (error) { fail(response, error.code === 'ER_DUP_ENTRY' ? 409 : 500, error.code === 'ER_DUP_ENTRY' ? 'El codigo ya esta vinculado a otro dispositivo' : 'No fue posible crear el dispositivo'); }
 });
 
 app.delete('/api/devices/:deviceId', requireSession, apiReady, async (request, response) => {
@@ -913,113 +938,31 @@ app.get('/api/telemetry', requireSession, apiReady, async (request, response) =>
   response.json({ telemetry: rows.map((row) => ({ ...row, payload: typeof row.payload === 'string' ? JSON.parse(row.payload) : row.payload })) });
 });
 
-app.post('/api/relay/telemetry', (request, response) => {
-  if (!request.get('x-api-key')) return fail(response, 401, 'X-API-Key is required');
-  relayCloud(request, response, 'POST', '/api/telemetry');
-});
-
-app.get('/api/relay/device-commands', (request, response) => {
-  if (!request.get('x-api-key')) return fail(response, 401, 'X-API-Key is required');
-  const deviceId = String(request.query.deviceId || '').trim();
-  if (!deviceId) return fail(response, 422, 'deviceId es obligatorio');
-  relayCloud(request, response, 'GET', `/api/device-commands?deviceId=${encodeURIComponent(deviceId)}`);
-});
-
-app.post('/api/relay/device-commands/:commandId/ack', (request, response) => {
-  if (!request.get('x-api-key')) return fail(response, 401, 'X-API-Key is required');
-  relayCloud(request, response, 'POST', `/api/device-commands/${encodeURIComponent(request.params.commandId)}/ack`);
-});
-
-app.get('/api/relay/firmware/manifest', (request, response) => {
-  if (!request.get('x-api-key')) return fail(response, 401, 'X-API-Key is required');
-  const query = new URLSearchParams();
-  if (request.query.version) query.set('version', request.query.version);
-  if (request.query.targetModel) query.set('targetModel', request.query.targetModel);
-  relayCloud(request, response, 'GET', `/api/firmware/manifest${query.toString() ? `?${query}` : ''}`);
-});
-
-app.get('/api/relay/firmware/files/:version/:file', (request, response) => {
-  if (!request.get('x-api-key')) return fail(response, 401, 'X-API-Key is required');
-  const target = request.query.targetModel ? `?targetModel=${encodeURIComponent(request.query.targetModel)}` : '';
-  relayCloud(request, response, 'GET', `/api/firmware/files/${encodeURIComponent(request.params.version)}/${encodeURIComponent(request.params.file)}${target}`);
-});
-
-app.post('/api/device-presence', apiReady, async (request, response) => {
-  if (request.get('x-api-key') !== bootstrapApiKey) return fail(response, 401, 'Invalid bootstrap API key');
-  const body = request.body || {};
-  const deviceId = String(body.deviceId || '').trim();
-  const apiKeyConfigured = body.apiKeyConfigured === true;
-  if (!deviceId) return fail(response, 422, 'deviceId es obligatorio');
-  const db = database();
-  const [devices] = await db.execute('SELECT id FROM devices WHERE device_id = ? LIMIT 1', [deviceId]);
-  if (!devices[0]) return fail(response, 404, 'Device not found');
-  await db.execute("UPDATE devices SET status = ?, last_seen = NOW() WHERE id = ?", [apiKeyConfigured ? 'online' : 'provisioning', devices[0].id]);
-  response.json({ ok: true, status: apiKeyConfigured ? 'online' : 'provisioning' });
-});
-
-app.get('/api/device-bootstrap', apiReady, async (request, response) => {
-  if (request.get('x-api-key') !== bootstrapApiKey) return fail(response, 401, 'Invalid bootstrap API key');
-  const deviceId = String(request.query.deviceId || '').trim();
-  if (!/^[A-Za-z0-9_.:-]{1,100}$/.test(deviceId)) return fail(response, 422, 'deviceId no es valido');
-  const db = database();
-  const [devices] = await db.execute('SELECT id FROM devices WHERE device_id = ? LIMIT 1', [deviceId]);
-  if (!devices[0]) return fail(response, 404, 'Device not found');
-  await db.execute("UPDATE devices SET status = 'provisioning', last_seen = NOW() WHERE id = ?", [devices[0].id]);
-  const [commands] = await db.execute("SELECT id, command_name AS name, payload FROM commands WHERE device_id = ? AND command_name = 'device.configure' AND status IN ('queued', 'delivered') ORDER BY created_at ASC, id ASC LIMIT 1", [devices[0].id]);
-  if (!commands[0]) return response.json({ command: null });
-  const payload = typeof commands[0].payload === 'string' ? JSON.parse(commands[0].payload) : commands[0].payload;
-  if (!payload || typeof payload.apiKey !== 'string' || !payload.apiKey.trim()) return response.json({ command: null });
-  await db.execute("UPDATE commands SET status = 'delivered' WHERE id = ? AND status = 'queued'", [commands[0].id]);
-  response.json({ command: { id: commands[0].id, name: commands[0].name, payload } });
-});
-
-app.post('/api/device-bootstrap/:commandId/ack', apiReady, async (request, response) => {
-  if (request.get('x-api-key') !== bootstrapApiKey) return fail(response, 401, 'Invalid bootstrap API key');
-  const deviceId = String((request.body || {}).deviceId || '').trim();
-  if (!deviceId || !['succeeded', 'failed'].includes((request.body || {}).status)) return fail(response, 422, 'deviceId y estado valido son obligatorios');
-  const [result] = await database().execute('UPDATE commands SET status = ?, error_message = ? WHERE id = ? AND command_name = \'device.configure\' AND status = \'delivered\' AND device_id = (SELECT id FROM devices WHERE device_id = ? LIMIT 1)', [(request.body || {}).status, String((request.body || {}).error || '').slice(0, 500) || null, request.params.commandId, deviceId]);
-  if (!result.affectedRows) return fail(response, 404, 'Bootstrap command not found');
-  response.json({ ok: true });
-});
-
 app.post('/api/telemetry', apiReady, async (request, response) => {
-  const apiKey = request.get('x-api-key');
+  if (!secureDeviceRequest(request, response)) return;
   const { deviceId, ...payload } = request.body || {};
-  if (!apiKey || !deviceId || Object.keys(payload).length === 0) return fail(response, 422, 'X-API-Key, deviceId y al menos una lectura son obligatorios');
+  if (!deviceId || Object.keys(payload).length === 0) return fail(response, 422, 'deviceId y al menos una lectura son obligatorios');
   const db = database();
-  const keyOwner = await apiKeyOwner(apiKey);
-  if (!keyOwner) return fail(response, 401, 'Invalid API key');
-  const [devices] = await db.execute('SELECT id FROM devices WHERE user_id = ? AND device_id = ? LIMIT 1', [keyOwner.user_id, String(deviceId).trim()]);
-  if (!devices[0]) return fail(response, 404, 'Device not found for this API key');
-  const stored = await storeTelemetryIfChanged(db, devices[0].id, payload);
-  await db.execute("UPDATE devices SET status = 'online', last_seen = NOW() WHERE id = ?", [devices[0].id]);
-  await db.execute('UPDATE api_keys SET last_used_at = NOW() WHERE key_hash = ?', [hashApiKey(apiKey)]);
+  let device = await deviceForCode(request.get('x-device-code'), deviceId);
+  let apiKeyHash = null;
+  if (!device) {
+    const apiKey = request.get('x-api-key');
+    const keyOwner = await apiKeyOwner(apiKey);
+    if (!keyOwner) return fail(response, 401, 'Invalid device code or API key');
+    const [rows] = await db.execute('SELECT id FROM devices WHERE user_id = ? AND device_id = ? LIMIT 1', [keyOwner.user_id, String(deviceId).trim()]);
+    if (!rows[0]) return fail(response, 404, 'Device not found for this API key');
+    device = rows[0];
+    apiKeyHash = hashApiKey(apiKey);
+  }
+  const stored = await storeTelemetryIfChanged(db, device.id, payload);
+  await db.execute("UPDATE devices SET status = 'online', last_seen = NOW() WHERE id = ?", [device.id]);
+  if (apiKeyHash) await db.execute('UPDATE api_keys SET last_used_at = NOW() WHERE key_hash = ?', [apiKeyHash]);
   response.status(stored ? 201 : 200).json({ ok: true, stored, unchanged: !stored });
-});
-
-app.post('/api/commands', requireSession, apiReady, async (request, response) => {
-  const { deviceId, command, payload = {} } = request.body || {};
-  if (!deviceId || !command || typeof command !== 'string' || !payload || typeof payload !== 'object' || Array.isArray(payload)) return fail(response, 422, 'Device ID, comando y payload JSON son obligatorios');
-  const db = database();
-  const [devices] = await db.execute('SELECT id, user_id AS userId, device_id, provider, capabilities FROM devices WHERE user_id = (SELECT id FROM users WHERE email = ?) AND device_id = ? LIMIT 1', [request.session.user.email, String(deviceId).trim()]);
-  if (!devices[0]) return fail(response, 404, 'Dispositivo no encontrado');
-  try {
-    const result = await dispatchDeviceCommand(db, devices[0], command.trim(), payload);
-    response.status(201).json({ ok: true, commandId: result.id, status: result.status, troubleshooting: result.troubleshooting || null });
-  } catch (error) { response.status(422).json({ error: error.message, troubleshooting: error.troubleshooting || null }); }
 });
 
 app.get('/api/automation-troubleshooting', requireSession, apiReady, async (request, response) => {
   const userId = await sessionUserId(request.session.user.email);
-  const db = database();
-  const [rules] = await db.execute('SELECT id, user_id AS userId, trigger_time AS triggerTime, timezone, weekdays, condition_json AS conditionJson, condition_active AS conditionActive FROM automations WHERE user_id = ?', [userId]);
-  const evaluations = await Promise.all(rules.map(async (rule) => {
-    const localTime = automationLocalTime(rule.timezone || 'UTC');
-    const evaluation = await automationConditionEvaluation(db, rule);
-    const onScheduledDay = String(rule.weekdays).split(',').map(Number).includes(localTime.weekday);
-    return { ruleId: rule.id, ...evaluation, scheduleMet: onScheduledDay && (rule.triggerTime === 'anytime' || localTime.time === rule.triggerTime), conditionActive: Boolean(rule.conditionActive), evaluatedAt: new Date().toISOString() };
-  }));
-  response.json({ entries: automationTroubleshooting.get(String(userId)) || [], evaluations });
+  response.json({ entries: automationTroubleshooting.get(String(userId)) || [] });
 });
 
 app.get('/api/commands', requireSession, apiReady, async (request, response) => {
@@ -1161,10 +1104,12 @@ app.post('/api/firmware/releases', requireSession, apiReady, async (request, res
 });
 
 app.get('/api/firmware/manifest', apiReady, async (request, response) => {
-  const keyOwner = await apiKeyOwner(request.get('x-api-key'));
-  if (!keyOwner) return fail(response, 401, 'Invalid API key');
+  if (!secureDeviceRequest(request, response)) return;
+  const device = request.get('x-device-code') ? await deviceForCode(request.get('x-device-code'), request.query.deviceId) : null;
+  const keyOwner = device ? null : await apiKeyOwner(request.get('x-api-key'));
+  if (!device && !keyOwner) return fail(response, 401, 'Invalid device code or API key');
   try {
-    const manifest = await readFirmwareManifest(keyOwner.user_id, request.query.version, request.query.targetModel);
+    const manifest = await readFirmwareManifest(device ? device.userId : keyOwner.user_id, request.query.version, request.query.targetModel);
     if (!manifest) return fail(response, 404, 'Firmware release not found');
     response.json(manifest);
   } catch (error) {
@@ -1173,12 +1118,14 @@ app.get('/api/firmware/manifest', apiReady, async (request, response) => {
 });
 
 app.get('/api/firmware/files/:version/:file', apiReady, async (request, response) => {
-  const keyOwner = await apiKeyOwner(request.get('x-api-key'));
-  if (!keyOwner) return fail(response, 401, 'Invalid API key');
+  if (!secureDeviceRequest(request, response)) return;
+  const device = request.get('x-device-code') ? await deviceForCode(request.get('x-device-code'), request.query.deviceId) : null;
+  const keyOwner = device ? null : await apiKeyOwner(request.get('x-api-key'));
+  if (!device && !keyOwner) return fail(response, 401, 'Invalid device code or API key');
   try {
     const version = firmwareVersion(request.params.version);
     const fileName = safeFirmwareFileName(request.params.file);
-    const manifest = await readFirmwareManifest(keyOwner.user_id, version, request.query.targetModel);
+    const manifest = await readFirmwareManifest(device ? device.userId : keyOwner.user_id, version, request.query.targetModel);
     if (!manifest) return fail(response, 404, 'Firmware release not found');
     if (!manifest.files.some((file) => file.name === fileName)) return fail(response, 404, 'Firmware file not found');
     const [files] = await database().execute('SELECT content FROM firmware_files WHERE release_id = ? AND name = ? LIMIT 1', [manifest.id, fileName]);
@@ -1190,29 +1137,27 @@ app.get('/api/firmware/files/:version/:file', apiReady, async (request, response
 });
 
 app.get('/api/device-commands', apiReady, async (request, response) => {
-  const apiKey = request.get('x-api-key');
+  if (!secureDeviceRequest(request, response)) return;
   const deviceId = String(request.query.deviceId || '').trim();
-  const keyOwner = await apiKeyOwner(apiKey);
-  if (!keyOwner) return fail(response, 401, 'Invalid API key');
   if (!deviceId) return fail(response, 422, 'deviceId es obligatorio');
+  const authenticated = await deviceForCode(request.get('x-device-code'), deviceId);
+  if (!authenticated) return fail(response, 401, 'Invalid device code');
   const db = database();
-  const [devices] = await db.execute('SELECT id FROM devices WHERE user_id = ? AND device_id = ? LIMIT 1', [keyOwner.user_id, deviceId]);
-  if (!devices[0]) return fail(response, 404, 'Device not found for this API key');
-  const [commands] = await db.execute("SELECT id, command_name AS name, payload FROM commands WHERE device_id = ? AND status IN ('queued', 'delivered') ORDER BY created_at ASC LIMIT 1", [devices[0].id]);
+  const [commands] = await db.execute("SELECT id, command_name AS name, payload FROM commands WHERE device_id = ? AND status IN ('queued', 'delivered') ORDER BY created_at ASC LIMIT 1", [authenticated.id]);
   if (!commands[0]) return response.json({ command: null });
   await db.execute("UPDATE commands SET status = 'delivered' WHERE id = ? AND status = 'queued'", [commands[0].id]);
   response.json({ command: { id: commands[0].id, name: commands[0].name, payload: typeof commands[0].payload === 'string' ? JSON.parse(commands[0].payload) : commands[0].payload } });
 });
 
 app.post('/api/device-commands/:commandId/ack', apiReady, async (request, response) => {
-  const apiKey = request.get('x-api-key');
+  if (!secureDeviceRequest(request, response)) return;
   const deviceId = String((request.body || {}).deviceId || '').trim();
   const status = (request.body || {}).status;
   const errorMessage = String((request.body || {}).error || '').slice(0, 500) || null;
-  const keyOwner = await apiKeyOwner(apiKey);
-  if (!keyOwner) return fail(response, 401, 'Invalid API key');
   if (!deviceId || !['succeeded', 'failed'].includes(status)) return fail(response, 422, 'deviceId y estado valido son obligatorios');
-  const [result] = await database().execute('UPDATE commands SET status = ?, error_message = ? WHERE id = ? AND device_id = (SELECT id FROM devices WHERE user_id = ? AND device_id = ? LIMIT 1)', [status, status === 'failed' ? errorMessage : null, request.params.commandId, keyOwner.user_id, deviceId]);
+  const authenticated = await deviceForCode(request.get('x-device-code'), deviceId);
+  if (!authenticated) return fail(response, 401, 'Invalid device code');
+  const [result] = await database().execute('UPDATE commands SET status = ?, error_message = ? WHERE id = ? AND device_id = ?', [status, status === 'failed' ? errorMessage : null, request.params.commandId, authenticated.id]);
   if (!result.affectedRows) return fail(response, 404, 'Comando no encontrado');
   response.json({ ok: true });
 });
