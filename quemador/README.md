@@ -43,6 +43,8 @@ Toma los archivos de `dispositivos/servo`:
 
 ```text
 main.py
+cloud_client.py
+board_led.py
 captive_portal.py
 cortina.py
 stservo.py

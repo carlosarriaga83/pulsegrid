@@ -35,6 +35,10 @@ class Cortina:
         self._last_saved_turns = dict(self.absolute_turns)
         self._load_persistent_state()
         self.servo_ids = tuple(servo_id for servo_id in self.known_servo_ids if self.bus.ping(servo_id))
+        active_ids = set(self.servo_ids)
+        self.multiturn_tasks = {servo_id: None for servo_id in active_ids}
+        self.multiturn_active = {servo_id: False for servo_id in active_ids}
+        self.calibration_references = {}
         for servo_id in self.servo_ids:
             try:
                 self._last_positions[servo_id] = self.bus.position(servo_id)
@@ -172,58 +176,6 @@ class Cortina:
         self._save_persistent_state()
 
     def mover_vueltas(self, servo_id, turns, speed=800, acceleration=50):
-        self._start_multiturn(servo_id, turns, speed, acceleration)
-
-    def set_motor_side(self, servo_id, side):
-        if servo_id not in self.servo_ids or side not in ('left', 'right'):
-            raise ValueError('servo o lado del motor invalido')
-        if self.multiturn_active[servo_id]:
-            raise ValueError('espera a que termine el movimiento')
-        self.blind_config[servo_id]['motor_side'] = side
-        self._save_persistent_state()
-
-    def begin_blind_calibration(self, servo_id):
-        if servo_id not in self.servo_ids:
-            raise ValueError('ID de servo no detectado')
-        if self.multiturn_active[servo_id]:
-            raise ValueError('espera a que termine el movimiento')
-        self.calibration_references[servo_id] = set()
-        self.blind_config[servo_id]['calibrated'] = False
-        self.position_recovery_required[servo_id] = True
-        self._save_persistent_state()
-
-    def mark_blind_reference(self, servo_id, reference):
-        if servo_id not in self.servo_ids or reference not in ('rolled', 'deployed'):
-            raise ValueError('referencia de calibracion invalida')
-        self.update_multiturn()
-        current = round(self.absolute_turns[servo_id], 4)
-        config = self.blind_config[servo_id]
-        if reference == 'rolled':
-            config['rolled_turns'] = current
-        else:
-            config['unrolled_turns'] = current
-        self.calibration_references[servo_id].add(reference)
-        if len(self.calibration_references[servo_id]) == 2 and config['rolled_turns'] != config['unrolled_turns']:
-            config['calibrated'] = True
-            self.position_recovery_required[servo_id] = False
-        self._save_persistent_state()
-
-    def mark_deployed(self, servo_id):
-        self.mark_blind_reference(servo_id, 'deployed')
-
-    def mark_rolled(self, servo_id):
-        self.mark_blind_reference(servo_id, 'rolled')
-
-    def jog_blind(self, servo_id, direction, speed=800, acceleration=50):
-        if direction in ('deployed', 'rolled'):
-            positive_for_deployed = -1 if self.blind_config[servo_id]['motor_side'] == 'left' else 1
-            turns = positive_for_deployed if direction == 'deployed' else -positive_for_deployed
-        elif direction == 'clockwise':
-            turns = self.FRONT_GEAR_CLOCKWISE_TURNS
-        elif direction == 'counterclockwise':
-            turns = self.FRONT_GEAR_COUNTERCLOCKWISE_TURNS
-        else:
-            raise ValueError('direccion de calibracion invalida')
         self._start_multiturn(servo_id, turns, speed, acceleration)
 
     def _calibrated_target(self, servo_id, percent):

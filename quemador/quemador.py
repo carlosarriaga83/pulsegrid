@@ -32,7 +32,7 @@ MODEL_PROFILES = {
     "servo": {
         "label": "Servo",
         "directory": SERVO_DIR,
-        "files": ("main.py", "captive_portal.py", "cortina.py", "stservo.py", "boot.py", "ota_boot.py", "pulsegrid_ota.py"),
+        "files": ("main.py", "cloud_client.py", "board_led.py", "captive_portal.py", "cortina.py", "servo_calibration.py", "stservo.py", "boot.py", "ota_boot.py", "pulsegrid_ota.py"),
         "remove": ("pulsegrid_min.py", "pulsegrid_bootstrap.py", "pulsegrid_commands.py", "webserver_min.py", "webserver_portal.py", "cloud_loop.py", "config.py", "wifi_config.py", "pulsegrid_config.py", "motor_curtain.py"),
         "config": "config.py",
     },
