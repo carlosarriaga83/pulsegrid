@@ -4,11 +4,13 @@ Firmware MicroPython para el controlador Waveshare Servo Driver con ESP32 y serv
 
 El perfil usa un unico `config.py` con Wi-Fi, API URL HTTPS, `DEVICE_CODE`, Device ID, comandos y sentido. El quemador genera el código secreto único; registra el Device ID y ese código en cloud. El cloud guarda solo su hash. La API key de usuario, si se usa para integraciones externas, no es una credencial del firmware.
 
-Archivos incluidos en un release OTA: `main.py`, `cloud_client.py`, `board_led.py`, `captive_portal.py`, `cortina.py`, `servo_calibration.py`, `stservo.py`, `boot.py`, `ota_boot.py` y `pulsegrid_ota.py`. `config.py` se genera durante la provision y no se reemplaza por OTA.
+Archivos incluidos en un release OTA: `main.py`, `cloud_client.py`, `board_led.py`, `captive_portal.py`, `cortina.py`, `servo_calibration.py`, `stservo.py`, `boot.py`, `ota_boot.py`, `pulsegrid_ota.py` y `wifi_recovery.py`. `config.py` se genera durante la provision y no se reemplaza por OTA.
 
 `main.py` mantiene sólo el arranque, Wi-Fi y hardware; `cloud_client.py` contiene el transporte HTTPS mínimo para que mbedTLS tenga memoria suficiente en el ESP32.
 
-La placa Waveshare usa un RGB WS2812 en GPIO23. `board_led.py` controla los píxeles 0 y 1 del indicador integrado: verde cuando hay respuesta reciente de Pulsegrid, amarillo durante el aprovisionamiento (sin código registrado) y rojo si el dispositivo registrado no tiene Wi-Fi o el cloud lleva más de 30 s sin responder. `led.configure` habilita o apaga la indicación sin alterar el estado detectado.
+La placa Waveshare usa un RGB WS2812 en GPIO23. `board_led.py` controla los píxeles 0 y 1 del indicador integrado: verde cuando hay respuesta reciente de Pulsegrid, amarillo durante el aprovisionamiento (sin código registrado), rojo si el dispositivo registrado no tiene Wi-Fi o el cloud lleva más de 30 s sin responder y ámbar intermitente durante la recuperación Wi-Fi. Para abrir el portal aunque la red guardada todavía conecte, corta y restablece la alimentación tres veces rápidamente; el AP de configuración permanece activo hasta guardar las nuevas credenciales. La secuencia se cancela tras 30 s de funcionamiento estable. `led.configure` habilita o apaga la indicación sin alterar el estado detectado.
+
+Los comandos ESP se consultan cada segundo (antes cada tres) para reducir su latencia; la telemetría conserva su intervalo independiente.
 
 El adaptador `cortina.py` mantiene la superficie de movimiento del cloud (`curtain.open`, `curtain.close`, `curtain.stop`, `curtain.move`) sobre el bus STServo. Tambien implementa el asistente de calibracion (`blind.setMotorSide`, `blind.beginCalibration`, `blind.markDeployed`, `blind.markRolled`, `blind.jog`) y persiste los extremos, lado del motor, porcentaje objetivo y recorrido absoluto. Los estados `blind_state.py` y `multiturn_state.py` quedan fuera de OTA y de la limpieza del perfil del quemador; sus escrituras usan temporal y respaldo para recuperarse de un reset durante el guardado. Si un reset interrumpe un movimiento, se conserva la calibracion pero la posicion queda marcada para recuperacion. Un borrado completo de flash sí elimina esos archivos.
 

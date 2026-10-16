@@ -122,6 +122,11 @@ def _write_config(values):
         os.remove(backup)
     except OSError:
         pass
+    try:
+        import wifi_recovery
+        wifi_recovery.clear_boots()
+    except ImportError:
+        pass
 
 
 def _dns_response(query):
@@ -172,7 +177,7 @@ def _test_motor(direction):
     motor_controller.stop()
 
 
-def run(motor=None):
+def run(motor=None, force_ap=False):
     global motor_controller, PORTAL_HOST, _portal_server, _portal_started
     if _portal_started:
         return
@@ -237,7 +242,7 @@ def run(motor=None):
         return
     try:
         while True:
-            connected = bool(wifi_ssid and station.active() and station.isconnected())
+            connected = bool(not force_ap and wifi_ssid and station.active() and station.isconnected())
             if connected:
                 if ap.active():
                     ap.active(False)
@@ -319,5 +324,5 @@ def _enable_ap(ap):
     PORTAL_HOST = AP_IP
 
 
-def start_background(motor=None):
-    _thread.start_new_thread(run, (motor,))
+def start_background(motor=None, force_ap=False):
+    _thread.start_new_thread(run, (motor, force_ap))

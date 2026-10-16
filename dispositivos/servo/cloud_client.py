@@ -145,7 +145,7 @@ class CloudClient:
                 cortina.move_blind(int(payload.get('servoId', 1)), float(payload.get('percent', payload.get('position'))), int(payload.get('speed', 800)), int(payload.get('acceleration', 50)))
             elif name == 'firmware.update':
                 import pulsegrid_ota
-                files = ('main.py', 'cloud_client.py', 'board_led.py', 'captive_portal.py', 'cortina.py', 'servo_calibration.py', 'stservo.py', 'boot.py', 'ota_boot.py', 'pulsegrid_ota.py')
+                files = ('main.py', 'cloud_client.py', 'board_led.py', 'captive_portal.py', 'cortina.py', 'servo_calibration.py', 'stservo.py', 'boot.py', 'ota_boot.py', 'pulsegrid_ota.py', 'wifi_recovery.py')
                 pulsegrid_ota.update(self.api_url, self.device_code, self.device_id, str(payload.get('version', '')), 'servo', files)
                 del pulsegrid_ota
                 import sys

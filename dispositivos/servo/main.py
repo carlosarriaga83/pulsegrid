@@ -18,8 +18,9 @@ except ImportError:
     COMMANDS_ENABLED = True
     DIRECTION_REVERSED = False
 
-FIRMWARE_VERSION = '2026.10.16.servo-r4'
-FIRMWARE_FILES = ('main.py', 'cloud_client.py', 'board_led.py', 'captive_portal.py', 'cortina.py', 'servo_calibration.py', 'stservo.py', 'boot.py', 'ota_boot.py', 'pulsegrid_ota.py')
+FIRMWARE_VERSION = '2026.10.16.servo-r5'
+FIRMWARE_FILES = ('main.py', 'cloud_client.py', 'board_led.py', 'captive_portal.py', 'cortina.py', 'servo_calibration.py', 'stservo.py', 'boot.py', 'ota_boot.py', 'pulsegrid_ota.py', 'wifi_recovery.py')
+COMMAND_POLL_MS = 1000
 WIFI_RETRY_MIN_MS = 2000
 WIFI_RETRY_MAX_MS = 60000
 WIFI_CONNECT_TIMEOUT_MS = 20000
@@ -68,6 +69,9 @@ def build_controller():
 
 def main():
     global wifi_connect_pending, wifi_connect_started
+    import wifi_recovery
+    recovery_mode = wifi_recovery.register_boot()
+    boot_started_at = time.ticks_ms()
     controller = build_controller()
     controller.parar()
     import board_led
@@ -76,11 +80,13 @@ def main():
     connected = connect_wifi(wlan)
     wifi_retry_ms = WIFI_RETRY_MIN_MS
     next_wifi_retry = time.ticks_add(time.ticks_ms(), wifi_retry_ms)
-    if not connected:
+    if not connected or recovery_mode:
         import captive_portal
-        captive_portal.start_background(controller)
+        captive_portal.start_background(controller, recovery_mode)
     if not connected:
         print('Servo en modo provisionamiento')
+    if recovery_mode:
+        print('Recuperacion Wi-Fi: cambie la red en el portal Pulsegrid y guarde para reiniciar')
     else:
         print('Servo cloud activo; firmware {}'.format(FIRMWARE_VERSION))
     from cloud_client import CloudClient
@@ -90,6 +96,7 @@ def main():
         ota_boot.confirm()
     last_poll = 0
     last_telemetry = 0
+    wifi_recovery_cleared = False
     while True:
         if ota_boot:
             ota_boot.feed()
@@ -102,15 +109,20 @@ def main():
         if connected:
             wifi_connect_pending = False
             wifi_connect_started = None
-        if not DEVICE_CODE:
+        if recovery_mode:
+            board_led.set_status('recovery')
+        elif not DEVICE_CODE:
             board_led.set_status('provisioning')
         elif not connected or not client.is_online():
             board_led.set_status('offline')
         else:
             board_led.set_status('online')
-        if connected and DEVICE_CODE:
+        if not recovery_mode and not wifi_recovery_cleared and time.ticks_diff(now, boot_started_at) >= wifi_recovery.STABLE_BOOT_MS:
+            wifi_recovery.clear_boots()
+            wifi_recovery_cleared = True
+        if connected and DEVICE_CODE and not recovery_mode:
             wifi_retry_ms = WIFI_RETRY_MIN_MS
-            if time.ticks_diff(now, last_poll) >= 3000:
+            if time.ticks_diff(now, last_poll) >= COMMAND_POLL_MS:
                 last_poll = now
                 client.commands(controller, board_led.set_enabled)
             if time.ticks_diff(now, last_telemetry) >= 5000:
@@ -126,6 +138,7 @@ def main():
                 else:
                     wifi_retry_ms = min(wifi_retry_ms * 2, WIFI_RETRY_MAX_MS)
                 next_wifi_retry = time.ticks_add(time.ticks_ms(), wifi_retry_ms)
+        board_led.tick()
         time.sleep_ms(50)
 
 

@@ -62,7 +62,7 @@ ENABLE_PIN = 16
 DIRECTION_A_PIN = 18
 DIRECTION_B_PIN = 33
 STATUS_LED_PIN = 15
-POLL_MS = 5000
+POLL_MS = 1000
 TELEMETRY_MS = 4000
 REQUEST_TIMEOUT = 5
 RETRY_MS = 5000
@@ -95,7 +95,7 @@ pending_configuration = None
 restart_requested = False
 led_override = None
 FIRMWARE_TARGET = "ga25"
-FIRMWARE_FILES = ("main.py", "captive_portal.py", "motor_curtain.py", "boot.py", "ota_boot.py")
+FIRMWARE_FILES = ("main.py", "captive_portal.py", "motor_curtain.py", "boot.py", "ota_boot.py", "wifi_recovery.py")
 
 try:
     from pulsegrid_firmware import VERSION as FIRMWARE_VERSION
@@ -592,6 +592,10 @@ def send_telemetry():
 
 
 def main():
+    import wifi_recovery
+    recovery_mode = wifi_recovery.register_boot()
+    boot_started_at = time.ticks_ms()
+    recovery_counter_cleared = False
     motor.stop()
     status_led.set(False)
     print("Pulsegrid GA25YN370 listo; firmware {}; PWM GPIO16, direccion GPIO18/GPIO33".format(FIRMWARE_VERSION))
@@ -600,6 +604,8 @@ def main():
     if not WIFI_SSID:
         print("Portal de configuracion: LED parpadeando 1 Hz")
     connected = wifi_connect()
+    if recovery_mode:
+        print("Recuperacion Wi-Fi: conecte a Pulsegrid-Cortina y cambie la red desde el portal")
     if not connected:
         print("Wi-Fi no disponible: el portal continua activo; LED parpadeando 1 Hz")
     elif DEVICE_CODE:
@@ -608,7 +614,7 @@ def main():
     else:
         status_led.set((255, 180, 0))
         print("LED de estado: amarillo; pendiente de registro cloud")
-    captive_portal.start_background(motor)
+    captive_portal.start_background(motor, recovery_mode)
     global last_poll, last_telemetry, last_presence, next_wifi_retry
     wifi_retry_ms = WIFI_RETRY_MIN_MS
     next_wifi_retry = time.ticks_add(time.ticks_ms(), wifi_retry_ms)
@@ -623,9 +629,14 @@ def main():
             connected = False
         if connected:
             wifi_retry_ms = WIFI_RETRY_MIN_MS
-            status_led.set(led_override if led_override is not None else (True if DEVICE_CODE else (255, 180, 0)))
+            if recovery_mode:
+                status_led.portal_tick()
+            else:
+                status_led.set(led_override if led_override is not None else (True if DEVICE_CODE else (255, 180, 0)))
         else:
-            if led_override is False:
+            if recovery_mode:
+                status_led.portal_tick()
+            elif led_override is False:
                 status_led.set(False)
             else:
                 status_led.portal_tick()
@@ -638,10 +649,13 @@ def main():
                 else:
                     wifi_retry_ms = min(wifi_retry_ms * 2, WIFI_RETRY_MAX_MS)
                 next_wifi_retry = time.ticks_add(time.ticks_ms(), wifi_retry_ms)
-        if connected and time.ticks_diff(now, last_poll) >= POLL_MS:
+        if not recovery_mode and not recovery_counter_cleared and time.ticks_diff(now, boot_started_at) >= wifi_recovery.STABLE_BOOT_MS:
+            wifi_recovery.clear_boots()
+            recovery_counter_cleared = True
+        if connected and not recovery_mode and time.ticks_diff(now, last_poll) >= POLL_MS:
             last_poll = now
             poll_commands()
-        if connected and time.ticks_diff(now, last_telemetry) >= TELEMETRY_MS:
+        if connected and not recovery_mode and time.ticks_diff(now, last_telemetry) >= TELEMETRY_MS:
             last_telemetry = now
             send_telemetry()
         time.sleep_ms(50)

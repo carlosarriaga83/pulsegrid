@@ -93,6 +93,11 @@ def _write_config(values):
     )
     with open(CONFIG_FILE, 'w') as config:
         config.write(content)
+    try:
+        import wifi_recovery
+        wifi_recovery.clear_boots()
+    except ImportError:
+        pass
 
 
 def _send(client, body, status='200 OK', content_type='text/html'):
@@ -132,7 +137,7 @@ def _enable_ap(ap):
     PORTAL_HOST = AP_IP
 
 
-def run(controller=None):
+def run(controller=None, force_ap=False):
     global _controller, PORTAL_HOST, _started
     if _started:
         return
@@ -150,7 +155,7 @@ def run(controller=None):
     server.listen(2)
     server.settimeout(0.2)
     while True:
-        if station.isconnected():
+        if station.isconnected() and not force_ap:
             if ap.active():
                 ap.active(False)
             PORTAL_HOST = station.ifconfig()[0]
@@ -199,5 +204,5 @@ def run(controller=None):
             client.close()
 
 
-def start_background(controller=None):
-    _thread.start_new_thread(run, (controller,))
+def start_background(controller=None, force_ap=False):
+    _thread.start_new_thread(run, (controller, force_ap))

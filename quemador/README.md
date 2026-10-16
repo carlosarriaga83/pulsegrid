@@ -51,6 +51,7 @@ stservo.py
 boot.py
 ota_boot.py
 pulsegrid_ota.py
+wifi_recovery.py
 ```
 
 Genera y carga un unico `config.py` con Wi-Fi, API URL HTTPS, código único, Device ID, comandos y sentido. Tras cargar, registra el Device ID y el código mostrado por el quemador en el cloud; el código no se imprime en el registro. El portal local solo cambia Wi-Fi.
@@ -67,6 +68,7 @@ captive_portal.py
 motor_curtain.py
 boot.py
 ota_boot.py
+wifi_recovery.py
 ```
 
 Genera y carga `config.py` con Wi-Fi, API URL HTTPS, código único, Device ID, recorrido y sentido del motor. Registra el Device ID y el código mostrado en el cloud. El portal local solo cambia Wi-Fi y conserva los ajustes del motor.

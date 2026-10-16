@@ -14,12 +14,14 @@ El firmware autentica telemetría, comandos y OTA con `DEVICE_CODE`, generado po
 
 ## Carga
 
-1. Instala `mpremote` y carga `captive_portal.py`, `motor_curtain.py` y `main.py`.
+1. Instala `mpremote` y carga `captive_portal.py`, `motor_curtain.py`, `wifi_recovery.py` y `main.py`.
 2. Reinicia la placa. Si no existe `config.py` o no puede conectar a la red configurada, crea la red abierta `Pulsegrid-Cortina`.
 3. Conecta el telefono o PC a esa red y abre `http://192.168.4.1/`. El portal permite guardar solo Wi-Fi y conserva el código, Device ID y ajustes del motor.
 4. La placa reinicia y se conecta a la red configurada.
 
-Cuando la placa está conectada, el portal escucha en su IP dentro de la red Wi-Fi. El AP `Pulsegrid-Cortina` queda apagado y solo se activa como portal de recuperacion si la conexión se pierde o las credenciales dejan de funcionar.
+Cuando la placa está conectada, el portal escucha en su IP dentro de la red Wi-Fi. El AP `Pulsegrid-Cortina` queda apagado y solo se activa como portal de recuperacion si la conexión se pierde o las credenciales dejan de funcionar. Para abrirlo aunque la red guardada siga conectando, corta y restablece la alimentación tres veces rápidamente; el LED parpadea mientras permanece en recuperación. La secuencia se cancela tras 30 s de funcionamiento estable y el AP se mantiene activo hasta guardar la nueva red.
+
+Los comandos ESP se consultan cada segundo (antes cada cinco); la telemetría conserva su intervalo independiente.
 
 Tambien puedes preparar `config.py` a partir de `config.example.py` y cargarlo directamente. La red de configuracion es abierta y no debe usarse para trafico sensible; solo expone el portal local durante la configuracion.
 
@@ -28,6 +30,7 @@ Ejemplo en PowerShell:
 ```powershell
 python -m mpremote connect COM8 fs cp captive_portal.py :captive_portal.py
 python -m mpremote connect COM8 fs cp motor_curtain.py :motor_curtain.py
+python -m mpremote connect COM8 fs cp wifi_recovery.py :wifi_recovery.py
 python -m mpremote connect COM8 fs cp main.py :main.py
 python -m mpremote connect COM8 reset
 ```

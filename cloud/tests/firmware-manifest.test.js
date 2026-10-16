@@ -56,6 +56,33 @@ test('servo confirms and feeds the transactional OTA watchdog', () => {
   assert.match(source, /ota_boot\.feed\(\)/);
 });
 
+test('ESP firmware supports three-boot Wi-Fi recovery and faster command polling', () => {
+  const cloudServer = fs.readFileSync(path.join(root, 'cloud/server.js'), 'utf8');
+  const servoMain = fs.readFileSync(path.join(root, 'dispositivos/servo/main.py'), 'utf8');
+  const servoPortal = fs.readFileSync(path.join(root, 'dispositivos/servo/captive_portal.py'), 'utf8');
+  const servoLed = fs.readFileSync(path.join(root, 'dispositivos/servo/board_led.py'), 'utf8');
+  const servoCloud = fs.readFileSync(path.join(root, 'dispositivos/servo/cloud_client.py'), 'utf8');
+  const ga25Main = fs.readFileSync(path.join(root, 'dispositivos/ga25/esp32_motor/main.py'), 'utf8');
+  const ga25Portal = fs.readFileSync(path.join(root, 'dispositivos/ga25/esp32_motor/captive_portal.py'), 'utf8');
+  for (const directory of ['dispositivos/servo', 'dispositivos/ga25/esp32_motor']) {
+    const recovery = fs.readFileSync(path.join(root, directory, 'wifi_recovery.py'), 'utf8');
+    assert.match(recovery, /RESET_LIMIT = 3/);
+    assert.match(recovery, /STABLE_BOOT_MS = 30000/);
+    assert.match(recovery, /def register_boot\(\)/);
+  }
+  assert.match(servoMain, /recovery_mode = wifi_recovery\.register_boot\(\)/);
+  assert.match(servoMain, /COMMAND_POLL_MS = 1000/);
+  assert.match(servoPortal, /def run\(controller=None, force_ap=False\)/);
+  assert.match(servoLed, /'recovery': \(32, 14, 0\)/);
+  assert.match(servoLed, /def tick\(\)/);
+  assert.match(servoCloud, /'wifi_recovery\.py'/);
+  assert.match(ga25Main, /POLL_MS = 1000/);
+  assert.match(ga25Main, /recovery_mode = wifi_recovery\.register_boot\(\)/);
+  assert.match(ga25Portal, /def run\(motor=None, force_ap=False\)/);
+  assert.match(ga25Portal, /not force_ap and wifi_ssid/);
+  assert.match(cloudServer, /'wifi_recovery\.py'/);
+});
+
 test('burner and firmware use per-device codes over HTTPS while captive portals save Wi-Fi only', () => {
   const servoMain = fs.readFileSync(path.join(root, 'dispositivos/servo/main.py'), 'utf8');
   const servoCloud = fs.readFileSync(path.join(root, 'dispositivos/servo/cloud_client.py'), 'utf8');
