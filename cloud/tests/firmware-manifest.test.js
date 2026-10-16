@@ -59,6 +59,7 @@ test('servo confirms and feeds the transactional OTA watchdog', () => {
 test('ESP firmware supports three-boot Wi-Fi recovery and faster command polling', () => {
   const cloudServer = fs.readFileSync(path.join(root, 'cloud/server.js'), 'utf8');
   const servoMain = fs.readFileSync(path.join(root, 'dispositivos/servo/main.py'), 'utf8');
+  const servoRecovery = fs.readFileSync(path.join(root, 'dispositivos/servo/wifi_recovery.py'), 'utf8');
   const servoPortal = fs.readFileSync(path.join(root, 'dispositivos/servo/captive_portal.py'), 'utf8');
   const servoLed = fs.readFileSync(path.join(root, 'dispositivos/servo/board_led.py'), 'utf8');
   const servoCloud = fs.readFileSync(path.join(root, 'dispositivos/servo/cloud_client.py'), 'utf8');
@@ -71,6 +72,10 @@ test('ESP firmware supports three-boot Wi-Fi recovery and faster command polling
     assert.match(recovery, /def register_boot\(\)/);
   }
   assert.match(servoMain, /recovery_mode = wifi_recovery\.register_boot\(\)/);
+  assert.match(servoRecovery, /RECOVERY_FILE = '\.pulsegrid_wifi_recovery'/);
+  assert.match(servoRecovery, /if recovery_latched\(\):\s+return True/);
+  assert.match(servoRecovery, /with open\(RECOVERY_FILE, 'w'\)/);
+  assert.match(servoRecovery, /STATE_FILE, STATE_TEMP, RECOVERY_FILE/);
   assert.match(servoMain, /COMMAND_POLL_MS = 1000/);
   assert.match(servoMain, /if recovery_mode or not WIFI_SSID:/);
   assert.match(servoMain, /time\.ticks_diff\(now, boot_started_at\) >= WIFI_CONNECT_TIMEOUT_MS/);
@@ -83,6 +88,15 @@ test('ESP firmware supports three-boot Wi-Fi recovery and faster command polling
   assert.match(ga25Portal, /def run\(motor=None, force_ap=False\)/);
   assert.match(ga25Portal, /not force_ap and wifi_ssid/);
   assert.match(cloudServer, /'wifi_recovery\.py'/);
+});
+
+test('Cloud dashboard commands have an authenticated API route and validate LED payloads', () => {
+  const cloudServer = fs.readFileSync(path.join(root, 'cloud/server.js'), 'utf8');
+  assert.match(cloudServer, /app\.post\('\/api\/commands', requireSession, apiReady/);
+  assert.match(cloudServer, /queueUserDeviceCommand\(database\(\), request\.session\.user\.email, deviceId, command, payload\)/);
+  assert.match(cloudServer, /return dispatchDeviceCommand\(db, devices\[0\], name, payload\)/);
+  assert.match(cloudServer, /command !== 'led\.configure'/);
+  assert.match(cloudServer, /typeof payload\.enabled !== 'boolean'/);
 });
 
 test('burner and firmware use per-device codes over HTTPS while captive portals save Wi-Fi only', () => {

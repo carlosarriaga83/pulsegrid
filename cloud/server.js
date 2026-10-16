@@ -648,6 +648,16 @@ async function dispatchDeviceCommand(db, device, command, payload, context = {})
   }
 }
 
+async function queueUserDeviceCommand(db, email, deviceId, command, payload) {
+  const id = String(deviceId || '').trim();
+  const name = String(command || '').trim();
+  if (!id || id.length > 100 || !/^[A-Za-z][A-Za-z0-9_.-]{0,79}$/.test(name)) throw new Error('deviceId y comando valido son obligatorios');
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('payload debe ser un objeto');
+  const [devices] = await db.execute('SELECT id, user_id AS userId, device_id AS deviceId, provider, type, capabilities FROM devices WHERE user_id = (SELECT id FROM users WHERE email = ?) AND device_id = ? LIMIT 1', [email, id]);
+  if (!devices[0]) throw new Error('Dispositivo no encontrado');
+  return dispatchDeviceCommand(db, devices[0], name, payload);
+}
+
 async function syncTuyaDevice(db, device) {
   const values = {};
   const errors = [];
@@ -986,6 +996,16 @@ app.get('/api/automation-troubleshooting', requireSession, apiReady, async (requ
 app.get('/api/commands', requireSession, apiReady, async (request, response) => {
   const [rows] = await database().execute('SELECT commands.id, commands.command_name AS command, commands.status, commands.error_message AS errorMessage, commands.created_at AS createdAt, devices.device_id AS deviceId, devices.name AS deviceName FROM commands JOIN devices ON devices.id = commands.device_id WHERE devices.user_id = (SELECT id FROM users WHERE email = ?) ORDER BY commands.created_at DESC LIMIT 20', [request.session.user.email]);
   response.json({ commands: rows });
+});
+
+app.post('/api/commands', requireSession, apiReady, async (request, response) => {
+  try {
+    const { deviceId, command, payload } = request.body || {};
+    const result = await queueUserDeviceCommand(database(), request.session.user.email, deviceId, command, payload);
+    response.status(result.status === 'queued' ? 201 : 200).json({ ok: true, ...result, commandId: result.id });
+  } catch (error) {
+    fail(response, error.message === 'Dispositivo no encontrado' ? 404 : 422, error.message);
+  }
 });
 
 app.delete('/api/commands/:id', requireSession, apiReady, async (request, response) => {
