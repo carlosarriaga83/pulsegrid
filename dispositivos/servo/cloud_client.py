@@ -23,6 +23,11 @@ class CloudClient:
         parts = host.split(':', 1)
         port = int(parts[1]) if len(parts) > 1 else 443
         client = socket.socket()
+        try:
+            client.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
+            client.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 4096)
+        except (AttributeError, OSError):
+            pass
         client.settimeout(8)
         phase = 'TCP connect'
         try:
@@ -90,9 +95,17 @@ class CloudClient:
             if getattr(error, 'errno', None) == 12:
                 gc.collect()
                 try:
-                    print('Heap libre tras recuperar:', gc.mem_free())
+                    free_heap = gc.mem_free()
+                    print('Heap libre tras recuperar:', free_heap)
                 except AttributeError:
-                    pass
+                    free_heap = None
+                try:
+                    import esp32
+                    heap_info = esp32.idf_heap_info(esp32.HEAP_DATA)
+                    print('Heap ESP32 (bloque mayor, libre total, minimo):', heap_info)
+                except (ImportError, AttributeError, OSError, TypeError):
+                    if free_heap is not None:
+                        print('La falta de memoria TLS puede deberse a fragmentacion del heap.')
             self.next_request_at = time.ticks_add(time.ticks_ms(), self.retry_ms)
             self.retry_ms = min(self.retry_ms * 2, 60000)
             return None

@@ -72,6 +72,8 @@ test('ESP firmware supports three-boot Wi-Fi recovery and faster command polling
   }
   assert.match(servoMain, /recovery_mode = wifi_recovery\.register_boot\(\)/);
   assert.match(servoMain, /COMMAND_POLL_MS = 1000/);
+  assert.match(servoMain, /if recovery_mode or not WIFI_SSID:/);
+  assert.match(servoMain, /time\.ticks_diff\(now, boot_started_at\) >= WIFI_CONNECT_TIMEOUT_MS/);
   assert.match(servoPortal, /def run\(controller=None, force_ap=False\)/);
   assert.match(servoLed, /'recovery': \(32, 14, 0\)/);
   assert.match(servoLed, /def tick\(\)/);
@@ -118,6 +120,14 @@ test('burner and firmware use per-device codes over HTTPS while captive portals 
   assert.doesNotMatch(ga25Portal, /name=(?:api_key|device_id|device_code|api_url|travel|direction_reversed)/);
 });
 
+test('burner displays and logs the device code only after a successful firmware load', () => {
+  assert.match(burner, /elif kind == "device-code":\s+self\.device_code\.set\(value\)/);
+  assert.match(burner, /CODIGO UNICO DEL DISPOSITIVO: \{\}/);
+  assert.match(burner, /self\.events\.put\(\("device-code", settings\["device_code"\]\)\)[\s\S]*?self\._finish\("Carga terminada correctamente"\)/);
+  assert.match(burner, /\["mpremote", "connect", port, "reset"\]/);
+  assert.match(burner, /else:\s+if not settings\["flash_micropython"\]:\s+self\._log\("Reiniciando MicroPython\.\.\."\)/);
+});
+
 test('servo NeoPixel reflects cloud/provisioning/offline state and OTA retries timeouts', () => {
   const led = fs.readFileSync(path.join(root, 'dispositivos/servo/board_led.py'), 'utf8');
   const main = fs.readFileSync(path.join(root, 'dispositivos/servo/main.py'), 'utf8');
@@ -134,6 +144,8 @@ test('servo NeoPixel reflects cloud/provisioning/offline state and OTA retries t
   assert.match(cloud, /self\.retry_ms = min\(self\.retry_ms \* 2, 60000\)/);
   assert.match(cloud, /self\.retry_ms = 5000/);
   assert.match(cloud, /gc\.collect\(\)\s+phase = 'TLS handshake'/);
+  assert.match(cloud, /socket\.SO_RCVBUF, 4096/);
+  assert.match(cloud, /idf_heap_info/);
   assert.match(ota, /_connection\(api_url, 30\)/);
   assert.match(ota, /client\.connect\(\(host, port\)\)\s+if secure:\s+gc\.collect\(\)/);
   assert.match(ota, /phase = 'TLS handshake'\s+client = tls\.wrap_socket/);

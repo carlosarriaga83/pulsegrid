@@ -281,6 +281,7 @@ class BurnerApp(tk.Tk):
         except BurnerError as error:
             messagebox.showerror("Quemador", str(error))
             return
+        self.device_code.set("")
         self._start_worker("Preparando carga", self._burn_worker, port, files, settings)
 
     def _settings_snapshot(self):
@@ -356,12 +357,17 @@ class BurnerApp(tk.Tk):
             self._log("Device ID asignado: {}".format(settings["device_id"]))
             mac_suffix = settings["device_id"].removeprefix("PULSE_")
             settings["device_code"] = mac_suffix + secrets.token_hex(16).upper()
-            self.events.put(("device-code", settings["device_code"]))
         self._upload_profile(port, files, settings)
-        if not settings["flash_micropython"]:
-            self._log("Reiniciando MicroPython...")
-            self._run_tool(["mpremote", "connect", port, "soft-reset"])
-        self._verify_runtime(port)
+        if settings["model"] in MODEL_PROFILES:
+            self._log("Reiniciando la placa; el firmware toma el REPL durante su ejecucion.")
+            self._run_tool(["mpremote", "connect", port, "reset"])
+            self._log("CODIGO UNICO DEL DISPOSITIVO: {}".format(settings["device_code"]))
+            self.events.put(("device-code", settings["device_code"]))
+        else:
+            if not settings["flash_micropython"]:
+                self._log("Reiniciando MicroPython...")
+                self._run_tool(["mpremote", "connect", port, "soft-reset"])
+            self._verify_runtime(port)
         self._finish("Carga terminada correctamente")
 
     def _validate_chip(self, output, selected):
@@ -487,6 +493,8 @@ class BurnerApp(tk.Tk):
                     self._write_log(value)
                 elif kind == "device-id":
                     self.device_id.set(value)
+                elif kind == "device-code":
+                    self.device_code.set(value)
                 elif kind == "error":
                     self.running = False
                     self.status.set("Error")

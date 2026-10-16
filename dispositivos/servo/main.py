@@ -80,15 +80,19 @@ def main():
     connected = connect_wifi(wlan)
     wifi_retry_ms = WIFI_RETRY_MIN_MS
     next_wifi_retry = time.ticks_add(time.ticks_ms(), wifi_retry_ms)
-    if not connected or recovery_mode:
+    portal_started = False
+    if recovery_mode or not WIFI_SSID:
         import captive_portal
         captive_portal.start_background(controller, recovery_mode)
-    if not connected:
-        print('Servo en modo provisionamiento')
+        portal_started = True
     if recovery_mode:
         print('Recuperacion Wi-Fi: cambie la red en el portal Pulsegrid y guarde para reiniciar')
-    else:
+    elif connected and DEVICE_CODE:
         print('Servo cloud activo; firmware {}'.format(FIRMWARE_VERSION))
+    elif not DEVICE_CODE:
+        print('Servo en modo provisionamiento; esperando el codigo del dispositivo')
+    else:
+        print('Conectando a la red Wi-Fi guardada antes de iniciar el portal local')
     from cloud_client import CloudClient
     client = CloudClient(API_URL, DEVICE_CODE, DEVICE_ID, COMMANDS_ENABLED)
     ota_boot = sys.modules.get('ota_boot')
@@ -106,6 +110,10 @@ def main():
             connected = wlan.isconnected()
         except Exception:
             connected = False
+        if not connected and not portal_started and time.ticks_diff(now, boot_started_at) >= WIFI_CONNECT_TIMEOUT_MS:
+            import captive_portal
+            captive_portal.start_background(controller, recovery_mode)
+            portal_started = True
         if connected:
             wifi_connect_pending = False
             wifi_connect_started = None
