@@ -116,8 +116,14 @@ test('burner and firmware use per-device codes over HTTPS while captive portals 
   const ga25Portal = fs.readFileSync(path.join(root, 'dispositivos/ga25/esp32_motor/captive_portal.py'), 'utf8');
   const cloudServer = fs.readFileSync(path.join(root, 'cloud/server.js'), 'utf8');
   const ga25Led = fs.readFileSync(path.join(root, 'dispositivos/ga25/esp32_motor/main.py'), 'utf8');
-  assert.match(burner, /secrets\.token_hex\(16\)/);
-  assert.match(burner, /mac_suffix \+ secrets\.token_hex\(16\)\.upper\(\)/);
+  assert.match(burner, /DEVICE_CODE_DOMAIN = "pulsegrid-device-code-v1:"/);
+  assert.match(burner, /hashlib\.sha256\(\(DEVICE_CODE_DOMAIN \+ mac\)\.encode\("ascii"\)\)\.hexdigest\(\)\[:32\]\.upper\(\)/);
+  assert.match(burner, /def normalize_mac_address\(value\)/);
+  assert.match(burner, /def device_code_from_mac\(value\)/);
+  assert.match(burner, /MAC \(12 hex\)/);
+  assert.match(burner, /text="Calcular codigo"/);
+  assert.match(burner, /def calculate_device_code\(self\)/);
+  assert.match(burner, /normalize_mac_address\(settings\["mac"\]\) != mac/);
   assert.match(burner, /DEVICE_CODE =/);
   assert.match(burner, /PULSE_\(\[0-9A-Fa-f\]\{12\}\)/);
   for (const source of [servoCloud, ga25Main]) {
@@ -139,6 +145,10 @@ test('burner and firmware use per-device codes over HTTPS while captive portals 
   const identityEnd = cloudServer.indexOf('function secureDeviceRequest(', identityStart);
   vm.runInNewContext(cloudServer.slice(identityStart, identityEnd), idContext);
   assert.equal(idContext.deviceIdFromCode('aabbccddeeff' + '1'.repeat(32)), 'PULSE_AABBCCDDEEFF');
+  const mac = 'AABBCCDDEEFF';
+  const expectedCode = mac + require('node:crypto').createHash('sha256').update('pulsegrid-device-code-v1:' + mac, 'ascii').digest('hex').slice(0, 32).toUpperCase();
+  assert.equal(expectedCode.length, 44);
+  assert.equal(expectedCode.slice(0, 12), mac);
   assert.doesNotMatch(servoPortal, /name=['"](?:api_key|device_id|device_code|api_url)['"]/);
   assert.doesNotMatch(ga25Portal, /name=(?:api_key|device_id|device_code|api_url|travel|direction_reversed)/);
 });

@@ -2,7 +2,7 @@
 
 Firmware MicroPython para el controlador Waveshare Servo Driver con ESP32 y servos ST/STS. El dispositivo se administra por Pulsegrid y las actualizaciones deben publicarse y aplicarse por OTA; no se presupone acceso USB/COM.
 
-El perfil usa un unico `config.py` con Wi-Fi, API URL HTTPS, `DEVICE_CODE`, Device ID, comandos y sentido. El quemador genera el código secreto único; registra el Device ID y ese código en cloud. El cloud guarda solo su hash. La API key de usuario, si se usa para integraciones externas, no es una credencial del firmware.
+El perfil usa un unico `config.py` con Wi-Fi, API URL HTTPS, `DEVICE_CODE`, Device ID, comandos y sentido. El código se deriva determinísticamente de la MAC para que pueda volver a calcularse en el quemador; no es un secreto: cualquiera que conozca la MAC puede calcularlo e imitar el dispositivo. El cloud guarda solo su hash. La API key de usuario, si se usa para integraciones externas, no es una credencial del firmware.
 
 Archivos incluidos en un release OTA: `main.py`, `cloud_client.py`, `board_led.py`, `captive_portal.py`, `cortina.py`, `servo_calibration.py`, `stservo.py`, `boot.py`, `ota_boot.py`, `pulsegrid_ota.py` y `wifi_recovery.py`. `config.py` se genera durante la provision y no se reemplaza por OTA.
 

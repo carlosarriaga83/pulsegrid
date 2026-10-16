@@ -10,7 +10,7 @@ El firmware consulta los comandos de Pulsegrid y envia telemetria. Sin encoder o
 
 `FULL_TRAVEL_MS` se guarda en `config.py`, que queda fuera de los manifiestos OTA y de la limpieza del perfil GA25 del quemador. Los reinicios, las actualizaciones OTA y la pérdida de Wi-Fi no borran ese ajuste; el guardado del portal y de la configuración remota conserva un respaldo para recuperarlo si hay un reset durante la escritura. La posición física no se puede conocer con exactitud tras un corte durante el movimiento sin encoder o finales de carrera. Borrar toda la flash sí elimina `config.py`.
 
-El firmware autentica telemetría, comandos y OTA con `DEVICE_CODE`, generado por el quemador y guardado como hash en cloud. La API key de usuario se reserva para integraciones externas; no se incluye en la configuración del motor.
+El firmware autentica telemetría, comandos y OTA con `DEVICE_CODE`, derivado determinísticamente de la MAC por el quemador y guardado como hash en cloud. El código no es secreto: quien conozca la MAC puede calcularlo e imitar el dispositivo. La API key de usuario se reserva para integraciones externas; no se incluye en la configuración del motor.
 
 ## Carga
 

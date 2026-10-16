@@ -28,7 +28,7 @@ Tkinter forma parte de la instalacion normal de Python para Windows. La placa de
 8. Pulsa `Detectar y verificar` para consultar el chip y la version instalada.
 9. Si ya hay MicroPython instalado, desactiva `Actualizar MicroPython (borra la flash)`: el quemador usará `mpremote`, copiará los `.py` y hará un `soft-reset`.
 10. Mantén activada esa casilla solo si la placa es nueva o necesita otra versión; en ese caso se usará `esptool` y se borrará la flash.
-11. Configura Wi-Fi. El quemador genera un código secreto único por carga; cópialo junto con el Device ID y regístralos en el cloud. El portal local del ESP32 solo sirve para cambiar Wi-Fi.
+11. Configura Wi-Fi. Puedes introducir una MAC y pulsar `Calcular codigo` para obtener el Device ID y el código estable, o dejar el campo vacío para que el quemador lea la MAC de la placa al cargarla. Copia el código y regístralo en cloud. El portal local del ESP32 solo sirve para cambiar Wi-Fi.
 12. Pulsa `VERIFICAR Y CARGAR`.
 
 `Liberar COM` no termina procesos externos por seguridad. Si el puerto sigue ocupado, cierra Thonny, Arduino IDE, otro monitor serial o el proceso que tenga abierta la ESP32 y vuelve a pulsar el botón.
@@ -56,7 +56,7 @@ wifi_recovery.py
 
 Genera y carga un unico `config.py` con Wi-Fi, API URL HTTPS, código único, Device ID, comandos y sentido. Tras cargar, registra el Device ID y el código mostrado por el quemador en el cloud; el código no se imprime en el registro. El portal local solo cambia Wi-Fi.
 La calibracion del servo se conserva en `blind_state.py` y `multiturn_state.py`; el quemador no elimina esos archivos al actualizar el firmware.
-El `Device ID` se asigna automáticamente como `PULSE_` seguido de los 12 dígitos hexadecimales de la MAC. El codigo que se registra en cloud concatena ese identificador con un secreto aleatorio de 128 bits; el usuario solo tiene que introducir el código.
+El `Device ID` se asigna como `PULSE_` seguido de los 12 dígitos hexadecimales de la MAC. El código estable de 44 caracteres concatena la MAC normalizada y los primeros 32 caracteres hexadecimales de SHA-256 sobre `pulsegrid-device-code-v1:` más la MAC. Se aceptan MAC compactas, con `:` o con `-`. **El código es calculable por cualquiera que conozca la MAC y no debe tratarse como secreto ni como prueba fuerte de identidad.** Los dispositivos que aún tengan un código aleatorio anterior deben registrarse de nuevo en cloud con el código calculado y volver a cargarse.
 
 ### GA25
 
@@ -72,7 +72,7 @@ wifi_recovery.py
 ```
 
 Genera y carga `config.py` con Wi-Fi, API URL HTTPS, código único, Device ID, recorrido y sentido del motor. Registra el Device ID y el código mostrado en el cloud. El portal local solo cambia Wi-Fi y conserva los ajustes del motor.
-El `Device ID` se asigna automáticamente como `PULSE_` seguido de los 12 dígitos hexadecimales de la MAC. El codigo que se registra en cloud concatena ese identificador con un secreto aleatorio de 128 bits; el usuario solo tiene que introducir el código.
+El `Device ID` se asigna como `PULSE_` seguido de los 12 dígitos hexadecimales de la MAC. El código se deriva de forma determinista de la misma MAC y puede calcularse antes de conectar la placa. Su derivación pública implica que no es un secreto; consulta la advertencia del perfil Servo.
 
 ### Otros
 

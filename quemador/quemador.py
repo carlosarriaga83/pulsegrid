@@ -1,8 +1,8 @@
 import json
+import hashlib
 import os
 import queue
 import re
-import secrets
 import shutil
 import subprocess
 import sys
@@ -28,6 +28,7 @@ VENV_PYTHON = APP_DIR / ".venv" / "Scripts" / "python.exe"
 SERVO_DIR = ROOT / "dispositivos" / "servo"
 GA25_DIR = ROOT / "dispositivos" / "ga25" / "esp32_motor"
 DEFAULT_API_URL = "https://pulse.2api2.com"
+DEVICE_CODE_DOMAIN = "pulsegrid-device-code-v1:"
 ESP_TYPES = ("Auto", "ESP32", "ESP32-S2", "ESP32-S3", "ESP32-C3", "ESP32-C6", "ESP32-H2")
 MODEL_PROFILES = {
     "servo": {
@@ -51,6 +52,19 @@ class BurnerError(RuntimeError):
     pass
 
 
+def normalize_mac_address(value):
+    mac = str(value or "").strip().replace(":", "").replace("-", "").replace(".", "").upper()
+    if not re.fullmatch(r"[0-9A-F]{12}", mac):
+        raise BurnerError("La MAC debe contener exactamente 12 caracteres hexadecimales")
+    return mac
+
+
+def device_code_from_mac(value):
+    mac = normalize_mac_address(value)
+    suffix = hashlib.sha256((DEVICE_CODE_DOMAIN + mac).encode("ascii")).hexdigest()[:32].upper()
+    return mac + suffix
+
+
 class BurnerApp(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -69,6 +83,7 @@ class BurnerApp(tk.Tk):
         self.custom_dir = tk.StringVar()
         self.api_url = tk.StringVar(value=DEFAULT_API_URL)
         self.device_id = tk.StringVar(value="PULSE_XX")
+        self.device_mac = tk.StringVar()
         self.device_code = tk.StringVar()
         self.wifi_ssid = tk.StringVar()
         self.wifi_password = tk.StringVar()
@@ -130,12 +145,14 @@ class BurnerApp(tk.Tk):
         self._entry(config, "Contraseña Wi-Fi", self.wifi_password, 0, 2, show="*")
         self._entry(config, "API URL", self.api_url, 1, 0)
         self._entry(config, "Device ID (MAC)", self.device_id, 2, 0, state="readonly")
-        self._entry(config, "Codigo unico (registrar en cloud)", self.device_code, 4, 0, state="readonly")
-        ttk.Button(config, text="Copiar codigo", command=self.copy_device_code).grid(row=4, column=2, sticky="w", padx=(18, 0), pady=4)
+        self._entry(config, "MAC (12 hex)", self.device_mac, 3, 0)
+        ttk.Button(config, text="Calcular codigo", command=self.calculate_device_code).grid(row=3, column=2, sticky="w", padx=(18, 0), pady=4)
+        self._entry(config, "Codigo unico (registrar en cloud)", self.device_code, 5, 0, state="readonly")
+        ttk.Button(config, text="Copiar codigo", command=self.copy_device_code).grid(row=5, column=2, sticky="w", padx=(18, 0), pady=4)
         ttk.Checkbutton(config, text="Comandos habilitados", variable=self.commands).grid(row=2, column=2, sticky="w", padx=(5, 0), pady=4)
-        ttk.Label(config, text="Recorrido GA25 (ms)").grid(row=3, column=0, sticky="w", pady=4)
-        ttk.Spinbox(config, from_=1000, to=120000, textvariable=self.full_travel, width=12).grid(row=3, column=1, sticky="w", padx=(5, 0), pady=4)
-        ttk.Checkbutton(config, text="Invertir sentido GA25", variable=self.reversed).grid(row=3, column=2, sticky="w", padx=(5, 0), pady=4)
+        ttk.Label(config, text="Recorrido GA25 (ms)").grid(row=4, column=0, sticky="w", pady=4)
+        ttk.Spinbox(config, from_=1000, to=120000, textvariable=self.full_travel, width=12).grid(row=4, column=1, sticky="w", padx=(5, 0), pady=4)
+        ttk.Checkbutton(config, text="Invertir sentido GA25", variable=self.reversed).grid(row=4, column=2, sticky="w", padx=(5, 0), pady=4)
         for column in (1, 3):
             config.columnconfigure(column, weight=1)
 
@@ -168,11 +185,23 @@ class BurnerApp(tk.Tk):
     def copy_device_code(self):
         code = self.device_code.get().strip()
         if not code:
-            messagebox.showinfo("Quemador", "Primero carga el firmware para generar el codigo unico.")
+            messagebox.showinfo("Quemador", "Escribe una MAC y pulsa Calcular codigo.")
             return
         self.clipboard_clear()
         self.clipboard_append(code)
-        self.status.set("Codigo unico copiado; registralo junto con el Device ID en cloud.")
+        self.status.set("Codigo unico copiado; registralo en cloud junto con el Device ID.")
+
+    def calculate_device_code(self):
+        try:
+            mac = normalize_mac_address(self.device_mac.get())
+            code = device_code_from_mac(mac)
+        except BurnerError as error:
+            messagebox.showerror("Quemador", str(error))
+            return
+        self.device_mac.set(mac)
+        self.device_id.set("PULSE_{}".format(mac))
+        self.device_code.set(code)
+        self.status.set("Codigo unico calculado para la MAC {}.".format(mac))
 
     def _model_changed(self, _event=None):
         if self.model.get() != "otros":
@@ -281,7 +310,6 @@ class BurnerApp(tk.Tk):
         except BurnerError as error:
             messagebox.showerror("Quemador", str(error))
             return
-        self.device_code.set("")
         self._start_worker("Preparando carga", self._burn_worker, port, files, settings)
 
     def _settings_snapshot(self):
@@ -293,6 +321,7 @@ class BurnerApp(tk.Tk):
             "clean_files": self.clean_files.get(),
             "api_url": self.api_url.get().strip().rstrip("/"),
             "device_id": self.device_id.get().strip(),
+            "mac": self.device_mac.get().strip(),
             "device_code": self.device_code.get().strip(),
             "ssid": self.wifi_ssid.get(),
             "password": self.wifi_password.get(),
@@ -355,8 +384,11 @@ class BurnerApp(tk.Tk):
             settings["device_id"] = self._device_id_from_mac(port)
             self.events.put(("device-id", settings["device_id"]))
             self._log("Device ID asignado: {}".format(settings["device_id"]))
-            mac_suffix = settings["device_id"].removeprefix("PULSE_")
-            settings["device_code"] = mac_suffix + secrets.token_hex(16).upper()
+            mac = settings["device_id"].removeprefix("PULSE_")
+            if settings["mac"] and normalize_mac_address(settings["mac"]) != mac:
+                raise BurnerError("La MAC introducida no coincide con la MAC leida de la placa ({})".format(mac))
+            settings["mac"] = mac
+            settings["device_code"] = device_code_from_mac(mac)
         self._upload_profile(port, files, settings)
         if settings["model"] in MODEL_PROFILES:
             self._log("Reiniciando la placa; el firmware toma el REPL durante su ejecucion.")
