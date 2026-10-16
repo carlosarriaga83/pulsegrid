@@ -32,6 +32,6 @@ python -m mpremote connect COM8 reset
 
 Comandos Pulsegrid soportados: `curtain.open`, `curtain.close`, `curtain.stop` y `curtain.move` con `position` o `percent`, opcionalmente `speed` de 10 a 100.
 
-OTA uses a transactional flash staging area. Files are downloaded in chunks to `.pulsegrid_ota/stage`, checked against the declared `Content-Length` and SHA-256, then activated by `boot.py`. The previous set is retained in `.pulsegrid_ota/backup` until the new firmware confirms a healthy boot; a failed boot or watchdog reset restores that backup.
+GA25 OTA releases contain `main.py`, `captive_portal.py`, `motor_curtain.py`, `boot.py` and `ota_boot.py`. OTA uses a transactional flash staging area. Files are streamed in bounded chunks to `.pulsegrid_ota/stage`; the loader accepts either `Content-Length` or proxy `chunked` transfer encoding, checks the manifest size and SHA-256, then activates the release through `boot.py`. The previous set is retained in `.pulsegrid_ota/backup` until the new firmware confirms a healthy boot; a failed boot or watchdog reset restores that backup. `firmware.update` is handled by the cloud command loop.
 
 Migration from the older GA25 loader is two-step: publish the new `main.py` alone first, then publish the complete release containing `boot.py` and `ota_boot.py`. The transitional loader keeps a legacy direct-download path only until those boot files exist.

@@ -200,7 +200,7 @@ test('HTML loads automation helpers before app and mirrors are synchronized', ()
     assert.ok(html.indexOf('automation-model.js?v=47') >= 0);
     assert.ok(html.indexOf('automation-ui.js?v=56') >= 0);
     assert.ok(html.indexOf('app.js?v=61') >= 0);
-    assert.ok(html.includes('telemetry-overrides.css?v=52'));
+    assert.ok(html.includes('telemetry-overrides.css?v=53'));
     assert.ok(html.indexOf('automation-model.js?v=47') < html.indexOf('automation-ui.js?v=56'));
     assert.ok(html.indexOf('automation-ui.js?v=56') < html.indexOf('app.js?v=61'));
     assert.match(html, /automations.css\?v=48/);

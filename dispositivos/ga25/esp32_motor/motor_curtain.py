@@ -64,6 +64,8 @@ class CurtainMotor:
     def move_to(self, percent, speed=70):
         self._update_position()
         target = max(0.0, min(100.0, float(percent)))
+        if self.direction and self.target is not None and abs(self.target - target) < 0.5:
+            return
         if abs(target - self.position) < 0.5:
             return self.stop()
         self.start(1 if target > self.position else -1, speed, target)

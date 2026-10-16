@@ -62,6 +62,19 @@ function setup(folder, requestImpl = async () => ({ status: 'succeeded' }), conf
 
 for (const folder of ['', 'public', 'public_html']) {
   const label = folder || 'root';
+  test(`${label}: card icon reflects online, provisioning, and offline state`, (t) => {
+    const f = setup(folder); t.after(() => f.dom.window.close());
+    const { window, context } = f;
+    const icon = () => window.document.querySelector('.device-card .device-icon');
+    assert.equal(icon().classList.contains('status-online'), true);
+    window.devices[0].status = 'provisioning';
+    vm.runInContext('renderDeviceCards()', context);
+    assert.equal(icon().classList.contains('status-provisioning'), true);
+    window.devices[0].status = 'offline';
+    vm.runInContext('renderDeviceCards()', context);
+    assert.equal(icon().classList.contains('status-offline'), true);
+  });
+
   test(`${label}: renders writable controls by capability and keeps other readings read-only`, (t) => {
     const f = setup(folder); t.after(() => f.dom.window.close());
     const { window } = f;

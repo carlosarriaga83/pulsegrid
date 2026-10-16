@@ -128,14 +128,14 @@ class Cortina:
                 continue
             task['moved_counts'] += delta * task['direction']
             if task['moved_counts'] >= task['target_counts']:
-                self._finish_multiturn(servo_id)
+                self._finish_multiturn(servo_id, completed=True)
             elif abs(self.absolute_turns[servo_id] - self._last_saved_turns[servo_id]) >= 0.5:
                 self._last_saved_turns[servo_id] = self.absolute_turns[servo_id]
                 checkpoint = True
         if checkpoint:
             self._save_persistent_state()
 
-    def _finish_multiturn(self, servo_id):
+    def _finish_multiturn(self, servo_id, completed=False):
         try:
             self.bus.move_wheel(servo_id, 0, acceleration=50)
             self.bus.torque(servo_id, False)
@@ -144,7 +144,7 @@ class Cortina:
             pass
         self.multiturn_tasks[servo_id] = None
         self.multiturn_active[servo_id] = False
-        self.position_recovery_required[servo_id] = not self.blind_config[servo_id]['calibrated']
+        self.position_recovery_required[servo_id] = not (completed and self.blind_config[servo_id]['calibrated'])
         self._last_saved_turns[servo_id] = self.absolute_turns[servo_id]
         self._save_persistent_state()
 
@@ -191,7 +191,12 @@ class Cortina:
             raise ValueError('servo o posicion invalida')
         percent = float(percent)
         config = self.blind_config[servo_id]
+        self.update_multiturn()
         if config['calibrated']:
+            previous_target = self.blind_targets[servo_id]['percent']
+            if (abs(previous_target - percent) <= 0.001
+                    and (self.multiturn_active[servo_id] or not self.position_recovery_required[servo_id])):
+                return
             turns = self._calibrated_target(servo_id, percent) - self.absolute_turns[servo_id]
             if abs(turns) > 0.001:
                 self._start_multiturn(servo_id, turns, speed, acceleration)
@@ -199,6 +204,10 @@ class Cortina:
             target = self.min_position + (self.max_position - self.min_position) * percent / 100
             if self.direction_reversed:
                 target = self.min_position + self.max_position - target
+            if abs(self.bus.position(servo_id) - target) <= 8:
+                self.blind_targets[servo_id] = {'percent': percent, 'speed': int(speed), 'acceleration': int(acceleration)}
+                self._save_persistent_state()
+                return
             self.bus.torque(servo_id, True)
             self.bus.move(servo_id, int(round(target)), speed=int(speed), acceleration=int(acceleration))
         self.blind_targets[servo_id] = {'percent': percent, 'speed': int(speed), 'acceleration': int(acceleration)}

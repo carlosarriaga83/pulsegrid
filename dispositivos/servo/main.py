@@ -13,15 +13,21 @@ except ImportError:
 
 FIRMWARE_VERSION = '2026.10.15.servo'
 FIRMWARE_FILES = ('main.py', 'cloud_client.py', 'board_led.py', 'captive_portal.py', 'cortina.py', 'servo_calibration.py', 'stservo.py', 'boot.py', 'ota_boot.py', 'pulsegrid_ota.py')
+WIFI_RETRY_MIN_MS = 2000
+WIFI_RETRY_MAX_MS = 60000
 
 
-def connect_wifi():
-    wlan = network.WLAN(network.STA_IF)
-    wlan.active(True)
-    if not wlan.isconnected():
-        wlan.connect(WIFI_SSID, WIFI_PASSWORD)
-        time.sleep_ms(8000)
-    return wlan if wlan.isconnected() else None
+def connect_wifi(wlan):
+    if not WIFI_SSID:
+        return False
+    try:
+        wlan.active(True)
+        if not wlan.isconnected():
+            wlan.connect(WIFI_SSID, WIFI_PASSWORD)
+        return wlan.isconnected()
+    except Exception as error:
+        print('Wi-Fi reconexion:', error)
+        return False
 
 
 def build_controller():
@@ -41,11 +47,14 @@ def main():
     controller.parar()
     import board_led
     board_led.set_enabled(bool(API_KEY))
-    wlan = connect_wifi()
-    if not wlan or not API_KEY:
+    wlan = network.WLAN(network.STA_IF)
+    connected = connect_wifi(wlan)
+    wifi_retry_ms = WIFI_RETRY_MIN_MS
+    next_wifi_retry = time.ticks_add(time.ticks_ms(), wifi_retry_ms)
+    if not connected or not API_KEY:
         import captive_portal
         captive_portal.start_background(controller)
-    if not wlan or not API_KEY:
+    if not connected or not API_KEY:
         print('Servo en modo provisionamiento')
     else:
         print('Servo cloud activo; firmware {}'.format(FIRMWARE_VERSION))
@@ -56,7 +65,11 @@ def main():
     while True:
         controller.update_multiturn()
         now = time.ticks_ms()
-        if wlan and wlan.isconnected() and API_KEY:
+        try:
+            connected = wlan.isconnected()
+        except Exception:
+            connected = False
+        if connected and API_KEY:
             if time.ticks_diff(now, last_poll) >= 3000:
                 last_poll = now
                 client.commands(controller, board_led.set_enabled)
@@ -65,8 +78,15 @@ def main():
                 client.telemetry(controller, FIRMWARE_VERSION, bool(API_KEY), bool(controller.direction_reversed))
         else:
             board_led.set_provisioning()
-            if not wlan or not wlan.isconnected():
-                wlan = connect_wifi()
+            if not connected and time.ticks_diff(now, next_wifi_retry) >= 0:
+                connected = connect_wifi(wlan)
+                if connected:
+                    wifi_retry_ms = WIFI_RETRY_MIN_MS
+                    last_poll = 0
+                    last_telemetry = 0
+                else:
+                    wifi_retry_ms = min(wifi_retry_ms * 2, WIFI_RETRY_MAX_MS)
+                next_wifi_retry = time.ticks_add(time.ticks_ms(), wifi_retry_ms)
         time.sleep_ms(50)
 
 

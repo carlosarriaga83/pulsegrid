@@ -38,16 +38,14 @@ DIRECTION_A_PIN = 18
 DIRECTION_B_PIN = 33
 STATUS_LED_PIN = 15
 POLL_MS = 5000
-TELEMETRY_MS = 5000
+TELEMETRY_MS = 4000
 REQUEST_TIMEOUT = 5
 RETRY_MS = 5000
+WIFI_RETRY_MIN_MS = 2000
+WIFI_RETRY_MAX_MS = 60000
 next_request_at = 0
 wifi_station = None
 next_wifi_retry = 0
-WIFI_RETRY_MS = 15000
-
-
-
 
 class StatusLed:
     def __init__(self, pin=15):
@@ -108,19 +106,18 @@ def wifi_connect():
     if not WIFI_SSID:
         print("Configura firmware/esp32_motor/config.py antes de conectar")
         return False
-    wlan = network.WLAN(network.STA_IF)
-    wifi_station = wlan
-    wlan.active(True)
-    if not wlan.isconnected():
-        print("Conectando WiFi...")
-        wlan.connect(WIFI_SSID, WIFI_PASSWORD)
-        deadline = time.ticks_add(time.ticks_ms(), 15000)
-        while not wlan.isconnected() and time.ticks_diff(deadline, time.ticks_ms()) > 0:
-            time.sleep_ms(250)
-    if wlan.isconnected():
-        print("WiFi:", wlan.ifconfig()[0])
-        return True
-    print("WiFi no disponible")
+    try:
+        if wifi_station is None:
+            wifi_station = network.WLAN(network.STA_IF)
+        wifi_station.active(True)
+        if not wifi_station.isconnected():
+            print("Conectando WiFi...")
+            wifi_station.connect(WIFI_SSID, WIFI_PASSWORD)
+        if wifi_station.isconnected():
+            print("WiFi:", wifi_station.ifconfig()[0])
+            return True
+    except Exception as error:
+        print("WiFi no disponible:", error)
     return False
 
 
@@ -142,6 +139,103 @@ def _unchunk(value):
         output += value[start:start + size]
         offset = start + size + 2
     return output
+
+
+def _write_chunked(client, buffer, target, digest, expected_length, name):
+    received = 0
+    trailer_bytes = 0
+    while True:
+        while b"\r\n" not in buffer:
+            if len(buffer) > 64:
+                raise ValueError("Tamano de bloque HTTP invalido para " + name)
+            chunk = client.recv(128)
+            if not chunk:
+                raise ValueError("Respuesta OTA chunked incompleta para " + name)
+            buffer += chunk
+        end = buffer.find(b"\r\n")
+        line = buffer[:end]
+        buffer = buffer[end + 2:]
+        try:
+            size = int(line.split(b";", 1)[0].strip(), 16)
+        except Exception:
+            raise ValueError("Tamano de bloque HTTP invalido para " + name)
+        if size == 0:
+            while True:
+                while b"\r\n" not in buffer:
+                    if len(buffer) > 512:
+                        raise ValueError("Trailer HTTP demasiado grande para " + name)
+                    chunk = client.recv(128)
+                    if not chunk:
+                        raise ValueError("Fin chunked incompleto para " + name)
+                    buffer += chunk
+                end = buffer.find(b"\r\n")
+                trailer_bytes += end + 2
+                if trailer_bytes > 1024:
+                    raise ValueError("Trailer HTTP demasiado grande para " + name)
+                if end == 0:
+                    return received
+                buffer = buffer[end + 2:]
+        if received + size > expected_length:
+            raise ValueError("Respuesta OTA excede el tamano declarado para " + name)
+        remaining = size
+        while remaining:
+            if not buffer:
+                buffer = client.recv(512)
+                if not buffer:
+                    raise ValueError("Descarga OTA incompleta para " + name)
+            count = min(remaining, len(buffer))
+            part = buffer[:count]
+            target.write(part)
+            digest.update(part)
+            received += count
+            remaining -= count
+            buffer = buffer[count:]
+        while len(buffer) < 2:
+            chunk = client.recv(128)
+            if not chunk:
+                raise ValueError("Separador chunked incompleto para " + name)
+            buffer += chunk
+        if buffer[:2] != b"\r\n":
+            raise ValueError("Separador chunked invalido para " + name)
+        buffer = buffer[2:]
+
+
+def _write_sized(client, buffer, target, digest, expected_length, name):
+    received = 0
+    while received < expected_length:
+        if not buffer:
+            buffer = client.recv(512)
+            if not buffer:
+                break
+        count = min(expected_length - received, len(buffer))
+        part = buffer[:count]
+        target.write(part)
+        digest.update(part)
+        received += count
+        buffer = buffer[count:]
+        if buffer and received == expected_length:
+            raise ValueError("Respuesta OTA excede el tamano declarado para " + name)
+    if received != expected_length:
+        raise ValueError("Descarga OTA incompleta para " + name)
+    return received
+
+
+def _write_ota_body(client, response_headers, initial_body, target, digest, expected_length, name):
+    chunked = b"transfer-encoding: chunked" in response_headers.lower()
+    content_length = None
+    for line in response_headers.lower().split(b"\r\n"):
+        if line.startswith(b"content-length:"):
+            content_length = int(line.split(b":", 1)[1].strip())
+            break
+    if content_length is not None and content_length != expected_length:
+        raise ValueError("Tamano OTA no coincide para " + name)
+    if chunked:
+        received = _write_chunked(client, initial_body, target, digest, expected_length, name)
+    else:
+        received = _write_sized(client, initial_body, target, digest, expected_length, name)
+    if received != expected_length:
+        raise ValueError("Descarga OTA incompleta para " + name)
+    return received
 
 
 def relay_request(method, path, body=None, api_key=None):
@@ -294,13 +388,14 @@ def _legacy_update_firmware(version):
             separator = header.find(b"\r\n\r\n")
             if separator < 0 or header[9:12] != b"200":
                 raise ValueError("Descarga HTTP para " + name)
+            response_headers = header[:separator]
+            expected_length = int(file_info.get("size", 0))
+            if expected_length < 0:
+                raise ValueError("Tamano OTA invalido para " + name)
             digest = uhashlib.sha256()
             with open(temporary_name, "wb") as firmware_file:
-                chunk = header[separator + 4:]
-                while chunk:
-                    firmware_file.write(chunk)
-                    digest.update(chunk)
-                    chunk = client.recv(512)
+                _write_ota_body(client, response_headers, header[separator + 4:], firmware_file,
+                                digest, expected_length, name)
             actual_hash = "".join("{:02x}".format(value) for value in digest.digest())
             if actual_hash != file_info.get("sha256"):
                 raise ValueError("Hash invalido para " + name)
@@ -373,37 +468,14 @@ def update_firmware(version):
             if separator < 0 or status_code != b"200":
                 detail = header[separator + 4:separator + 164] if separator >= 0 else status_line
                 raise ValueError("Descarga HTTP para {}: {} {}".format(name, status_code.decode(), detail.decode(errors="replace").strip()))
-            response_body = header[separator + 4:]
-            if b"transfer-encoding: chunked" in header[:separator].lower():
-                raise ValueError("OTA requiere Content-Length")
-            content_length = None
-            for line in header[:separator].lower().split(b"\r\n"):
-                if line.startswith(b"content-length:"):
-                    content_length = int(line.split(b":", 1)[1].strip())
-            expected_length = int(file_info.get("size", content_length or 0))
-            if content_length is None or content_length != expected_length:
-                raise ValueError("Tamano OTA no coincide para " + name)
+            response_headers = header[:separator]
+            expected_length = int(file_info.get("size", 0))
+            if expected_length < 0:
+                raise ValueError("Tamano OTA invalido para " + name)
             digest = uhashlib.sha256()
-            received = 0
             with open(temporary_name, "wb") as firmware_file:
-                while response_body:
-                    chunk, response_body = response_body[:512], response_body[512:]
-                    if received + len(chunk) > expected_length:
-                        raise ValueError("Respuesta OTA excede el tamano declarado para " + name)
-                    firmware_file.write(chunk)
-                    digest.update(chunk)
-                    received += len(chunk)
-                while True:
-                    chunk = client.recv(512)
-                    if not chunk:
-                        break
-                    if received + len(chunk) > expected_length:
-                        raise ValueError("Respuesta OTA excede el tamano declarado para " + name)
-                    firmware_file.write(chunk)
-                    digest.update(chunk)
-                    received += len(chunk)
-            if received != expected_length:
-                raise ValueError("Descarga OTA incompleta para " + name)
+                _write_ota_body(client, response_headers, header[separator + 4:], firmware_file,
+                                digest, expected_length, name)
             actual_hash = "".join("{:02x}".format(value) for value in digest.digest())
             if actual_hash != file_info.get("sha256"):
                 raise ValueError("Hash invalido para " + name)
@@ -444,9 +516,9 @@ def execute(command):
                                  "open_a_level": OPEN_A_LEVEL, "direction_reversed": payload["reversed"]}
         save_configuration(pending_configuration)
     elif name == "curtain.open":
-        motor.start(1, payload.get("speed", 70), 100)
+        motor.move_to(100, payload.get("speed", 70))
     elif name == "curtain.close":
-        motor.start(-1, payload.get("speed", 70), 0)
+        motor.move_to(0, payload.get("speed", 70))
     elif name == "curtain.stop":
         motor.stop()
     elif name == "curtain.move":
@@ -515,30 +587,43 @@ def main():
         ota_boot.confirm()
     if not WIFI_SSID:
         print("Portal de configuracion: LED parpadeando 1 Hz")
-    if not wifi_connect():
+    connected = wifi_connect()
+    if not connected:
         print("Wi-Fi no disponible: el portal continua activo; LED parpadeando 1 Hz")
+    elif API_KEY:
+        status_led.set(True)
+        print("LED de estado: verde; Pulsegrid configurado")
     else:
-        if API_KEY:
-            status_led.set(True)
-            print("LED de estado: verde; Pulsegrid configurado")
-        else:
-            status_led.set((255, 180, 0))
-            print("LED de estado: amarillo; esperando API key")
+        status_led.set((255, 180, 0))
+        print("LED de estado: amarillo; esperando API key")
     captive_portal.start_background(motor)
     global last_poll, last_telemetry, last_presence, next_wifi_retry
+    wifi_retry_ms = WIFI_RETRY_MIN_MS
+    next_wifi_retry = time.ticks_add(time.ticks_ms(), wifi_retry_ms)
     while True:
         if ota_boot:
             ota_boot.feed()
         now = time.ticks_ms()
         motor.tick()
-        connected = bool(wifi_station and wifi_station.isconnected())
+        try:
+            connected = bool(wifi_station and wifi_station.isconnected())
+        except Exception:
+            connected = False
         if connected:
+            wifi_retry_ms = WIFI_RETRY_MIN_MS
             status_led.set(led_override if led_override is not None else (True if API_KEY else (255, 180, 0)))
         else:
             status_led.portal_tick()
             if time.ticks_diff(now, next_wifi_retry) >= 0:
-                next_wifi_retry = time.ticks_add(now, WIFI_RETRY_MS)
-                wifi_connect()
+                connected = wifi_connect()
+                if connected:
+                    wifi_retry_ms = WIFI_RETRY_MIN_MS
+                    last_poll = 0
+                    last_telemetry = 0
+                    last_presence = 0
+                else:
+                    wifi_retry_ms = min(wifi_retry_ms * 2, WIFI_RETRY_MAX_MS)
+                next_wifi_retry = time.ticks_add(time.ticks_ms(), wifi_retry_ms)
         if connected and time.ticks_diff(now, last_poll) >= POLL_MS:
             last_poll = now
             poll_commands()
