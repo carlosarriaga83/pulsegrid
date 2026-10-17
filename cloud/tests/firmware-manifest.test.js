@@ -56,6 +56,42 @@ test('servo confirms and feeds the transactional OTA watchdog', () => {
   assert.match(source, /ota_boot\.feed\(\)/);
 });
 
+test('servo cloud dispatcher explicitly recognizes calibration wizard commands', () => {
+  const cloudClient = fs.readFileSync(path.join(root, 'dispositivos/servo/cloud_client.py'), 'utf8');
+  const dashboard = fs.readFileSync(path.join(root, 'cloud/app.js'), 'utf8');
+  const calibrationUi = fs.readFileSync(path.join(root, 'cloud/blind-calibration-ui.js'), 'utf8');
+  const calibrationCommands = [
+    'blind.safeCalibrationBegin', 'blind.safeCalibrationTest',
+    'blind.safeCalibrationDirection', 'blind.safeCalibrationStep',
+    'blind.safeCalibrationMark', 'blind.safeCalibrationCancel'
+  ];
+  assert.match(cloudClient, /BLIND_COMMANDS = \(/);
+  assert.match(cloudClient, /elif name in BLIND_COMMANDS:\s+execute_blind_command\(cortina, name, payload\)/);
+  assert.match(cloudClient, /def execute_blind_command\(cortina, name, payload\):/);
+  assert.match(cloudClient, /Comando de calibracion no soportado:/);
+  assert.doesNotMatch(cloudClient, /'blind\.jog'/);
+  assert.match(cloudClient, /blind\.safeCalibrationBegin/);
+  assert.match(cloudClient, /blind\.safeCalibrationStep/);
+  for (const command of calibrationCommands) {
+    assert.ok(cloudClient.includes(`'${command}'`), `servo dispatcher must recognize ${command}`);
+    if (command !== 'blind.safeCalibrationCancel') assert.ok(calibrationUi.includes(`'${command}'`), `dashboard must send ${command}`);
+  }
+  assert.match(dashboard, /mountBlindCalibrationWizard/);
+});
+
+test('calibration wizard and generic command menu do not send servo actions to GA25', () => {
+  for (const folder of ['', 'public', 'public_html', 'legacy-root']) {
+    const file = path.join(root, 'cloud', folder, 'app.js');
+    const source = fs.readFileSync(file, 'utf8');
+    assert.match(source, /const supportsServo = targetModel === 'servo' \|\| \(!targetModel && !\/ga25\/i\.test\(identity\)\)/, folder || 'cloud root');
+    assert.match(source, /if \(!supportsServo\) \{ \$\('#calibration-wizard'\)\?\.remove\(\); return; \}/, folder || 'cloud root');
+    assert.match(source, /mountBlindCalibrationWizard\(\{ \$, \$\$, apiRequest, loadDevices, getCalibrationPosition, waitForCalibrationCommand, waitForCalibrationIdle, showToast, renderIcons \}\)/, folder || 'cloud root');
+    assert.doesNotMatch(source, /'blind\.configure':|'<option value="blind\.configure"/);
+    assert.match(source, /const isGa25Device = targetModel === 'ga25' \|\| \(!targetModel && \/ga25\/i\.test\(selectedIdentity\)\)/, folder || 'cloud root');
+    assert.match(source, /configureDeviceCommands\(\);\s+renderCalibrationWizard\(\);/, folder || 'cloud root');
+  }
+});
+
 test('ESP firmware supports three-boot Wi-Fi recovery and faster command polling', () => {
   const cloudServer = fs.readFileSync(path.join(root, 'cloud/server.js'), 'utf8');
   const servoMain = fs.readFileSync(path.join(root, 'dispositivos/servo/main.py'), 'utf8');
@@ -79,7 +115,7 @@ test('ESP firmware supports three-boot Wi-Fi recovery and faster command polling
   }
   assert.match(servoMain, /recovery_mode = wifi_recovery\.register_boot\(count_reset\)/);
   assert.match(servoMain, /reset_cause in \(getattr\(machine, 'PWRON_RESET', 1\), getattr\(machine, 'HARD_RESET', 2\)\)/);
-  assert.match(servoMain, /FIRMWARE_VERSION = '2026\.10\.16\.servo-r6'/);
+  assert.match(servoMain, /FIRMWARE_VERSION = '2026\.10\.17\.servo-r7'/);
   assert.match(servoMain, /if recovery_mode:\s+try:\s+wlan\.disconnect\(\)\s+wlan\.active\(False\)/);
   assert.match(servoMain, /COMMAND_POLL_MS = 1000/);
   assert.match(servoMain, /if recovery_mode or not WIFI_SSID:/);

@@ -614,6 +614,9 @@ async function validateAutomationDevices(db, email, target, rule) {
 
 async function dispatchDeviceCommand(db, device, command, payload, context = {}) {
   if (device.provider !== 'tuya') {
+    if (['blind.configure', 'blind.jog', 'blind.markDeployed', 'blind.markRolled', 'blind.setMotorSide', 'blind.beginCalibration'].includes(command)) {
+      throw new Error('Usa el asistente de calibracion segura para configurar el recorrido');
+    }
     if (command === 'device.configure') throw new Error('La identidad del dispositivo se configura con el quemador, no de forma remota');
     if (command === 'direction.configure') {
       const [readings] = await db.execute('SELECT payload FROM telemetry WHERE device_id = ? ORDER BY created_at DESC, id DESC LIMIT 1', [device.id]);

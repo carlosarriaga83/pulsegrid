@@ -1,0 +1,69 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const model = require('../blind-calibration-model');
+
+test('geometry estimator accounts for fabric thickness and motor/tube ratio', () => {
+  const tubeTurns = model.estimateTurns(150, 5, 0.5);
+  assert.ok(tubeTurns > 8 && tubeTurns < 10);
+  assert.equal(model.estimateTurns(150, 5, 0.5, 2), tubeTurns * 2);
+});
+
+test('geometry estimator rejects unsafe or missing inputs', () => {
+  assert.throws(() => model.estimateTurns(10, 5, 0.5), /altura/);
+  assert.throws(() => model.estimateTurns(150, 0, 0.5), /diámetro/);
+  assert.throws(() => model.estimateTurns(150, 5, 0), /grosor/);
+  assert.throws(() => model.estimateTurns(150, 5, 0.5, 0), /relación/);
+});
+
+test('all deployed static copies use the same estimator implementation', () => {
+  const root = path.join(__dirname, '..');
+  for (const folder of ['', 'public', 'public_html', 'legacy-root']) {
+    const source = fs.readFileSync(path.join(root, folder, 'blind-calibration-model.js'), 'utf8');
+    assert.match(source, /function estimateTurns\(heightCm, tubeDiameterCm, fabricThicknessMm, motorTurnsPerTubeTurn = 1\)/);
+    assert.match(source, /tubeTurns \* ratio/);
+    const copy = require(path.join(root, folder, 'blind-calibration-model.js'));
+    assert.equal(copy.estimateTurns(150, 5, 0.5, 2), model.estimateTurns(150, 5, 0.5, 2));
+  }
+});
+
+test('safe-calibration wizard uses bounded commands only and documents manual supervision', () => {
+  const root = path.join(__dirname, '..');
+  for (const folder of ['', 'public', 'public_html', 'legacy-root']) {
+    const html = fs.readFileSync(path.join(root, folder, 'blind-calibration-ui.js'), 'utf8');
+    assert.match(html, /blind\.safeCalibrationBegin/);
+    assert.match(html, /blind\.safeCalibrationTest/);
+    assert.match(html, /blind\.safeCalibrationStep/);
+    assert.match(html, /turns: ?\.125|turns: 0\.125/);
+    assert.match(html, /calibration-midpoint-confirm/);
+    assert.match(html, /El encoder no detecta fuerza|no detecta fuerza/);
+    assert.match(html, /Tope preventivo con margen/);
+    assert.match(html, /curtain\.stop.{0,20}false/s);
+    assert.doesNotMatch(html, /blind\.jog|blind\.configure|blind\.markRolled|blind\.markDeployed/);
+  }
+});
+
+test('all dashboard copies verify encoder displacement and surface motion faults', () => {
+  const root = path.join(__dirname, '..');
+  for (const folder of ['', 'public', 'public_html', 'legacy-root']) {
+    const app = fs.readFileSync(path.join(root, folder, 'app.js'), 'utf8');
+    const wizard = fs.readFileSync(path.join(root, folder, 'blind-calibration-ui.js'), 'utf8');
+    assert.match(app, /blind_calibration_motion_fault/);
+    assert.match(app, /Math\.abs\(position - startPosition\) >= 0\.02/);
+    assert.match(wizard, /getCalibrationPosition/);
+    assert.match(wizard, /waitForCalibrationIdle\([^\n]*startPosition/s);
+  }
+});
+
+test('servo calibration firmware enforces a geometry ceiling and persists real encoder endpoints', () => {
+  const root = path.join(__dirname, '..', '..');
+  const firmware = fs.readFileSync(path.join(root, 'dispositivos/servo/servo_calibration.py'), 'utf8');
+  const cortina = fs.readFileSync(path.join(root, 'dispositivos/servo/cortina.py'), 'utf8');
+  assert.match(firmware, /'half_travel_limit': max\(0\.0, estimated \* 0\.5 - max\(2\.0, estimated \* 0\.2\)\)/);
+  assert.match(firmware, /amount <= 0\.125/);
+  assert.match(firmware, /cortina\._save_persistent_state\(\)/);
+  assert.match(cortina, /timeout_ms/);
+  assert.match(cortina, /calibration_motion_fault/);
+  assert.match(cortina, /movimiento normal bloqueado durante la calibracion segura/);
+});

@@ -1402,6 +1402,7 @@ function renderCommandDeviceState() {
     : '<span><i data-lucide="circle-off"></i> Sin estado disponible</span>';
   renderIcons();
   configureDeviceCommands();
+  renderCalibrationWizard();
 }
 $$('[data-open-modal="add-device"], #add-device').forEach((button) => button.addEventListener('click', openModal));
 $$('[data-open-modal="configure-tuya"]').forEach((button) => button.addEventListener('click', openTuyaSettings));
@@ -1417,15 +1418,28 @@ function queueCalibrationCommand(command, payload) {
   return apiRequest('commands', { method: 'POST', body: JSON.stringify({ deviceId, command, payload }) });
 }
 
-async function waitForCalibrationIdle(deviceId, servoId, timeout = 60000) {
+function getCalibrationPosition(deviceId, servoId) {
+  const device = devices.find((item) => item.id === deviceId);
+  const telemetry = parseTelemetry(device?.telemetry);
+  const servo = telemetry.servos?.[String(servoId)] || telemetry.servos?.[servoId];
+  const position = Number(servo?.absolute_turns);
+  return Number.isFinite(position) ? position : null;
+}
+
+async function waitForCalibrationIdle(deviceId, servoId, startPosition, timeout = 120000) {
   const startedAt = Date.now();
+  let sawMovement = false;
   while (Date.now() - startedAt < timeout) {
     await new Promise((resolve) => window.setTimeout(resolve, 1000));
     await loadDevices();
     const device = devices.find((item) => item.id === deviceId);
     const telemetry = parseTelemetry(device?.telemetry);
     const servo = telemetry.servos?.[String(servoId)] || telemetry.servos?.[servoId];
-    if (servo && !servo.multiturn_active) return;
+    if (servo?.blind_calibration_motion_fault) throw new Error('Movimiento detenido: el encoder no detectó avance. Revisa el mecanismo antes de cancelar.');
+    if (servo?.multiturn_active) sawMovement = true;
+    const position = Number(servo?.absolute_turns);
+    const encoderMoved = Number.isFinite(startPosition) && Number.isFinite(position) && Math.abs(position - startPosition) >= 0.02;
+    if (servo && !servo.multiturn_active && (sawMovement || encoderMoved)) return;
   }
   throw new Error('No se confirmo el fin del movimiento');
 }
@@ -1442,8 +1456,17 @@ async function waitForCalibrationCommand(commandId, timeout = 30000) {
   throw new Error('El dispositivo no confirmo el comando');
 }
 
-function renderCalibrationWizard() {
+function renderLegacyCalibrationWizard() {
   const layout = $('.command-layout');
+  const selectedDevice = devices.find((device) => device.id === $('#command-device')?.value);
+  const selectedTelemetry = parseTelemetry(selectedDevice?.telemetry);
+  const targetModel = String(selectedTelemetry.firmwareTarget || '').toLowerCase();
+  const selectedIdentity = `${selectedDevice?.name || ''} ${selectedDevice?.type || ''} ${selectedDevice?.id || ''}`;
+  const servoCalibrationSupported = targetModel === 'servo' || (!targetModel && !/ga25/i.test(selectedIdentity));
+  if (!servoCalibrationSupported) {
+    $('#calibration-wizard')?.remove();
+    return;
+  }
   if (!layout || $('#calibration-wizard')) return;
   layout.insertAdjacentHTML('beforeend', calibrationWizardMarkup());
   const status = $('#calibration-status');
@@ -1544,6 +1567,18 @@ function renderCalibrationWizard() {
   renderIcons();
 }
 
+function renderCalibrationWizard() {
+  const layout = $('.command-layout');
+  const selectedDevice = devices.find((device) => device.id === $('#command-device')?.value);
+  const telemetry = parseTelemetry(selectedDevice?.telemetry);
+  const targetModel = String(telemetry.firmwareTarget || '').toLowerCase();
+  const identity = `${selectedDevice?.name || ''} ${selectedDevice?.type || ''} ${selectedDevice?.id || ''}`;
+  const supportsServo = targetModel === 'servo' || (!targetModel && !/ga25/i.test(identity));
+  if (!supportsServo) { $('#calibration-wizard')?.remove(); return; }
+  if (!layout || $('#calibration-wizard') || typeof window.mountBlindCalibrationWizard !== 'function') return;
+  window.mountBlindCalibrationWizard({ $, $$, apiRequest, loadDevices, getCalibrationPosition, waitForCalibrationCommand, waitForCalibrationIdle, showToast, renderIcons });
+}
+
 function navigate(viewName) {
   if (viewName !== 'telemetry') clearTelemetryAutoRefreshTimer();
   $$('.view').forEach((view) => view.classList.toggle('active', view.id === `view-${viewName}`));
@@ -1613,10 +1648,6 @@ function configureDeviceCommands() {
     'curtain.stop': { payload: {}, help: 'No requiere payload. Detiene el movimiento actual de ambos servos.' },
     'curtain.move': { payload: { servoId: 1, percent: 50, speed: 800, acceleration: 50 }, help: 'servoId: 1 o 2. percent: 0-100. speed: 0-3073. acceleration: 0-150.' },
     'servo.configure': { payload: { servoId: 1, min: 300, max: 3700, mode: 0, torqueLimit: 1000 }, help: 'servoId: 1 o 2. min/max: 0-4095. mode: 0 Servo, 1 Rueda, 3 Multivuelta. torqueLimit: 0-1000.' },
-    'blind.configure': { payload: { servoId: 1, rolledTurns: 0, unrolledTurns: 10 }, help: 'servoId: 1 o 2. rolledTurns y unrolledTurns: -999.99 a 999.99; deben ser distintos.' },
-    'blind.markRolled': { payload: { servoId: 1 }, help: 'Fija la posicion actual del servo como cortina completamente enrollada.' },
-    'blind.markDeployed': { payload: { servoId: 1 }, help: 'Fija la posicion actual del servo como cortina completamente desplegada.' },
-    'blind.jog': { payload: { servoId: 1, turns: -1, speed: 800, acceleration: 50 }, help: 'Avanza exactamente una vuelta. Usa -1 para enrollar y 1 para desenrollar.' },
     'motion.configure': { payload: { speed: 800, acceleration: 50 }, help: 'speed: 0-3073. acceleration: 0-150.' },
     'servo.torque': { payload: { servoId: 1, enabled: true }, help: 'servoId: 1 o 2. enabled: true o false.' },
     'servo.resetTurns': { payload: { servoId: 1 }, help: 'servoId: 1 o 2. Reinicia el contador absoluto si no hay movimiento.' },
@@ -1624,9 +1655,13 @@ function configureDeviceCommands() {
   };
   const selectedDevice = devices.find((device) => device.id === $('#command-device')?.value);
   const isTuyaDevice = selectedDevice?.provider === 'tuya';
+  const selectedTelemetry = parseTelemetry(selectedDevice?.telemetry);
+  const targetModel = String(selectedTelemetry.firmwareTarget || '').toLowerCase();
+  const selectedIdentity = `${selectedDevice?.name || ''} ${selectedDevice?.type || ''} ${selectedDevice?.id || ''}`;
+  const isGa25Device = targetModel === 'ga25' || (!targetModel && /ga25/i.test(selectedIdentity));
   const tuyaCommands = isTuyaDevice ? tuyaCommandOptions(selectedDevice) : [];
   commandSelect.id = 'command-name';
-  commandSelect.innerHTML = tuyaCommands.length ? tuyaCommands.map((item) => `<option value="${escapeTelemetryHtml(item.value)}">${escapeTelemetryHtml(item.label)}</option>`).join('') : isTuyaDevice ? '<option value="">Tuya no expone controles para este equipo</option>' : '<option value="curtain.open">Abrir cortina</option><option value="curtain.close">Cerrar cortina</option><option value="curtain.stop">Detener cortina</option><option value="curtain.move">Mover cortina</option><option value="servo.configure">Configurar servo</option><option value="blind.configure">Configurar extremos</option><option value="blind.markRolled">Marcar completamente enrollada</option><option value="blind.markDeployed">Marcar completamente desplegada</option><option value="blind.jog">Avanzar una vuelta</option><option value="motion.configure">Configurar movimiento</option><option value="servo.torque">Configurar torque</option><option value="servo.resetTurns">Reiniciar vueltas</option>';
+  commandSelect.innerHTML = tuyaCommands.length ? tuyaCommands.map((item) => `<option value="${escapeTelemetryHtml(item.value)}">${escapeTelemetryHtml(item.label)}</option>`).join('') : isTuyaDevice ? '<option value="">Tuya no expone controles para este equipo</option>' : isGa25Device ? '<option value="curtain.open">Abrir cortina</option><option value="curtain.close">Cerrar cortina</option><option value="curtain.stop">Detener cortina</option><option value="curtain.move">Mover cortina</option>' : '<option value="curtain.open">Abrir cortina</option><option value="curtain.close">Cerrar cortina</option><option value="curtain.stop">Detener cortina</option><option value="curtain.move">Mover cortina</option><option value="servo.configure">Configurar servo</option><option value="motion.configure">Configurar movimiento</option><option value="servo.torque">Configurar torque</option><option value="servo.resetTurns">Reiniciar vueltas</option>';
   payload.id = 'command-payload';
   let help = $('#command-payload-help');
   if (!help) {

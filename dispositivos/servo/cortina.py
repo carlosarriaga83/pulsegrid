@@ -1,4 +1,5 @@
 import os
+import time
 
 from stservo import STServoBus, STServoError
 
@@ -21,7 +22,15 @@ class Cortina:
         self.absolute_turns = {servo_id: 0.0 for servo_id in self.known_servo_ids}
         self.position_recovery_required = {servo_id: True for servo_id in self.known_servo_ids}
         self.blind_config = {
-            servo_id: {'rolled_turns': 0.0, 'unrolled_turns': 10.0, 'motor_side': 'left', 'calibrated': False}
+            servo_id: {
+                'rolled_turns': 0.0, 'unrolled_turns': 10.0, 'motor_side': 'left', 'calibrated': False,
+                'calibration_in_progress': False, 'window_width_cm': 0.0, 'window_height_cm': 0.0,
+                'tube_diameter_cm': 0.0, 'fabric_thickness_mm': 0.0, 'motor_turns_per_tube_turn': 1.0,
+                'estimated_turns': 0.0, 'half_travel_limit': 0.0,
+                'calibration_midpoint_turns': 0.0, 'calibration_down_direction': 0,
+                'calibration_direction_pending': False,
+                'calibration_motion_fault': False,
+            }
             for servo_id in self.known_servo_ids
         }
         self.blind_targets = {
@@ -59,6 +68,15 @@ class Cortina:
                 config['unrolled_turns'] = float(saved.get('unrolled_turns', config['unrolled_turns']))
                 config['motor_side'] = str(saved.get('motor_side', config['motor_side'])) if saved.get('motor_side', config['motor_side']) in ('left', 'right') else 'left'
                 config['calibrated'] = bool(saved.get('calibrated', False))
+                for key in ('window_width_cm', 'window_height_cm', 'tube_diameter_cm', 'fabric_thickness_mm', 'motor_turns_per_tube_turn', 'estimated_turns', 'half_travel_limit', 'calibration_midpoint_turns'):
+                    try:
+                        config[key] = float(saved.get(key, config[key]))
+                    except (TypeError, ValueError):
+                        pass
+                config['calibration_in_progress'] = bool(saved.get('calibration_in_progress', False))
+                config['calibration_down_direction'] = int(saved.get('calibration_down_direction', 0))
+                config['calibration_direction_pending'] = bool(saved.get('calibration_direction_pending', False))
+                config['calibration_motion_fault'] = bool(saved.get('calibration_motion_fault', False))
                 target = BLIND_TARGETS.get(servo_id, {})
                 self.blind_targets[servo_id]['percent'] = float(target.get('percent', 50.0))
                 self.blind_targets[servo_id]['speed'] = int(target.get('speed', 800))
@@ -157,6 +175,9 @@ class Cortina:
             try:
                 position = self.bus.position(servo_id)
             except (STServoError, OSError):
+                task = self.multiturn_tasks[servo_id]
+                if task is not None and time.ticks_diff(time.ticks_ms(), task['started_at']) >= task['timeout_ms']:
+                    self._finish_multiturn(servo_id, timed_out=True)
                 continue
             delta = self._track_position(servo_id, position)
             task = self.multiturn_tasks[servo_id]
@@ -165,13 +186,15 @@ class Cortina:
             task['moved_counts'] += delta * task['direction']
             if task['moved_counts'] >= task['target_counts']:
                 self._finish_multiturn(servo_id, completed=True)
+            elif time.ticks_diff(time.ticks_ms(), task['started_at']) >= task['timeout_ms']:
+                self._finish_multiturn(servo_id, timed_out=True)
             elif abs(self.absolute_turns[servo_id] - self._last_saved_turns[servo_id]) >= 0.5:
                 self._last_saved_turns[servo_id] = self.absolute_turns[servo_id]
                 checkpoint = True
         if checkpoint:
             self._save_persistent_state()
 
-    def _finish_multiturn(self, servo_id, completed=False):
+    def _finish_multiturn(self, servo_id, completed=False, timed_out=False):
         try:
             self.bus.move_wheel(servo_id, 0, acceleration=50)
             self.bus.torque(servo_id, False)
@@ -181,6 +204,8 @@ class Cortina:
         self.multiturn_tasks[servo_id] = None
         self.multiturn_active[servo_id] = False
         self.position_recovery_required[servo_id] = not (completed and self.blind_config[servo_id]['calibrated'])
+        if timed_out:
+            self.blind_config[servo_id]['calibration_motion_fault'] = True
         self._last_saved_turns[servo_id] = self.absolute_turns[servo_id]
         self._save_persistent_state()
 
@@ -205,6 +230,8 @@ class Cortina:
             'direction': direction,
             'target_counts': int(round(abs(turns) * self.COUNTS_PER_TURN)),
             'moved_counts': 0,
+            'started_at': time.ticks_ms(),
+            'timeout_ms': max(5000, int(abs(turns) * self.COUNTS_PER_TURN / max(speed, 1) * 2500 + 3000)),
         }
         self.multiturn_active[servo_id] = True
         self.position_recovery_required[servo_id] = True
@@ -227,6 +254,8 @@ class Cortina:
             raise ValueError('servo o posicion invalida')
         percent = float(percent)
         config = self.blind_config[servo_id]
+        if config.get('calibration_in_progress'):
+            raise ValueError('movimiento normal bloqueado durante la calibracion segura')
         self.update_multiturn()
         if config['calibrated']:
             previous_target = self.blind_targets[servo_id]['percent']
@@ -260,6 +289,8 @@ class Cortina:
     def parar(self):
         for servo_id in self.servo_ids:
             if self.multiturn_active[servo_id]:
+                if self.blind_config[servo_id].get('calibration_in_progress'):
+                    self.blind_config[servo_id]['calibration_motion_fault'] = True
                 self._finish_multiturn(servo_id)
             else:
                 try:
@@ -298,5 +329,9 @@ class Cortina:
             'blind_target_acceleration': target['acceleration'],
             'blind_motor_side': blind['motor_side'],
             'blind_calibrated': self.blind_config[servo_id]['calibrated'],
+            'blind_calibration_in_progress': self.blind_config[servo_id]['calibration_in_progress'],
+            'blind_estimated_turns': self.blind_config[servo_id]['estimated_turns'],
+            'blind_calibration_limit_turns': self.blind_config[servo_id]['half_travel_limit'],
+            'blind_calibration_motion_fault': self.blind_config[servo_id]['calibration_motion_fault'],
             'position': position,
         }
