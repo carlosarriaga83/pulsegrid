@@ -503,6 +503,19 @@ async function tuyaRequest(userId, method, pathName, body) {
   return trace.response.result;
 }
 
+function tuyaErrorMessage(response) {
+  const code = Number(response?.code);
+  const message = String(response?.msg || 'Tuya rechazo la solicitud');
+  if (code === 28841105) {
+    return `Tuya denego el comando (codigo ${response.code}): autoriza en el proyecto Tuya la API de control de dispositivos y vincula a ese proyecto la cuenta de la app/dispositivo. Respuesta: ${message}`;
+  }
+  if (/permission\s*den(y|ied)|no permissions?/i.test(message)) {
+    const codeLabel = response?.code === undefined ? '' : ` (codigo ${response.code})`;
+    return `Tuya denego el comando${codeLabel}: revisa la autorizacion de la API de control y el vinculo de la cuenta/dispositivo con el proyecto. Respuesta: ${message}`;
+  }
+  return message;
+}
+
 async function tuyaRequestRaw(userId, method, pathName, body) {
   const { config, token } = await tuyaToken(userId);
   const bodyText = body ? JSON.stringify(body) : '';
@@ -510,8 +523,8 @@ async function tuyaRequestRaw(userId, method, pathName, body) {
   const response = await tuyaHttp(method, config.endpoint, pathName, { client_id: config.clientId, access_token: token, t: timestamp, sign: tuyaSignature(config, token, timestamp, method, pathName, bodyText), sign_method: 'HMAC-SHA256' }, bodyText);
   const trace = { request: body || null, response };
   if (!response.success) {
-    if ([1010, 1011, 28841105].includes(Number(response.code))) tuyaTokens.delete(String(userId || `environment:${config.clientId}`));
-    const error = new Error(response.msg || 'Tuya rechazo la solicitud');
+    if ([1010, 1011].includes(Number(response.code))) tuyaTokens.delete(String(userId || `environment:${config.clientId}`));
+    const error = new Error(tuyaErrorMessage(response));
     error.tuyaTrace = trace;
     throw error;
   }

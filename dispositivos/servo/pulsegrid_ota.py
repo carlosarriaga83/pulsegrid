@@ -4,6 +4,22 @@ import socket
 import ujson
 import uhashlib
 
+
+def _send_all(client, data):
+    sent = 0
+    while sent < len(data):
+        writer = getattr(client, 'write', None)
+        count = writer(data[sent:]) if writer else client.send(data[sent:])
+        if count is None or count <= 0:
+            raise OSError('Envio HTTP incompleto')
+        sent += count
+
+
+def _recv(client, size):
+    reader = getattr(client, 'read', None)
+    return reader(size) if reader else client.recv(size)
+
+
 def _connection(api_url, timeout):
     gc.collect()
     secure = api_url.startswith('https://')
@@ -64,7 +80,7 @@ def _write_chunked(client, buffer, target, digest, expected_length, name):
         while b'\r\n' not in buffer:
             if len(buffer) > 64:
                 raise ValueError('Tamano de bloque HTTP invalido para ' + name)
-            chunk = client.recv(128)
+            chunk = _recv(client, 128)
             if not chunk:
                 raise ValueError('Respuesta OTA chunked incompleta para ' + name)
             buffer += chunk
@@ -80,7 +96,7 @@ def _write_chunked(client, buffer, target, digest, expected_length, name):
                 while b'\r\n' not in buffer:
                     if len(buffer) > 512:
                         raise ValueError('Trailer HTTP demasiado grande para ' + name)
-                    chunk = client.recv(128)
+                    chunk = _recv(client, 128)
                     if not chunk:
                         raise ValueError('Fin chunked incompleto para ' + name)
                     buffer += chunk
@@ -96,7 +112,7 @@ def _write_chunked(client, buffer, target, digest, expected_length, name):
         remaining = size
         while remaining:
             if not buffer:
-                buffer = client.recv(512)
+                buffer = _recv(client, 512)
                 if not buffer:
                     raise ValueError('Descarga OTA incompleta para ' + name)
             count = min(remaining, len(buffer))
@@ -107,7 +123,7 @@ def _write_chunked(client, buffer, target, digest, expected_length, name):
             remaining -= count
             buffer = buffer[count:]
         while len(buffer) < 2:
-            chunk = client.recv(128)
+            chunk = _recv(client, 128)
             if not chunk:
                 raise ValueError('Separador chunked incompleto para ' + name)
             buffer += chunk
@@ -120,7 +136,7 @@ def _write_sized(client, buffer, target, digest, expected_length, name):
     received = 0
     while received < expected_length:
         if not buffer:
-            buffer = client.recv(512)
+            buffer = _recv(client, 512)
             if not buffer:
                 break
         count = min(expected_length - received, len(buffer))
@@ -139,10 +155,10 @@ def _write_sized(client, buffer, target, digest, expected_length, name):
 def _request(api_url, device_code, path):
     client, host = _connection(api_url, 30)
     try:
-        client.send('GET {} HTTP/1.1\r\nHost: {}\r\nX-Device-Code: {}\r\nConnection: close\r\n\r\n'.format(path, host, device_code).encode())
+        _send_all(client, 'GET {} HTTP/1.1\r\nHost: {}\r\nX-Device-Code: {}\r\nConnection: close\r\n\r\n'.format(path, host, device_code).encode())
         result = b''
         while True:
-            chunk = client.recv(512)
+            chunk = _recv(client, 512)
             if not chunk:
                 break
             result += chunk
@@ -174,10 +190,10 @@ def _download(api_url, device_code, device_id, version, info, target_model, allo
     try:
         client, host = _connection(api_url, 30)
         path = '/api/firmware/files/{}/{}?targetModel={}&deviceId={}'.format(version, name, target_model, device_id)
-        client.send('GET {} HTTP/1.1\r\nHost: {}\r\nX-Device-Code: {}\r\nConnection: close\r\n\r\n'.format(path, host, device_code).encode())
+        _send_all(client, 'GET {} HTTP/1.1\r\nHost: {}\r\nX-Device-Code: {}\r\nConnection: close\r\n\r\n'.format(path, host, device_code).encode())
         header = b''
         while b'\r\n\r\n' not in header:
-            chunk = client.recv(256)
+            chunk = _recv(client, 256)
             if not chunk:
                 break
             header += chunk

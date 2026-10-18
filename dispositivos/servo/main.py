@@ -104,7 +104,7 @@ def main():
         captive_portal.start_background(controller, recovery_mode)
         portal_started = True
     if recovery_mode:
-        print('Recuperacion Wi-Fi: cambie la red en el portal Pulsegrid y guarde para reiniciar')
+        print('Recuperacion Wi-Fi : cambie la red en el portal Pulsegrid y guarde para reiniciar')
     elif connected and DEVICE_CODE:
         print('Servo cloud activo; firmware {}'.format(FIRMWARE_VERSION))
     elif not DEVICE_CODE:

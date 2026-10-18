@@ -11,6 +11,21 @@ BLIND_COMMANDS = (
 )
 
 
+def _send_all(client, data):
+    sent = 0
+    while sent < len(data):
+        writer = getattr(client, 'write', None)
+        count = writer(data[sent:]) if writer else client.send(data[sent:])
+        if count is None or count <= 0:
+            raise OSError('Envio HTTP incompleto')
+        sent += count
+
+
+def _recv(client, size):
+    reader = getattr(client, 'read', None)
+    return reader(size) if reader else client.recv(size)
+
+
 def execute_blind_command(cortina, name, payload):
     if name not in BLIND_COMMANDS:
         raise ValueError('Comando de calibracion no soportado: ' + str(name))
@@ -100,10 +115,10 @@ class CloudClient:
             request = '{} {} HTTP/1.1\r\nHost: {}\r\nX-Device-Code: {}\r\nConnection: close\r\n'.format(method, path, host, self.device_code)
             if body:
                 request += 'Content-Type: application/json\r\nContent-Length: {}\r\n'.format(len(body))
-            client.sendall((request + '\r\n' + body).encode())
+            _send_all(client, (request + '\r\n' + body).encode())
             header = b''
             while b'\r\n\r\n' not in header:
-                chunk = client.recv(256)
+                chunk = _recv(client, 256)
                 if not chunk:
                     break
                 header += chunk
@@ -120,7 +135,7 @@ class CloudClient:
                     content_length = int(line.split(b':', 1)[1].strip())
             if content_length is not None:
                 while len(body) < content_length:
-                    chunk = client.recv(256)
+                    chunk = _recv(client, 256)
                     if not chunk:
                         break
                     body += chunk
