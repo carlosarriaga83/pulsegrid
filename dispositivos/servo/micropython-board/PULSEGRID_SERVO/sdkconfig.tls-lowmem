@@ -1,0 +1,6 @@
+# Pulsegrid uses TLS over TCP only; DTLS is not needed.
+CONFIG_MBEDTLS_SSL_PROTO_DTLS=n
+
+# Allocate TLS record buffers on demand and release them as records are consumed.
+# This avoids reserving both full-size record buffers for the entire connection.
+CONFIG_MBEDTLS_DYNAMIC_BUFFER=y

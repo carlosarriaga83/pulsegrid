@@ -8,6 +8,8 @@ Archivos incluidos en un release OTA: `main.py`, `cloud_client.py`, `board_led.p
 
 `main.py` mantiene sólo el arranque, Wi-Fi y hardware; `cloud_client.py` contiene el transporte HTTPS mínimo. El portal en segundo plano se inicia solo si falta la red, vence el tiempo de conexión o se solicita recuperación, para no reservar su pila durante el arranque Wi-Fi normal. El transporte limita los buffers del socket a 512 bytes y registra la memoria libre de MicroPython y del heap ESP-IDF justo antes del handshake TLS y después de recuperar un `ENOMEM`, para comparar la memoria disponible en el momento del fallo.
 
+Para ESP32 que aún fallen durante el handshake, hay un perfil MicroPython de bajo consumo TLS en [micropython-board/README.md](micropython-board/README.md); requiere compilar y flashear una imagen personalizada, no se instala mediante OTA.
+
 La placa Waveshare usa un RGB WS2812 en GPIO23. `board_led.py` controla los píxeles 0 y 1 del indicador integrado: verde cuando hay respuesta reciente de Pulsegrid, amarillo durante el aprovisionamiento (sin código registrado), rojo si el dispositivo registrado no tiene Wi-Fi o el cloud lleva más de 30 s sin responder y ámbar intermitente durante la recuperación Wi-Fi. Para abrir el portal aunque la red guardada todavía conecte, corta y restablece la alimentación tres veces rápidamente; el AP de configuración permanece activo hasta guardar las nuevas credenciales. La secuencia se cancela tras 30 s de funcionamiento estable. `led.configure` habilita o apaga la indicación sin alterar el estado detectado.
 
 Los comandos ESP se consultan cada segundo (antes cada tres) para reducir su latencia; la telemetría conserva su intervalo independiente.

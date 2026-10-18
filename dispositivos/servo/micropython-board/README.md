@@ -1,0 +1,21 @@
+# MicroPython de bajo consumo TLS para Servo
+
+El MicroPython genérico del Servo falla durante el handshake porque TLS necesita memoria del heap interno ESP-IDF; los ~96 KB de `gc.mem_free()` pertenecen al heap de MicroPython y no se pueden usar automáticamente para satisfacer esas asignaciones. El heap interno tenía solo ~22 KB libres y un bloque contiguo máximo de ~20.5 KB.
+
+Este perfil personalizado configura mbedTLS con buffers de registro dinámicos. Los buffers se asignan al necesitarlos y se liberan conforme se consumen; desactiva DTLS, que Pulsegrid no usa y que impide activar esa función en esta versión de ESP-IDF. A diferencia de fijar un límite de entrada TLS menor, no establece un tamaño máximo de registro inferior a los 16 KB habituales, lo cual evita imponer ese límite a las descargas OTA.
+
+## Construcción
+
+Requiere MicroPython `v1.29.0` y ESP-IDF `v5.5.2`, con el entorno de compilación ESP32 activado. En Windows, MicroPython recomienda usar WSL. Desde WSL:
+
+1. Clona MicroPython v1.29.0 con sus submódulos, compila `mpy-cross` y prepara ESP32 con `make -C ports/esp32 submodules`.
+2. Construye el perfil pasando como `BOARD_DIR` la ruta WSL de `dispositivos/servo/micropython-board/PULSEGRID_SERVO` y `BOARD=PULSEGRID_SERVO` a `make -C ports/esp32`.
+3. Comprueba en el `sdkconfig` generado que `CONFIG_MBEDTLS_DYNAMIC_BUFFER=y` y `CONFIG_MBEDTLS_SSL_PROTO_DTLS` no esté habilitado. El resultado combinado debe ser `ports/esp32/build-PULSEGRID_SERVO/firmware.bin`.
+
+No se generó el binario en este workspace: no están instalados ESP-IDF ni el checkout de fuentes de MicroPython. El ajuste todavía requiere compilar y validar en placa antes de considerarlo solución confirmada.
+
+## Instalación y precauciones
+
+La opción «Actualizar MicroPython (borra la flash)» del quemador elimina `config.py`, `blind_state.py` y `multiturn_state.py`. Guarda fuera de la placa la configuración y el estado/calibración antes de usarla; después vuelve a aprovisionar el Wi-Fi y restaura la calibración según corresponda. No flashees este perfil genérico en otra familia ESP32.
+
+Primero valida en COM6 que arranca, conecta al Wi-Fi, completa TLS repetidamente y acepta un OTA de prueba. Si la actualización falla, no interrumpas la alimentación: el mecanismo de staging OTA debe conservar el firmware Python activo, pero tendrás que resolver la conexión por el puerto serie. En este entorno COM6 es un puente CP210x disponible; no se ha conectado ni flasheado.

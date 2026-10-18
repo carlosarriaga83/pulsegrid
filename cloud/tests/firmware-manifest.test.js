@@ -231,3 +231,18 @@ test('servo NeoPixel reflects cloud/provisioning/offline state and OTA retries t
   assert.match(ota, /for attempt in range\(2\)/);
   assert.match(ota, /OTA servo: descargando/);
 });
+
+test('Servo low-memory MicroPython profile enables dynamic TLS buffers without reducing record size', () => {
+  const profile = path.join(root, 'dispositivos/servo/micropython-board/PULSEGRID_SERVO');
+  const board = fs.readFileSync(path.join(profile, 'mpconfigboard.cmake'), 'utf8');
+  const sdkconfig = fs.readFileSync(path.join(profile, 'sdkconfig.tls-lowmem'), 'utf8');
+  const notes = fs.readFileSync(path.join(root, 'dispositivos/servo/micropython-board/README.md'), 'utf8');
+  assert.match(board, /boards\/mpconfigboard_esp32_common\.cmake/);
+  assert.match(board, /boards\/sdkconfig\.csi/);
+  assert.match(board, /sdkconfig\.tls-lowmem/);
+  assert.match(sdkconfig, /CONFIG_MBEDTLS_SSL_PROTO_DTLS=n/);
+  assert.match(sdkconfig, /CONFIG_MBEDTLS_DYNAMIC_BUFFER=y/);
+  assert.doesNotMatch(sdkconfig, /CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN=/);
+  assert.match(notes, /no establece un tamaño máximo de registro inferior/);
+  assert.match(notes, /blind_state\.py.*multiturn_state\.py/);
+});
