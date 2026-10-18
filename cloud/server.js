@@ -514,18 +514,23 @@ function tuyaErrorMessage(response) {
 }
 
 async function tuyaRequestRaw(userId, method, pathName, body) {
-  const { config, token } = await tuyaToken(userId);
   const bodyText = body ? JSON.stringify(body) : '';
-  const timestamp = String(Date.now());
-  const response = await tuyaHttp(method, config.endpoint, pathName, { client_id: config.clientId, access_token: token, t: timestamp, sign: tuyaSignature(config, token, timestamp, method, pathName, bodyText), sign_method: 'HMAC-SHA256' }, bodyText);
-  const trace = { request: body || null, response };
-  if (!response.success) {
-    if ([1010, 1011].includes(Number(response.code))) tuyaTokens.delete(String(userId || `environment:${config.clientId}`));
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const { config, token } = await tuyaToken(userId);
+    const timestamp = String(Date.now());
+    const response = await tuyaHttp(method, config.endpoint, pathName, { client_id: config.clientId, access_token: token, t: timestamp, sign: tuyaSignature(config, token, timestamp, method, pathName, bodyText), sign_method: 'HMAC-SHA256' }, bodyText);
+    const trace = { request: body || null, response };
+    if (response.success) return trace;
+    const tokenKey = String(userId || `environment:${config.clientId}`);
+    if ([1010, 1011].includes(Number(response.code))) {
+      tuyaTokens.delete(tokenKey);
+      if (attempt === 0) continue;
+    }
     const error = new Error(tuyaErrorMessage(response));
     error.tuyaTrace = trace;
     throw error;
   }
-  return trace;
+  throw new Error('No fue posible renovar el token de Tuya');
 }
 
 function recordAutomationTroubleshooting(userId, entry) {

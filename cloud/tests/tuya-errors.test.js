@@ -7,12 +7,15 @@ const vm = require('node:vm');
 const server = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
 
 function tuyaBackend(response) {
+  const responses = Array.isArray(response) ? response : [response];
+  let tokenRequests = 0;
   const context = vm.createContext({
     tuyaTokens: new Map([['42', { token: 'cached-token', expiresAt: Infinity }]]),
-    tuyaToken: async () => ({ config: { clientId: 'client-id' }, token: 'cached-token' }),
+    tuyaToken: async () => ({ config: { clientId: 'client-id' }, token: `token-${++tokenRequests}` }),
     tuyaSignature: () => 'signature',
-    tuyaHttp: async () => response,
-    Date
+    tuyaHttp: async () => responses.shift(),
+    Date,
+    tokenRequestCount: () => tokenRequests
   });
   const helperStart = server.indexOf('function tuyaErrorMessage(');
   const requestStart = server.indexOf('async function tuyaRequestRaw(', helperStart);
@@ -37,8 +40,23 @@ test('Tuya 1106 permission-denied error explains API, data-center, and account-l
   assert.equal(backend.tuyaTokens.has('42'), true, 'permission errors must not invalidate a valid token');
 });
 
-test('Tuya token errors still invalidate the cached token', async () => {
-  const backend = tuyaBackend({ success: false, code: 1010, msg: 'token invalid' });
-  await assert.rejects(backend.tuyaRequestRaw(42, 'POST', '/v1.0/devices/id/commands', { commands: [] }), /token invalid/);
+test('Tuya retries once with a fresh token after an explicit invalid-token response', async () => {
+  const backend = tuyaBackend([
+    { success: false, code: 1010, msg: 'token invalid' },
+    { success: true, result: { success: true } }
+  ]);
+  const trace = await backend.tuyaRequestRaw(42, 'POST', '/v1.0/devices/id/commands', { commands: [] });
+  assert.equal(trace.response.success, true);
+  assert.equal(backend.tokenRequestCount(), 2);
+  assert.equal(backend.tuyaTokens.has('42'), false, 'the rejected cached token must be discarded before retry');
+});
+
+test('Tuya stops after a second invalid-token response and leaves no stale cache entry', async () => {
+  const backend = tuyaBackend([
+    { success: false, code: 1010, msg: 'token invalid' },
+    { success: false, code: 1011, msg: 'token expired' }
+  ]);
+  await assert.rejects(backend.tuyaRequestRaw(42, 'POST', '/v1.0/devices/id/commands', { commands: [] }), /token expired/);
+  assert.equal(backend.tokenRequestCount(), 2);
   assert.equal(backend.tuyaTokens.has('42'), false);
 });
