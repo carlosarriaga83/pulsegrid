@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import tkinter as tk
 import urllib.parse
 import urllib.request
@@ -29,6 +30,8 @@ SERVO_DIR = ROOT / "dispositivos" / "servo"
 GA25_DIR = ROOT / "dispositivos" / "ga25" / "esp32_motor"
 DEFAULT_API_URL = "https://pulse.2api2.com"
 DEVICE_CODE_DOMAIN = "pulsegrid-device-code-v1:"
+MPREMOTE_RETRY_ATTEMPTS = 5
+MPREMOTE_RETRY_DELAY_SECONDS = 1
 ESP_TYPES = ("Auto", "ESP32", "ESP32-S2", "ESP32-S3", "ESP32-C3", "ESP32-C6", "ESP32-H2")
 MODEL_PROFILES = {
     "servo": {
@@ -376,6 +379,7 @@ class BurnerApp(tk.Tk):
             self._log("Escribiendo MicroPython: {}".format(image.name))
             self._run_tool(["esptool", "--port", port, "write_flash", "-z", "0x1000", str(image)])
             self._log("MicroPython instalado. Esperando reinicio...")
+            time.sleep(2)
         else:
             self._log("Usando el MicroPython existente; no se usara esptool ni se borrara la flash.")
             runtime = self._run_tool(["mpremote", "connect", port, "exec", "import sys; print(sys.version)"])
@@ -407,8 +411,8 @@ class BurnerApp(tk.Tk):
             raise BurnerError("El chip detectado no coincide con {}. Revisa el tipo de ESP32 o usa Auto.".format(selected))
 
     def _device_id_from_mac(self, port):
-        result = self._run_tool([
-            "mpremote", "connect", port, "exec",
+        result = self._run_mpremote(port, [
+            "exec",
             "import network; w=network.WLAN(network.STA_IF); w.active(True); print('PULSE_' + ''.join('{:02X}'.format(x) for x in w.config('mac'))) ",
         ])
         match = re.search(r"PULSE_([0-9A-Fa-f]{12})", result.output)
@@ -426,8 +430,26 @@ class BurnerApp(tk.Tk):
                 self._run_tool(["mpremote", "connect", port, "fs", "rm", ":" + name], allow_error=True)
         for name, path in upload:
             self._log("Cargando {}...".format(name))
-            self._run_tool(["mpremote", "connect", port, "fs", "cp", str(path), ":" + name])
+            self._run_mpremote(port, ["fs", "cp", str(path), ":" + name])
         self._log("Archivos cargados. Configuración: {}".format(", ".join(name for name, _ in generated) or "ninguna"))
+
+    def _run_mpremote(self, port, arguments):
+        command = ["mpremote", "connect", port] + list(arguments)
+        transient_errors = ("could not enter raw repl", "could not exec command", "device is busy or does not respond")
+        last_result = None
+        for attempt in range(1, MPREMOTE_RETRY_ATTEMPTS + 1):
+            result = self._run_tool(command, allow_error=True)
+            if result.code == 0:
+                return result
+            last_result = result
+            output = result.output.casefold()
+            if not any(marker in output for marker in transient_errors):
+                break
+            if attempt < MPREMOTE_RETRY_ATTEMPTS:
+                self._log("MicroPython aún está iniciando en {}; reintentando acceso serial ({}/{}).".format(
+                    port, attempt + 1, MPREMOTE_RETRY_ATTEMPTS))
+                time.sleep(MPREMOTE_RETRY_DELAY_SECONDS)
+        raise BurnerError((last_result.output if last_result else "No se pudo ejecutar mpremote") or "No se pudo ejecutar mpremote")
 
     def _make_config(self, model, settings):
         if model == "otros":

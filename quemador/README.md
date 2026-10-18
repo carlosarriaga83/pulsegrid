@@ -86,6 +86,8 @@ La herramienta usa `esptool` para:
 - Borrar la flash cuando se solicita actualización.
 - Escribir la imagen en `0x1000`.
 
-Después usa `mpremote` para comprobar que MicroPython arranca y para cargar los archivos. Las imágenes `.bin` no se descargan automáticamente: selecciona una imagen oficial o una imagen local compatible con el tipo de ESP32. El repositorio incluye una imagen genérica en `dispositivos/servo/ESP32_GENERIC-20260824-v1.29.0.bin`.
+Después usa `mpremote` para comprobar que MicroPython arranca y para cargar los archivos. Tras flashear, el quemador espera el primer arranque y reintenta errores transitorios al entrar al REPL; considera la carga completa solo cuando aparezca `Carga terminada correctamente`.
+
+Las imágenes `.bin` no se descargan automáticamente: selecciona una imagen oficial o una imagen local compatible con el tipo de ESP32. El repositorio incluye una imagen genérica en `dispositivos/servo/ESP32_GENERIC-20260824-v1.29.0.bin`. Esa imagen genérica **no** incluye el perfil de buffers TLS dinámicos; actualizar solo los archivos `.py` o volver a instalar esa imagen no corrige el `ENOMEM` observado. Para ello hace falta compilar el perfil `PULSEGRID_SERVO` y seleccionar el `.bin` personalizado resultante.
 
 Para ESP32-S2, S3, C3, C6 o H2 selecciona una imagen construida específicamente para ese chip.

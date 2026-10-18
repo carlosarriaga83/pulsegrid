@@ -199,6 +199,16 @@ test('burner displays and logs the device code only after a successful firmware 
   assert.match(burner, /else:\s+if not settings\["flash_micropython"\]:\s+self\._log\("Reiniciando MicroPython\.\.\."\)/);
 });
 
+test('burner retries transient raw REPL failures after flashing MicroPython', () => {
+  assert.match(burner, /MPREMOTE_RETRY_ATTEMPTS = 5/);
+  assert.match(burner, /self\._log\("MicroPython instalado\. Esperando reinicio\.\.\."\)\s+time\.sleep\(2\)/);
+  assert.match(burner, /transient_errors = \("could not enter raw repl"/);
+  assert.match(burner, /self\._run_tool\(command, allow_error=True\)/);
+  assert.match(burner, /time\.sleep\(MPREMOTE_RETRY_DELAY_SECONDS\)/);
+  assert.match(burner, /self\._run_mpremote\(port, \[\s+"exec"/);
+  assert.match(burner, /self\._run_mpremote\(port, \["fs", "cp"/);
+});
+
 test('servo NeoPixel reflects cloud/provisioning/offline state and OTA retries timeouts', () => {
   const led = fs.readFileSync(path.join(root, 'dispositivos/servo/board_led.py'), 'utf8');
   const main = fs.readFileSync(path.join(root, 'dispositivos/servo/main.py'), 'utf8');
