@@ -50,8 +50,8 @@ class CloudClient:
         port = int(parts[1]) if len(parts) > 1 else 443
         client = socket.socket()
         try:
-            client.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 2048)
-            client.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 2048)
+            client.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 512)
+            client.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 512)
         except (AttributeError, OSError):
             pass
         client.settimeout(8)
@@ -66,6 +66,7 @@ class CloudClient:
                 import ssl as tls
             gc.collect()
             phase = 'TLS handshake'
+            self._log_heap('antes del handshake TLS')
             secure_client = tls.wrap_socket(client, server_hostname=parts[0])
             return secure_client, parts[0]
         except Exception as error:
@@ -73,6 +74,18 @@ class CloudClient:
             client.close()
             gc.collect()
             raise
+
+    def _log_heap(self, label):
+        try:
+            print('Heap MicroPython {}: {}'.format(label, gc.mem_free()))
+        except AttributeError:
+            pass
+        try:
+            import esp32
+            print('Heap ESP32 {} (total, libre, bloque mayor, minimo libre): {}'.format(
+                label, esp32.idf_heap_info(esp32.HEAP_DATA)))
+        except Exception:
+            pass
 
     def request(self, method, path, payload=None):
         if time.ticks_diff(time.ticks_ms(), self.next_request_at) < 0:
@@ -87,7 +100,7 @@ class CloudClient:
             request = '{} {} HTTP/1.1\r\nHost: {}\r\nX-Device-Code: {}\r\nConnection: close\r\n'.format(method, path, host, self.device_code)
             if body:
                 request += 'Content-Type: application/json\r\nContent-Length: {}\r\n'.format(len(body))
-            client.send((request + '\r\n' + body).encode())
+            client.sendall((request + '\r\n' + body).encode())
             header = b''
             while b'\r\n\r\n' not in header:
                 chunk = client.recv(256)
@@ -120,18 +133,7 @@ class CloudClient:
             print('Pulsegrid (TLS/HTTP):', error)
             if getattr(error, 'errno', None) == 12:
                 gc.collect()
-                try:
-                    free_heap = gc.mem_free()
-                    print('Heap libre tras recuperar:', free_heap)
-                except AttributeError:
-                    free_heap = None
-                try:
-                    import esp32
-                    heap_info = esp32.idf_heap_info(esp32.HEAP_DATA)
-                    print('Heap ESP32 (total, libre, bloque mayor, minimo libre):', heap_info)
-                except (ImportError, AttributeError, OSError, TypeError):
-                    if free_heap is not None:
-                        print('La falta de memoria TLS puede deberse a fragmentacion del heap.')
+                self._log_heap('tras recuperar')
             self.next_request_at = time.ticks_add(time.ticks_ms(), self.retry_ms)
             self.retry_ms = min(self.retry_ms * 2, 60000)
             return None
