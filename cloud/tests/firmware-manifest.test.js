@@ -115,11 +115,13 @@ test('ESP firmware supports three-boot Wi-Fi recovery and faster command polling
   }
   assert.match(servoMain, /recovery_mode = wifi_recovery\.register_boot\(count_reset\)/);
   assert.match(servoMain, /reset_cause in \(getattr\(machine, 'PWRON_RESET', 1\), getattr\(machine, 'HARD_RESET', 2\)\)/);
-  assert.match(servoMain, /FIRMWARE_VERSION = '2026\.10\.17\.servo-r7'/);
+  assert.match(servoMain, /FIRMWARE_VERSION = '2026\.10\.18\.servo-r8'/);
   assert.match(servoMain, /if recovery_mode:\s+try:\s+wlan\.disconnect\(\)\s+wlan\.active\(False\)/);
   assert.match(servoMain, /COMMAND_POLL_MS = 1000/);
   assert.match(servoMain, /if recovery_mode or not WIFI_SSID:/);
-  assert.match(servoMain, /time\.ticks_diff\(now, boot_started_at\) >= WIFI_CONNECT_TIMEOUT_MS/);
+  assert.match(servoMain, /PORTAL_START_DELAY_MS = 60000/);
+  assert.match(servoMain, /not connected and not wifi_connect_pending and not portal_started/);
+  assert.match(servoMain, /time\.ticks_diff\(now, boot_started_at\) >= PORTAL_START_DELAY_MS/);
   assert.match(servoPortal, /def run\(controller=None, force_ap=False\)/);
   assert.match(servoPortal, /values\['ssid'\] and not force_ap/);
   assert.match(servoLed, /'recovery': \(32, 14, 0\)/);
@@ -201,6 +203,7 @@ test('servo NeoPixel reflects cloud/provisioning/offline state and OTA retries t
   const led = fs.readFileSync(path.join(root, 'dispositivos/servo/board_led.py'), 'utf8');
   const main = fs.readFileSync(path.join(root, 'dispositivos/servo/main.py'), 'utf8');
   const cloud = fs.readFileSync(path.join(root, 'dispositivos/servo/cloud_client.py'), 'utf8');
+  const portal = fs.readFileSync(path.join(root, 'dispositivos/servo/captive_portal.py'), 'utf8');
   const ota = fs.readFileSync(path.join(root, 'dispositivos/servo/pulsegrid_ota.py'), 'utf8');
   assert.match(led, /'online': \(0, 24, 0\)/);
   assert.match(led, /'provisioning': \(24, 16, 0\)/);
@@ -213,8 +216,11 @@ test('servo NeoPixel reflects cloud/provisioning/offline state and OTA retries t
   assert.match(cloud, /self\.retry_ms = min\(self\.retry_ms \* 2, 60000\)/);
   assert.match(cloud, /self\.retry_ms = 5000/);
   assert.match(cloud, /gc\.collect\(\)\s+phase = 'TLS handshake'/);
-  assert.match(cloud, /socket\.SO_RCVBUF, 4096/);
+  assert.match(cloud, /socket\.SO_RCVBUF, 2048/);
+  assert.match(cloud, /socket\.SO_SNDBUF, 2048/);
+  assert.match(cloud, /Heap ESP32 \(total, libre, bloque mayor, minimo libre\)/);
   assert.match(cloud, /idf_heap_info/);
+  assert.match(portal, /server\.close\(\)\s+_started = False\s+return/);
   assert.match(ota, /_connection\(api_url, 30\)/);
   assert.match(ota, /client\.connect\(\(host, port\)\)\s+if secure:\s+gc\.collect\(\)/);
   assert.match(ota, /phase = 'TLS handshake'\s+client = tls\.wrap_socket/);

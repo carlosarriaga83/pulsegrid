@@ -19,12 +19,13 @@ except ImportError:
     COMMANDS_ENABLED = True
     DIRECTION_REVERSED = False
 
-FIRMWARE_VERSION = '2026.10.17.servo-r7'
+FIRMWARE_VERSION = '2026.10.18.servo-r8'
 FIRMWARE_FILES = ('main.py', 'cloud_client.py', 'board_led.py', 'captive_portal.py', 'cortina.py', 'servo_calibration.py', 'stservo.py', 'boot.py', 'ota_boot.py', 'pulsegrid_ota.py', 'wifi_recovery.py')
 COMMAND_POLL_MS = 1000
 WIFI_RETRY_MIN_MS = 2000
 WIFI_RETRY_MAX_MS = 60000
 WIFI_CONNECT_TIMEOUT_MS = 20000
+PORTAL_START_DELAY_MS = 60000
 wifi_connect_started = None
 wifi_connect_pending = False
 
@@ -127,7 +128,8 @@ def main():
             connected = wlan.isconnected()
         except Exception:
             connected = False
-        if not recovery_mode and not connected and not portal_started and time.ticks_diff(now, boot_started_at) >= WIFI_CONNECT_TIMEOUT_MS:
+        if (not recovery_mode and not connected and not wifi_connect_pending and not portal_started
+            and time.ticks_diff(now, boot_started_at) >= PORTAL_START_DELAY_MS):
             import captive_portal
             captive_portal.start_background(controller, recovery_mode)
             portal_started = True

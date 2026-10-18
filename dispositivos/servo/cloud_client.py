@@ -50,8 +50,8 @@ class CloudClient:
         port = int(parts[1]) if len(parts) > 1 else 443
         client = socket.socket()
         try:
-            client.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
-            client.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 4096)
+            client.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 2048)
+            client.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 2048)
         except (AttributeError, OSError):
             pass
         client.settimeout(8)
@@ -128,7 +128,7 @@ class CloudClient:
                 try:
                     import esp32
                     heap_info = esp32.idf_heap_info(esp32.HEAP_DATA)
-                    print('Heap ESP32 (bloque mayor, libre total, minimo):', heap_info)
+                    print('Heap ESP32 (total, libre, bloque mayor, minimo libre):', heap_info)
                 except (ImportError, AttributeError, OSError, TypeError):
                     if free_heap is not None:
                         print('La falta de memoria TLS puede deberse a fragmentacion del heap.')

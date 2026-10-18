@@ -165,6 +165,9 @@ def run(controller=None, force_ap=False):
             if ap.active():
                 ap.active(False)
             PORTAL_HOST = station.ifconfig()[0]
+            server.close()
+            _started = False
+            return
         elif not ap.active():
             _enable_ap(ap)
         try:
