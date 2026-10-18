@@ -24,12 +24,14 @@ function tuyaBackend(response) {
   return context;
 }
 
-test('Tuya permission-denied error explains the cloud API authorization needed and retains its code', async () => {
-  const backend = tuyaBackend({ success: false, code: 28841105, msg: 'permission deny' });
+test('Tuya 1106 permission-denied error explains API, data-center, and account-link checks', async () => {
+  const backend = tuyaBackend({ success: false, code: 1106, msg: 'permission deny' });
   await assert.rejects(backend.tuyaRequestRaw(42, 'POST', '/v1.0/devices/id/commands', { commands: [] }), (error) => {
-    assert.match(error.message, /28841105/);
-    assert.match(error.message, /autoriza.*API de control de dispositivos/i);
-    assert.equal(error.tuyaTrace.response.code, 28841105);
+    assert.match(error.message, /1106/);
+    assert.match(error.message, /API de control de dispositivos/i);
+    assert.match(error.message, /centro de datos/i);
+    assert.match(error.message, /cuenta de la app/i);
+    assert.equal(error.tuyaTrace.response.code, 1106);
     return true;
   });
   assert.equal(backend.tuyaTokens.has('42'), true, 'permission errors must not invalidate a valid token');

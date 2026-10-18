@@ -67,3 +67,16 @@ test('servo calibration firmware enforces a geometry ceiling and persists real e
   assert.match(cortina, /calibration_motion_fault/);
   assert.match(cortina, /movimiento normal bloqueado durante la calibracion segura/);
 });
+
+test('all dashboard copies provide a distinct timed GA25 calibration flow', () => {
+  const root = path.join(__dirname, '..');
+  for (const folder of ['', 'public', 'public_html', 'legacy-root']) {
+    const wizard = fs.readFileSync(path.join(root, folder, 'blind-calibration-ui.js'), 'utf8');
+    assert.match(wizard, /function mountGa25CalibrationWizard\(context\)/);
+    assert.match(wizard, /blind\.ga25CalibrationStart/);
+    assert.match(wizard, /blind\.ga25CalibrationStop/);
+    assert.match(wizard, /blind\.ga25CalibrationCancel/);
+    assert.match(wizard, /sin encoder/);
+    assert.match(wizard, /getCalibrationDeviceModel\(\) !== 'ga25'/);
+  }
+});

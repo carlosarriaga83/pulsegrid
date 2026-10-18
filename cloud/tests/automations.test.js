@@ -203,14 +203,14 @@ test('HTML loads automation helpers before app and mirrors are synchronized', ()
     const html = fs.readFileSync(path.join(root, folder, 'index.html'), 'utf8');
     assert.ok(html.indexOf('automation-model.js?v=47') >= 0);
     assert.ok(html.indexOf('automation-ui.js?v=56') >= 0);
-    assert.ok(html.indexOf('app.js?v=63') >= 0);
+    assert.ok(html.indexOf('app.js?v=64') >= 0);
     assert.ok(html.indexOf('blind-calibration-model.js?v=2') >= 0);
-    assert.ok(html.indexOf('blind-calibration-ui.js?v=2') >= 0);
+    assert.ok(html.indexOf('blind-calibration-ui.js?v=3') >= 0);
     assert.ok(html.includes('telemetry-overrides.css?v=53'));
     assert.ok(html.indexOf('automation-model.js?v=47') < html.indexOf('automation-ui.js?v=56'));
     assert.ok(html.indexOf('automation-ui.js?v=56') < html.indexOf('blind-calibration-model.js?v=2'));
-    assert.ok(html.indexOf('blind-calibration-model.js?v=2') < html.indexOf('blind-calibration-ui.js?v=2'));
-    assert.ok(html.indexOf('blind-calibration-ui.js?v=2') < html.indexOf('app.js?v=63'));
+    assert.ok(html.indexOf('blind-calibration-model.js?v=2') < html.indexOf('blind-calibration-ui.js?v=3'));
+    assert.ok(html.indexOf('blind-calibration-ui.js?v=3') < html.indexOf('app.js?v=64'));
     assert.match(html, /automations.css\?v=48/);
     const app = fs.readFileSync(path.join(root, folder, 'app.js'), 'utf8');
     assert.match(app, /pad\(date\.getHours\(\)\)}:\$\{pad\(date\.getMinutes\(\)\)}:\$\{pad\(date\.getSeconds\(\)\)/);

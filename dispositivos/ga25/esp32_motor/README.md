@@ -6,7 +6,7 @@ Para LOLIN S2 Mini / ESP32-S2:
 - GPIO18: entrada de direccion A.
 - GPIO33: entrada de direccion B.
 
-El firmware consulta los comandos de Pulsegrid y envia telemetria. Sin encoder o sensor, `position` es una estimacion basada en tiempo; ajusta `FULL_TRAVEL_MS` despues de medir el recorrido real.
+El firmware consulta los comandos de Pulsegrid y envia telemetria. Sin encoder o sensor, `position` es una estimacion basada en tiempo. El asistente de calibración GA25 mide el recorrido completo temporizado: coloca la cortina cerrada, inicia el movimiento supervisado y pulsa Guardar tiempo y parar al llegar al extremo abierto. El valor se persiste como `FULL_TRAVEL_MS`; no proporciona detección de atascos ni posición física real. Hay un corte local de seguridad a los 120 segundos.
 
 `FULL_TRAVEL_MS` se guarda en `config.py`, que queda fuera de los manifiestos OTA y de la limpieza del perfil GA25 del quemador. Los reinicios, las actualizaciones OTA y la pérdida de Wi-Fi no borran ese ajuste; el guardado del portal y de la configuración remota conserva un respaldo para recuperarlo si hay un reset durante la escritura. La posición física no se puede conocer con exactitud tras un corte durante el movimiento sin encoder o finales de carrera. Borrar toda la flash sí elimina `config.py`.
 
@@ -35,7 +35,7 @@ python -m mpremote connect COM8 fs cp main.py :main.py
 python -m mpremote connect COM8 reset
 ```
 
-Comandos Pulsegrid soportados: `curtain.open`, `curtain.close`, `curtain.stop` y `curtain.move` con `position` o `percent`, opcionalmente `speed` de 10 a 100.
+Comandos Pulsegrid soportados: `curtain.open`, `curtain.close`, `curtain.stop` y `curtain.move` con `position` o `percent`, opcionalmente `speed` de 10 a 100. La calibración añade `blind.ga25CalibrationStart`, `blind.ga25CalibrationStop` y `blind.ga25CalibrationCancel`; requiere supervisión visual continua.
 
 GA25 OTA releases contain `main.py`, `captive_portal.py`, `motor_curtain.py`, `boot.py` and `ota_boot.py`. OTA uses a transactional flash staging area. Files are streamed in bounded chunks to `.pulsegrid_ota/stage`; the loader accepts either `Content-Length` or proxy `chunked` transfer encoding, checks the manifest size and SHA-256, then activates the release through `boot.py`. The previous set is retained in `.pulsegrid_ota/backup` until the new firmware confirms a healthy boot; a failed boot or watchdog reset restores that backup. `firmware.update` is handled by the cloud command loop.
 

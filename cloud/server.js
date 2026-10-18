@@ -506,12 +506,9 @@ async function tuyaRequest(userId, method, pathName, body) {
 function tuyaErrorMessage(response) {
   const code = Number(response?.code);
   const message = String(response?.msg || 'Tuya rechazo la solicitud');
-  if (code === 28841105) {
-    return `Tuya denego el comando (codigo ${response.code}): autoriza en el proyecto Tuya la API de control de dispositivos y vincula a ese proyecto la cuenta de la app/dispositivo. Respuesta: ${message}`;
-  }
-  if (/permission\s*den(y|ied)|no permissions?/i.test(message)) {
+  if ([1106, 28841105].includes(code) || /permission\s*den(y|ied)|no permissions?/i.test(message)) {
     const codeLabel = response?.code === undefined ? '' : ` (codigo ${response.code})`;
-    return `Tuya denego el comando${codeLabel}: revisa la autorizacion de la API de control y el vinculo de la cuenta/dispositivo con el proyecto. Respuesta: ${message}`;
+    return `Tuya denego el comando${codeLabel}: revisa que el proyecto tenga autorizada la API de control de dispositivos, corresponda al centro de datos de la cuenta y tenga vinculada la cuenta de la app que posee el dispositivo. Respuesta: ${message}`;
   }
   return message;
 }

@@ -95,6 +95,7 @@ last_telemetry = 0
 pending_configuration = None
 restart_requested = False
 led_override = None
+ga25_calibration_started_at = None
 FIRMWARE_TARGET = "ga25"
 FIRMWARE_FILES = ("main.py", "captive_portal.py", "motor_curtain.py", "boot.py", "ota_boot.py", "wifi_recovery.py")
 
@@ -513,9 +514,11 @@ def update_firmware(version):
 
 
 def execute(command):
-    global pending_configuration, restart_requested, led_override
+    global pending_configuration, restart_requested, led_override, ga25_calibration_started_at, FULL_TRAVEL_MS
     name = command.get("name") or command.get("command")
     payload = command.get("payload") or {}
+    if ga25_calibration_started_at is not None and name not in ("blind.ga25CalibrationStop", "blind.ga25CalibrationCancel", "curtain.stop"):
+        raise ValueError("Deten la calibracion GA25 antes de enviar otro comando")
     if name == "led.configure":
         if not isinstance(payload.get("enabled"), bool):
             raise ValueError("enabled debe ser booleano")
@@ -534,11 +537,37 @@ def execute(command):
         motor.move_to(0, payload.get("speed", 70))
     elif name == "curtain.stop":
         motor.stop()
+        ga25_calibration_started_at = None
     elif name == "curtain.move":
         value = payload.get("position", payload.get("percent"))
         if value is None:
             raise ValueError("curtain.move requiere position o percent")
         motor.move_to(value, payload.get("speed", 70))
+    elif name == "blind.ga25CalibrationStart":
+        if ga25_calibration_started_at is not None or motor.direction:
+            raise ValueError("El motor ya esta en movimiento o calibracion")
+        if payload.get("from") != "closed":
+            raise ValueError("Coloca la cortina en el extremo cerrado antes de calibrar")
+        motor.position = 0.0
+        motor.start(1, 70)
+        ga25_calibration_started_at = time.ticks_ms()
+    elif name == "blind.ga25CalibrationStop":
+        if ga25_calibration_started_at is None:
+            raise ValueError("No hay una calibracion GA25 en curso")
+        elapsed = time.ticks_diff(time.ticks_ms(), ga25_calibration_started_at)
+        motor.stop()
+        ga25_calibration_started_at = None
+        if elapsed < 1000 or elapsed > 120000:
+            raise ValueError("Tiempo de recorrido invalido; rango permitido 1 a 120 segundos")
+        FULL_TRAVEL_MS = elapsed
+        motor.full_travel_ms = elapsed
+        motor.position = 100.0
+        save_configuration({"wifi_ssid": WIFI_SSID, "wifi_password": WIFI_PASSWORD, "api_url": API_URL,
+                            "device_code": DEVICE_CODE, "device_id": DEVICE_ID, "full_travel_ms": elapsed,
+                            "open_a_level": OPEN_A_LEVEL, "direction_reversed": DIRECTION_REVERSED})
+    elif name == "blind.ga25CalibrationCancel":
+        motor.stop()
+        ga25_calibration_started_at = None
     elif name == "firmware.update":
         restart_requested = update_firmware(str(payload.get("version", "")))
     else:
@@ -546,7 +575,7 @@ def execute(command):
 
 
 def poll_commands():
-    global pending_configuration, restart_requested
+    global pending_configuration, restart_requested, ga25_calibration_started_at
     if not DEVICE_CODE:
         return
     result = request("GET", cloud_path("/api/device-commands?deviceId=" + DEVICE_ID))
@@ -572,6 +601,7 @@ def poll_commands():
         print("Comando ejecutado:", command.get("name"))
     except Exception as error:
         motor.stop()
+        ga25_calibration_started_at = None
         pending_configuration = None
         acknowledge(command.get("id"), "failed", error)
         print("Comando rechazado:", error)
@@ -633,7 +663,7 @@ def main():
         status_led.set((255, 180, 0))
         print("LED de estado: amarillo; pendiente de registro cloud")
     captive_portal.start_background(motor, recovery_mode)
-    global last_poll, last_telemetry, last_presence, next_wifi_retry
+    global last_poll, last_telemetry, last_presence, next_wifi_retry, ga25_calibration_started_at
     wifi_retry_ms = WIFI_RETRY_MIN_MS
     next_wifi_retry = time.ticks_add(time.ticks_ms(), wifi_retry_ms)
     while True:
@@ -641,6 +671,10 @@ def main():
             ota_boot.feed()
         now = time.ticks_ms()
         motor.tick()
+        if ga25_calibration_started_at is not None and time.ticks_diff(now, ga25_calibration_started_at) >= 120000:
+            motor.stop()
+            ga25_calibration_started_at = None
+            print("Calibracion GA25 detenida por limite de seguridad (120 s)")
         try:
             connected = bool(wifi_station and wifi_station.isconnected())
         except Exception:

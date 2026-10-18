@@ -1528,9 +1528,16 @@ function renderCalibrationWizard() {
   const targetModel = String(telemetry.firmwareTarget || '').toLowerCase();
   const identity = `${selectedDevice?.name || ''} ${selectedDevice?.type || ''} ${selectedDevice?.id || ''}`;
   const supportsServo = targetModel === 'servo' || (!targetModel && !/ga25/i.test(identity));
-  if (!supportsServo) { $('#calibration-wizard')?.remove(); return; }
+  const supportsGa25 = targetModel === 'ga25' || (!targetModel && /ga25/i.test(identity));
+  if (!supportsServo && !supportsGa25) { $('#calibration-wizard')?.remove(); return; }
   if (!layout || $('#calibration-wizard') || typeof window.mountBlindCalibrationWizard !== 'function') return;
-  window.mountBlindCalibrationWizard({ $, $$, apiRequest, loadDevices, getCalibrationPosition, waitForCalibrationCommand, waitForCalibrationIdle, showToast, renderIcons });
+  const getCalibrationDeviceModel = () => {
+    const device = devices.find((item) => item.id === $('#command-device')?.value);
+    const model = String(parseTelemetry(device?.telemetry).firmwareTarget || '').toLowerCase();
+    const deviceIdentity = `${device?.name || ''} ${device?.type || ''} ${device?.id || ''}`;
+    return model || (/ga25/i.test(deviceIdentity) ? 'ga25' : 'servo');
+  };
+  window.mountBlindCalibrationWizard({ $, $$, apiRequest, loadDevices, getCalibrationPosition, waitForCalibrationCommand, waitForCalibrationIdle, getCalibrationDeviceModel, showToast, renderIcons });
 }
 
 function navigate(viewName) {

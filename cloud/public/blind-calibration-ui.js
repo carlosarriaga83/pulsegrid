@@ -1,6 +1,26 @@
 (function (root) {
   'use strict';
 
+  function mountGa25CalibrationWizard(context) {
+    const { $, apiRequest, loadDevices, waitForCalibrationCommand, showToast, getCalibrationDeviceModel } = context;
+    const layout = $('.command-layout');
+    if (!layout || $('#calibration-wizard')) return;
+    layout.insertAdjacentHTML('beforeend', `<div class="panel calibration-wizard" id="calibration-wizard"><div class="panel-heading"><div><h2>Calibración de recorrido GA25</h2><p>Recorrido temporizado, sin encoder.</p></div><span class="secure-badge">Supervisada</span></div><p class="calibration-safety-note"><strong>Antes de iniciar:</strong> coloca manualmente la cortina cerrada. Observa todo el recorrido y pulsa Guardar tiempo y parar al llegar al extremo abierto. No dejes que el motor empuje contra topes mecánicos.</p><p id="ga25-calibration-status" class="form-status" aria-live="polite">La calibración reemplazará el tiempo guardado.</p><div class="calibration-stage-actions"><button class="primary-button" id="ga25-calibration-start" type="button">Iniciar desde cerrado</button><button class="secondary-button calibration-stop" id="ga25-calibration-stop" type="button" disabled>Guardar tiempo y parar</button><button class="secondary-button" id="ga25-calibration-cancel" type="button" disabled>Cancelar sin guardar</button></div></div>`);
+    const status = $('#ga25-calibration-status'), startButton = $('#ga25-calibration-start'), stopButton = $('#ga25-calibration-stop'), cancelButton = $('#ga25-calibration-cancel');
+    let active = false, busy = false;
+    const send = async (command, payload = {}) => {
+      const deviceId = $('#command-device')?.value;
+      if (!deviceId || getCalibrationDeviceModel() !== 'ga25') throw new Error('Selecciona un dispositivo GA25.');
+      const result = await apiRequest('commands', { method: 'POST', body: JSON.stringify({ deviceId, command, payload }) });
+      await waitForCalibrationCommand(result.commandId); await loadDevices();
+    };
+    const render = () => { startButton.disabled = busy || active; stopButton.disabled = busy || !active; cancelButton.disabled = busy || !active; };
+    startButton.addEventListener('click', async () => { try { busy = true; render(); status.textContent = 'Arrancando desde cerrado. Supervisa el movimiento y detenlo en el extremo abierto.'; await send('blind.ga25CalibrationStart', { from: 'closed' }); active = true; status.textContent = 'En movimiento. Pulsa Guardar tiempo y parar al llegar al extremo abierto.'; } catch (error) { status.textContent = error.message; } finally { busy = false; render(); } });
+    stopButton.addEventListener('click', async () => { try { busy = true; render(); await send('blind.ga25CalibrationStop'); active = false; status.textContent = 'Tiempo guardado. La posición seguirá siendo una estimación por tiempo.'; showToast('Tiempo de recorrido GA25 guardado'); } catch (error) { status.textContent = error.message; } finally { busy = false; render(); } });
+    cancelButton.addEventListener('click', async () => { try { busy = true; render(); await send('blind.ga25CalibrationCancel'); active = false; status.textContent = 'Detenida sin guardar cambios.'; } catch (error) { status.textContent = error.message; } finally { busy = false; render(); } });
+    render();
+  }
+
   function mountBlindCalibrationWizard(context) {
     const { $, $$, apiRequest, loadDevices, getCalibrationPosition, waitForCalibrationCommand, waitForCalibrationIdle, showToast, renderIcons } = context;
     const markup = `<div class="panel calibration-wizard" id="calibration-wizard">
@@ -36,7 +56,7 @@
     </div>`;
 
     const layout = $('.command-layout');
-    if (!layout || $('#calibration-wizard')) return;
+    if (!layout || $('#calibration-wizard')) return; if (context.getCalibrationDeviceModel?.() === 'ga25') { mountGa25CalibrationWizard(context); return; }
     layout.insertAdjacentHTML('beforeend', markup);
     const status = $('#calibration-status');
     const get = (id) => $(`#${id}`);

@@ -79,17 +79,34 @@ test('servo cloud dispatcher explicitly recognizes calibration wizard commands',
   assert.match(dashboard, /mountBlindCalibrationWizard/);
 });
 
-test('calibration wizard and generic command menu do not send servo actions to GA25', () => {
+test('calibration wizard selects a timed GA25 flow without sending servo commands', () => {
   for (const folder of ['', 'public', 'public_html', 'legacy-root']) {
     const file = path.join(root, 'cloud', folder, 'app.js');
     const source = fs.readFileSync(file, 'utf8');
     assert.match(source, /const supportsServo = targetModel === 'servo' \|\| \(!targetModel && !\/ga25\/i\.test\(identity\)\)/, folder || 'cloud root');
-    assert.match(source, /if \(!supportsServo\) \{ \$\('#calibration-wizard'\)\?\.remove\(\); return; \}/, folder || 'cloud root');
-    assert.match(source, /mountBlindCalibrationWizard\(\{ \$, \$\$, apiRequest, loadDevices, getCalibrationPosition, waitForCalibrationCommand, waitForCalibrationIdle, showToast, renderIcons \}\)/, folder || 'cloud root');
+    assert.match(source, /if \(!supportsServo && !supportsGa25\) \{ \$\('#calibration-wizard'\)\?\.remove\(\); return; \}/, folder || 'cloud root');
+    assert.match(source, /getCalibrationDeviceModel/);
+    assert.match(source, /mountBlindCalibrationWizard\(\{ \$, \$\$, apiRequest, loadDevices, getCalibrationPosition, waitForCalibrationCommand, waitForCalibrationIdle, getCalibrationDeviceModel, showToast, renderIcons \}\)/, folder || 'cloud root');
+    const calibrationUi = fs.readFileSync(path.join(root, 'cloud', folder, 'blind-calibration-ui.js'), 'utf8');
+    assert.match(calibrationUi, /blind\.ga25CalibrationStart/);
+    assert.match(calibrationUi, /blind\.ga25CalibrationStop/);
+    assert.match(calibrationUi, /blind\.ga25CalibrationCancel/);
+    assert.match(calibrationUi, /timed-estimate|sin encoder/i);
     assert.doesNotMatch(source, /'blind\.configure':|'<option value="blind\.configure"/);
     assert.match(source, /const isGa25Device = targetModel === 'ga25' \|\| \(!targetModel && \/ga25\/i\.test\(selectedIdentity\)\)/, folder || 'cloud root');
     assert.match(source, /configureDeviceCommands\(\);\s+renderCalibrationWizard\(\);/, folder || 'cloud root');
   }
+});
+
+test('GA25 firmware times, bounds, stops, and persists a supervised full-travel calibration', () => {
+  const ga25Main = fs.readFileSync(path.join(root, 'dispositivos/ga25/esp32_motor/main.py'), 'utf8');
+  assert.match(ga25Main, /blind\.ga25CalibrationStart/);
+  assert.match(ga25Main, /blind\.ga25CalibrationStop/);
+  assert.match(ga25Main, /blind\.ga25CalibrationCancel/);
+  assert.match(ga25Main, /elapsed < 1000 or elapsed > 120000/);
+  assert.match(ga25Main, /motor\.full_travel_ms = elapsed/);
+  assert.match(ga25Main, /"full_travel_ms": elapsed/);
+  assert.match(ga25Main, /Calibracion GA25 detenida por limite de seguridad/);
 });
 
 test('ESP firmware supports three-boot Wi-Fi recovery and faster command polling', () => {
