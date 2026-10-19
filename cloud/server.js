@@ -508,7 +508,7 @@ function tuyaErrorMessage(response) {
   const message = String(response?.msg || 'Tuya rechazo la solicitud');
   if ([1106, 28841105].includes(code) || /permission\s*den(y|ied)|no permissions?/i.test(message)) {
     const codeLabel = response?.code === undefined ? '' : ` (codigo ${response.code})`;
-    return `Tuya denego el comando${codeLabel}: revisa que el proyecto tenga autorizada la API de control de dispositivos, corresponda al centro de datos de la cuenta y tenga vinculada la cuenta de la app que posee el dispositivo. Respuesta: ${message}`;
+    return `Tuya denego el control${codeLabel}. Segun Tuya, verifica: (1) que el ID enviado sea el device ID actual de Tuya y no un UUID; (2) si se elimino, restauro o volvio a enlazar el dispositivo, importalo de nuevo; (3) que el dispositivo/producto sea controlable por Cloud-to-Cloud desde esta cuenta de desarrollador (Tuya indica que el equipo debe estar emparejado y ser compatible con la app OEM/SDK correspondiente); y (4) que el endpoint sea de la region donde se emparejo. Si GET status funciona para ese mismo ID y endpoint, enfoca la revision en la elegibilidad de control del dispositivo/producto. Respuesta Tuya: ${message}`;
   }
   return message;
 }

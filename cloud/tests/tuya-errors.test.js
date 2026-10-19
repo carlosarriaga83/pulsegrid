@@ -27,13 +27,14 @@ function tuyaBackend(response) {
   return context;
 }
 
-test('Tuya 1106 permission-denied error explains API, data-center, and account-link checks', async () => {
+test('Tuya 1106 permission-denied error explains the vendor-documented device checks', async () => {
   const backend = tuyaBackend({ success: false, code: 1106, msg: 'permission deny' });
   await assert.rejects(backend.tuyaRequestRaw(42, 'POST', '/v1.0/devices/id/commands', { commands: [] }), (error) => {
     assert.match(error.message, /1106/);
-    assert.match(error.message, /API de control de dispositivos/i);
-    assert.match(error.message, /centro de datos/i);
-    assert.match(error.message, /cuenta de la app/i);
+    assert.match(error.message, /device ID actual/i);
+    assert.match(error.message, /importalo de nuevo/i);
+    assert.match(error.message, /Cloud-to-Cloud/i);
+    assert.match(error.message, /region/i);
     assert.equal(error.tuyaTrace.response.code, 1106);
     return true;
   });
