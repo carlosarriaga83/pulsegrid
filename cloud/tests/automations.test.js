@@ -152,6 +152,33 @@ test('scheduler retains time/day gate and once-per-local-date claim before dispa
   assert.ok(calls.some((sql) => sql.includes('last_checked_at <= DATE_SUB(NOW(), INTERVAL check_interval_seconds SECOND)')));
 });
 
+
+  test('user Tuya command dispatch uses the selected device ID alias in the OpenAPI URL', async () => {
+    const requested = [];
+    const calls = [];
+    const db = {
+      async execute(sql, params) {
+        calls.push({ sql, params });
+        if (sql.startsWith('SELECT id, user_id AS userId, device_id AS deviceId')) {
+          return [[{ id: 7, userId: 42, deviceId: 'tuya-current-device', provider: 'tuya', capabilities: [{ code: 'switch', type: 'Boolean' }] }], []];
+        }
+        if (sql.startsWith('INSERT INTO commands')) return [{ insertId: 19 }, []];
+        return [{ affectedRows: 1 }, []];
+      }
+    };
+    const b = backend({
+      tuyaRequestRaw: async (userId, method, url, payload) => {
+        requested.push({ userId, method, url, payload });
+        return { response: { success: true } };
+      },
+      recordAutomationTroubleshooting: () => {}
+    });
+    const result = await b.queueUserDeviceCommand(db, 'person@example.com', 'tuya-current-device', 'tuya.set', { code: 'switch', value: true });
+    assert.equal(result.status, 'succeeded');
+    assert.equal(requested[0].url, '/v1.0/devices/tuya-current-device/commands');
+    assert.deepEqual(JSON.parse(JSON.stringify(requested[0].payload)), { commands: [{ code: 'switch', value: true }] });
+    assert.equal(requested[0].userId, 42);
+  });
 test('anytime schedule dispatches each tick while conditions are met', async () => {
   const b = backend();
   assert.equal(b.automationInput(input({ triggerTime: 'anytime' })).triggerTime, 'anytime');

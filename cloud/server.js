@@ -646,20 +646,22 @@ async function dispatchDeviceCommand(db, device, command, payload, context = {})
     const [result] = await db.execute('INSERT INTO commands (device_id, command_name, payload) VALUES (?, ?, ?)', [device.id, command, JSON.stringify(payload)]);
     return { id: result.insertId, status: 'queued' };
   }
+  const tuyaDeviceId = String(device.deviceId || device.device_id || '').trim();
+  if (!tuyaDeviceId) throw new Error('El dispositivo Tuya no tiene un Device ID valido');
   validateTuyaCommand(device, command, payload);
   const option = AutomationModel.writable(device).find((item) => item.value === payload.code);
   const typedPayload = { code: payload.code, value: AutomationModel.typedValue(payload.value, option) };
   const [result] = await db.execute("INSERT INTO commands (device_id, command_name, payload, status) VALUES (?, ?, ?, 'running')", [device.id, command, JSON.stringify(typedPayload)]);
   try {
     const requestPayload = { commands: [typedPayload] };
-    const trace = await tuyaRequestRaw(device.userId, 'POST', `/v1.0/devices/${encodeURIComponent(device.device_id)}/commands`, requestPayload);
+    const trace = await tuyaRequestRaw(device.userId, 'POST', `/v1.0/devices/${encodeURIComponent(tuyaDeviceId)}/commands`, requestPayload);
     await db.execute("UPDATE commands SET status = 'succeeded' WHERE id = ?", [result.insertId]);
-    const troubleshooting = { deviceId: device.device_id, ruleId: context.ruleId || null, command, request: requestPayload, response: trace.response };
+    const troubleshooting = { deviceId: tuyaDeviceId, ruleId: context.ruleId || null, command, request: requestPayload, response: trace.response };
     recordAutomationTroubleshooting(device.userId, troubleshooting);
     return { id: result.insertId, status: 'succeeded', troubleshooting };
   } catch (error) {
     await db.execute("UPDATE commands SET status = 'failed', error_message = ? WHERE id = ?", [String(error.message).slice(0, 500), result.insertId]);
-    const troubleshooting = { deviceId: device.device_id, ruleId: context.ruleId || null, command, request: { commands: [typedPayload] }, response: error.tuyaTrace?.response || { error: error.message } };
+    const troubleshooting = { deviceId: tuyaDeviceId, ruleId: context.ruleId || null, command, request: { commands: [typedPayload] }, response: error.tuyaTrace?.response || { error: error.message } };
     recordAutomationTroubleshooting(device.userId, troubleshooting);
     error.troubleshooting = troubleshooting;
     throw error;
