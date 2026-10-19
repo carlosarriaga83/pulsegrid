@@ -40,7 +40,9 @@ test('safe-calibration wizard uses bounded commands only and documents manual su
     assert.match(html, /blind\.safeCalibrationBegin/);
     assert.match(html, /blind\.safeCalibrationTest/);
     assert.match(html, /blind\.safeCalibrationStep/);
-    assert.match(html, /turns: ?\.125|turns: 0\.125/);
+    assert.match(html, /calibration-step-size/);
+    assert.match(html, /value="1">1 vuelta/);
+    assert.match(html, /Number\(.*calibration-step-size.*value\)/s);
     assert.match(html, /calibration-midpoint-confirm/);
     assert.match(html, /El encoder no detecta fuerza|no detecta fuerza/);
     assert.match(html, /Límite preventivo \(80% de la mitad estimada\)/);
@@ -73,15 +75,20 @@ test('servo calibration firmware enforces a geometry ceiling and persists real e
   assert.match(firmware, /_start_precision_multiturn\(servo_id, TEST_DIRECTION_TURNS, cortina\.APPROACH_SPEED, 30\)/);
   assert.match(firmware, /def stop_safe\(cortina, servo_id\):/);
   assert.match(firmware, /def cancel_safe\(cortina, servo_id\):[\s\S]*?if cortina\.multiturn_active\[servo_id\]:[\s\S]*?cortina\._finish_multiturn\(servo_id\)[\s\S]*?config\['calibration_in_progress'\] = False/);
-  assert.match(firmware, /amount <= 0\.125/);
+  assert.match(firmware, /amount <= 1\.0/);
+  assert.match(firmware, /_start_precision_multiturn\(servo_id, signed, cortina\.CALIBRATION_STEP_SPEED, 40\)/);
   assert.match(firmware, /cortina\._save_persistent_state\(\)/);
   assert.match(cortina, /timeout_ms/);
   assert.match(cortina, /def _start_precision_multiturn\(self, servo_id, turns, speed=120, acceleration=30\):/);
   assert.match(cortina, /self\.bus\.set_mode\(servo_id, 3\)/);
   assert.match(cortina, /self\.bus\.set_mode\(servo_id, 0\)[\s\S]*?start_position = self\.bus\.position\(servo_id\)/);
   assert.match(cortina, /self\.bus\.move_multiturn\(servo_id, turns, start_position, speed, acceleration\)/);
-  assert.match(cortina, /remaining = self\.bus\.position_signed\(servo_id\)/);
-  assert.match(cortina, /if remaining == 0:/);
+  assert.match(cortina, /position = self\.bus\.position\(servo_id\)[\s\S]*?delta = self\._track_position\(servo_id, position\)[\s\S]*?task\['moved_counts'\] \+= delta \* task\['direction'\]/);
+  assert.match(cortina, /if task\['moved_counts'\] >= task\['target_counts'\]:/);
+  assert.doesNotMatch(cortina, /position_signed\(servo_id\)/);
+  assert.match(cortina, /def multiturn_status\(self, servo_id\):[\s\S]*?position = self\._last_positions\.get\(servo_id, 0\)/);
+  assert.doesNotMatch(cortina.slice(cortina.indexOf('    def multiturn_status('), cortina.indexOf('    def set_direction_reversed(')), /self\.position\(/);
+  assert.match(cortina, /CALIBRATION_STEP_SPEED = 240/);
   const stservo = fs.readFileSync(path.join(root, 'dispositivos/servo/stservo.py'), 'utf8');
   assert.match(stservo, /def move_multiturn\(self, servo_id, turns, current_position=0, speed=800, acceleration=50\):/);
   assert.match(stservo, /encoded_target = abs\(target\) \| \(\(1 << 15\) if target < 0 else 0\)/);
@@ -91,7 +98,12 @@ test('servo calibration firmware enforces a geometry ceiling and persists real e
   const cloudClient = fs.readFileSync(path.join(root, 'dispositivos/servo/cloud_client.py'), 'utf8');
   const main = fs.readFileSync(path.join(root, 'dispositivos/servo/main.py'), 'utf8');
   assert.match(cloudClient, /blind\.safeCalibrationStop/);
-  assert.match(main, /CALIBRATION_COMMAND_POLL_MS = 200/);
+  assert.match(main, /controller\.update_multiturn\(\)[\s\S]*?moving = any\(controller\.multiturn_active\.values\(\)\)[\s\S]*?if not moving:/);
+  assert.match(main, /if not any\(controller\.multiturn_active\.values\(\)\) and time\.ticks_diff/);
+  assert.match(main, /time\.sleep_ms\(10\)/);
+  assert.match(cloudClient, /def flush_ack\(self\):[\s\S]*?_pending_ack = None/);
+  assert.match(cloudClient, /self\._pending_ack = \(command, error, firmware_update\)/);
+  assert.doesNotMatch(cloudClient, /_thread|start_background|_network_loop/);
 });
 
 test('cloud command queue prioritizes emergency curtain and calibration stops', () => {

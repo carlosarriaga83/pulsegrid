@@ -27,6 +27,13 @@
     if (!layout || $('#calibration-wizard')) return; if (context.getCalibrationDeviceModel?.() === 'ga25') { mountGa25CalibrationWizard(context); return; }
     layout.insertAdjacentHTML('beforeend', markup);
     const get = (id) => $(`#${id}`), status = $('#calibration-status');
+    const stepSize = document.createElement('select');
+    stepSize.id = 'calibration-step-size';
+    stepSize.innerHTML = '<option value="0.125">1/8 de vuelta</option><option value="0.25">1/4 de vuelta</option><option value="0.5" selected>1/2 vuelta</option><option value="1">1 vuelta</option>';
+    const stepSizeLabel = document.createElement('label');
+    stepSizeLabel.className = 'calibration-step-size-label';
+    stepSizeLabel.append('Avance por paso', stepSize);
+    get('calibration-step-down').before(stepSizeLabel);
     let phase = 'measure', busy = false;
     const refs = new Set(), servoId = () => Number(get('calibration-servo').value), deviceId = () => $('#command-device')?.value;
     const disable = (id, value) => { get(id).disabled = value; };
@@ -37,6 +44,7 @@
       ['calibration-positive-down', 'calibration-positive-up'].forEach((id) => { get(id).hidden = phase !== 'directionConfirm'; });
       disable('calibration-step-down', phase !== 'travel' || refs.has('deployed') || busy);
       disable('calibration-step-up', phase !== 'travel' || refs.has('rolled') || busy);
+      disable('calibration-step-size', phase !== 'travel' || busy);
       disable('calibration-mark-deployed', phase !== 'travel' || refs.has('deployed') || busy);
       disable('calibration-mark-rolled', phase !== 'travel' || refs.has('rolled') || busy);
       disable('calibration-stop', phase === 'measure' || phase === 'done'); disable('calibration-cancel', phase === 'measure' || phase === 'done' || busy);
@@ -75,7 +83,7 @@
     get('calibration-test-direction').addEventListener('click', async () => { try { busy=true; render(); status.textContent='Prueba lenta en curso; observa la persiana.'; await send('blind.safeCalibrationTest', {}, true); phase='directionConfirm'; status.textContent='¿La persiana bajó o subió?'; } catch(e) { status.textContent=e.message; } finally { busy=false; render(); } });
     const confirm = async (down) => { try { busy=true; render(); await send('blind.safeCalibrationDirection',{positiveIsDown:down}); phase='travel'; status.textContent='Avanza en pasos supervisados; no fuerces los topes.'; } catch(e) { status.textContent=e.message; } finally { busy=false; render(); } };
     get('calibration-positive-down').addEventListener('click',()=>confirm(true)); get('calibration-positive-up').addEventListener('click',()=>confirm(false));
-    const step = async (direction) => { try { busy=true; render(); await send('blind.safeCalibrationStep',{direction,turns:.125},true); status.textContent='Paso completado. Revisa visualmente antes de continuar.'; } catch(e) { status.textContent=e.message; } finally { busy=false; render(); } };
+    const step = async (direction) => { try { busy=true; render(); const turns=Number(stepSize.value); status.textContent=`Avance supervisado de ${turns} vuelta(s)…`; await send('blind.safeCalibrationStep',{direction,turns},true); status.textContent='Paso completado. Revisa visualmente antes de continuar.'; } catch(e) { status.textContent=e.message; } finally { busy=false; render(); } };
     get('calibration-step-down').addEventListener('click',()=>step('down')); get('calibration-step-up').addEventListener('click',()=>step('up'));
     const mark = async (reference) => { try { busy=true; render(); await send('blind.safeCalibrationMark',{reference}); refs.add(reference); if(refs.size===2){phase='done';status.textContent='Límites guardados permanentemente en el servo.';showToast('Calibración guardada');}else status.textContent='Extremo guardado. Avanza hacia el otro extremo sin forzarlo.'; } catch(e){status.textContent=e.message;} finally{busy=false;render();} };
     get('calibration-mark-rolled').addEventListener('click',()=>mark('rolled')); get('calibration-mark-deployed').addEventListener('click',()=>mark('deployed'));

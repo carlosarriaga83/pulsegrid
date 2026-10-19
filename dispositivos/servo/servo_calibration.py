@@ -145,8 +145,8 @@ def safe_step(cortina, servo_id, direction, turns=0.125):
     if direction not in ('down', 'up'):
         raise ValueError('direccion de movimiento invalida')
     amount = float(turns)
-    if not 0.0 < amount <= 0.125:
-        raise ValueError('cada avance debe ser de hasta un octavo de vuelta')
+    if not 0.0 < amount <= 1.0:
+        raise ValueError('cada avance debe ser de hasta una vuelta')
     midpoint = config['calibration_midpoint_turns']
     current = cortina.absolute_turns[servo_id]
     remaining = config['half_travel_limit'] - abs(current - midpoint)
@@ -154,7 +154,7 @@ def safe_step(cortina, servo_id, direction, turns=0.125):
         raise ValueError('limite preventivo calculado alcanzado; no sigas avanzando')
     amount = min(amount, remaining)
     signed = amount * config['calibration_down_direction'] * (1 if direction == 'down' else -1)
-    cortina._start_multiturn(servo_id, signed, cortina.APPROACH_SPEED, 30)
+    cortina._start_precision_multiturn(servo_id, signed, cortina.CALIBRATION_STEP_SPEED, 40)
 
 
 def mark_safe(cortina, servo_id, reference):

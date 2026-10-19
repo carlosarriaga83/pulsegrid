@@ -46,8 +46,9 @@
         <button class="secondary-button" id="calibration-test-direction" type="button" disabled>Probar una vuelta lenta</button>
         <button class="secondary-button" id="calibration-positive-down" type="button" hidden>La prueba bajó la persiana</button>
         <button class="secondary-button" id="calibration-positive-up" type="button" hidden>La prueba subió la persiana</button>
-        <button class="secondary-button" id="calibration-step-down" type="button" disabled>Desenrollar 1/8 de vuelta</button>
-        <button class="secondary-button" id="calibration-step-up" type="button" disabled>Enrollar 1/8 de vuelta</button>
+        <label class="calibration-step-size-label">Avance por paso<select id="calibration-step-size"><option value="0.125">1/8 de vuelta</option><option value="0.25">1/4 de vuelta</option><option value="0.5" selected>1/2 vuelta</option><option value="1">1 vuelta</option></select></label>
+        <button class="secondary-button" id="calibration-step-down" type="button" disabled>Desenrollar paso</button>
+        <button class="secondary-button" id="calibration-step-up" type="button" disabled>Enrollar paso</button>
         <button class="secondary-button" id="calibration-mark-rolled" type="button" disabled>Guardar extremo abierto (enrollado)</button>
         <button class="secondary-button" id="calibration-mark-deployed" type="button" disabled>Guardar extremo cerrado (desplegado)</button>
         <button class="secondary-button calibration-stop" id="calibration-stop" type="button" disabled>Parar movimiento</button>
@@ -76,6 +77,7 @@
       get('calibration-positive-up').hidden = phase !== 'directionConfirm';
       setDisabled('calibration-step-down', phase !== 'travel' || references.has('deployed') || busy);
       setDisabled('calibration-step-up', phase !== 'travel' || references.has('rolled') || busy);
+      setDisabled('calibration-step-size', phase !== 'travel' || busy);
       setDisabled('calibration-mark-rolled', phase !== 'travel' || references.has('rolled') || busy);
       setDisabled('calibration-mark-deployed', phase !== 'travel' || references.has('deployed') || busy);
       setDisabled('calibration-stop', phase === 'measure' || phase === 'done');
@@ -160,8 +162,9 @@
     const step = async (direction) => {
       try {
         busy = true; render();
-        status.textContent = `Avance supervisado de 1/8 de vuelta hacia ${direction === 'down' ? 'abajo' : 'arriba'}…`;
-        await sendAndWait('blind.safeCalibrationStep', { direction, turns: 0.125 }, true);
+        const turns = Number(get('calibration-step-size').value);
+        status.textContent = `Avance supervisado de ${turns} vuelta(s) hacia ${direction === 'down' ? 'abajo' : 'arriba'}…`;
+        await sendAndWait('blind.safeCalibrationStep', { direction, turns }, true);
         status.textContent = 'Paso terminado. Observa la posición antes de ordenar el siguiente avance.';
       } catch (error) { status.textContent = error.message; }
       finally { busy = false; render(); }

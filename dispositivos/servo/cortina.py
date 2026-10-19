@@ -8,6 +8,7 @@ class Cortina:
     COUNTS_PER_TURN = 4096
     MAX_LONG_TURNS = 999.99
     APPROACH_SPEED = 120
+    CALIBRATION_STEP_SPEED = 240
     FRONT_GEAR_CLOCKWISE_TURNS = -1
     FRONT_GEAR_COUNTERCLOCKWISE_TURNS = 1
 
@@ -175,11 +176,12 @@ class Cortina:
             try:
                 task = self.multiturn_tasks[servo_id]
                 if task is not None and task.get('position_mode'):
-                    remaining = self.bus.position_signed(servo_id)
-                    task['remaining_counts'] = abs(remaining)
-                    task['moved_counts'] = max(0, task['target_counts'] - abs(remaining))
+                    position = self.bus.position(servo_id)
+                    delta = self._track_position(servo_id, position)
+                    task['moved_counts'] += delta * task['direction']
+                    task['remaining_counts'] = max(0, task['target_counts'] - task['moved_counts'])
                     self.absolute_turns[servo_id] = task['start_turns'] + task['direction'] * task['moved_counts'] / self.COUNTS_PER_TURN
-                    if remaining == 0:
+                    if task['moved_counts'] >= task['target_counts']:
                         self._finish_multiturn(servo_id, completed=True)
                     elif time.ticks_diff(time.ticks_ms(), task['started_at']) >= task['timeout_ms']:
                         self._finish_multiturn(servo_id, timed_out=True)
@@ -212,11 +214,9 @@ class Cortina:
         try:
             if task.get('position_mode'):
                 if completed:
-                    hold_position = task['start_position']
+                    hold_position = (task['start_position'] + task['direction'] * task['target_counts']) % self.COUNTS_PER_TURN
                 else:
-                    remaining = self.bus.position_signed(servo_id)
-                    current_position = task['target_position'] - remaining
-                    hold_position = current_position % self.COUNTS_PER_TURN
+                    hold_position = self.bus.position(servo_id)
                 self.bus.torque(servo_id, False)
                 self.bus.set_mode(servo_id, 0)
                 self.bus.torque(servo_id, True)
@@ -252,15 +252,15 @@ class Cortina:
         self.bus.torque(servo_id, False)
         self.bus.set_mode(servo_id, 0)
         self.bus.torque(servo_id, True)
-        start_position = self.bus.position(servo_id)
-        self._track_position(servo_id, start_position)
-        direction = 1 if turns > 0 else -1
-        target_counts = int(round(abs(turns) * self.COUNTS_PER_TURN))
-        target_position = start_position + direction * target_counts
         try:
             self.bus.torque(servo_id, False)
             self.bus.set_mode(servo_id, 3)
             self.bus.torque(servo_id, True)
+            start_position = self.bus.position(servo_id)
+            self._last_positions[servo_id] = start_position
+            direction = 1 if turns > 0 else -1
+            target_counts = int(round(abs(turns) * self.COUNTS_PER_TURN))
+            target_position = start_position + direction * target_counts
             self.bus.move_multiturn(servo_id, turns, start_position, speed, acceleration)
         except (STServoError, OSError, ValueError):
             try:
@@ -392,9 +392,7 @@ class Cortina:
         if servo_id not in self.servo_ids:
             raise ValueError('ID de servo no detectado')
         task = self.multiturn_tasks[servo_id]
-        if task is None or not task.get('position_mode'):
-            position = self.position(servo_id)
-            self._track_position(servo_id, position)
+        position = self._last_positions.get(servo_id, 0)
         blind = self.blind_status(servo_id)
         target = self.blind_targets[servo_id]
         return {

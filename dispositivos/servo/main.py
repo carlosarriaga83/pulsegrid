@@ -19,14 +19,13 @@ except ImportError:
     COMMANDS_ENABLED = True
     DIRECTION_REVERSED = False
 
-FIRMWARE_VERSION = '2026.10.19.servo-r10'
+FIRMWARE_VERSION = '2026.10.19.servo-r15'
 FIRMWARE_FILES = ('main.py', 'cloud_client.py', 'board_led.py', 'captive_portal.py', 'cortina.py', 'servo_calibration.py', 'stservo.py', 'boot.py', 'ota_boot.py', 'pulsegrid_ota.py', 'wifi_recovery.py')
 COMMAND_POLL_MS = 1000
 CALIBRATION_COMMAND_POLL_MS = 200
 WIFI_RETRY_MIN_MS = 2000
 WIFI_RETRY_MAX_MS = 60000
 WIFI_CONNECT_TIMEOUT_MS = 20000
-PORTAL_START_DELAY_MS = 60000
 wifi_connect_started = None
 wifi_connect_pending = False
 
@@ -99,11 +98,8 @@ def main():
         connected = connect_wifi(wlan)
     wifi_retry_ms = WIFI_RETRY_MIN_MS
     next_wifi_retry = time.ticks_add(time.ticks_ms(), wifi_retry_ms)
-    portal_started = False
-    if recovery_mode or not WIFI_SSID:
-        import captive_portal
-        captive_portal.start_background(controller, recovery_mode)
-        portal_started = True
+    import captive_portal
+    captive_portal.start_background(controller, recovery_mode)
     if recovery_mode:
         print('Recuperacion Wi-Fi : cambie la red en el portal Pulsegrid y guarde para reiniciar')
     elif connected and DEVICE_CODE:
@@ -117,8 +113,8 @@ def main():
     ota_boot = sys.modules.get('ota_boot')
     if ota_boot:
         ota_boot.confirm()
-    last_poll = 0
-    last_telemetry = 0
+    last_state_publish = 0
+    last_cloud_poll = 0
     wifi_recovery_cleared = False
     while True:
         if ota_boot:
@@ -129,11 +125,6 @@ def main():
             connected = wlan.isconnected()
         except Exception:
             connected = False
-        if (not recovery_mode and not connected and not wifi_connect_pending and not portal_started
-            and time.ticks_diff(now, boot_started_at) >= PORTAL_START_DELAY_MS):
-            import captive_portal
-            captive_portal.start_background(controller, recovery_mode)
-            portal_started = True
         if connected:
             wifi_connect_pending = False
             wifi_connect_started = None
@@ -150,26 +141,35 @@ def main():
             wifi_recovery_cleared = True
         if connected and DEVICE_CODE and not recovery_mode:
             wifi_retry_ms = WIFI_RETRY_MIN_MS
-            calibration_active = any(config.get('calibration_in_progress') for config in controller.blind_config.values())
-            poll_interval = CALIBRATION_COMMAND_POLL_MS if calibration_active else COMMAND_POLL_MS
-            if time.ticks_diff(now, last_poll) >= poll_interval:
-                last_poll = now
-                client.commands(controller, board_led.set_enabled)
-            if time.ticks_diff(now, last_telemetry) >= 5000:
-                last_telemetry = now
-                client.telemetry(controller, FIRMWARE_VERSION, board_led.is_enabled(), bool(controller.direction_reversed))
+            moving = any(controller.multiturn_active.values())
+            calibrating = any(config.get('calibration_in_progress') for config in controller.blind_config.values())
+            if not moving:
+                poll_interval = CALIBRATION_COMMAND_POLL_MS if calibrating else COMMAND_POLL_MS
+                if time.ticks_diff(now, last_cloud_poll) >= poll_interval:
+                    last_cloud_poll = now
+                    client.flush_ack()
+                    if not client._pending_ack:
+                        client.commands(controller, board_led.set_enabled)
+                telemetry_interval = 500 if calibrating else 2000
+                if not any(controller.multiturn_active.values()) and time.ticks_diff(now, last_state_publish) >= telemetry_interval:
+                    last_state_publish = time.ticks_ms()
+                    client.telemetry(controller, FIRMWARE_VERSION, board_led.is_enabled(), bool(controller.direction_reversed))
         else:
             if not recovery_mode and not connected and time.ticks_diff(now, next_wifi_retry) >= 0:
                 connected = connect_wifi(wlan)
                 if connected:
                     wifi_retry_ms = WIFI_RETRY_MIN_MS
-                    last_poll = 0
-                    last_telemetry = 0
+                    last_state_publish = 0
+                    last_cloud_poll = 0
                 else:
                     wifi_retry_ms = min(wifi_retry_ms * 2, WIFI_RETRY_MAX_MS)
                 next_wifi_retry = time.ticks_add(time.ticks_ms(), wifi_retry_ms)
+        if client.firmware_update_requested:
+            controller.parar()
+            time.sleep_ms(250)
+            machine.reset()
         board_led.tick()
-        time.sleep_ms(50)
+        time.sleep_ms(10)
 
 
 main()

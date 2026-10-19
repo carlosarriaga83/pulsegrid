@@ -1430,7 +1430,7 @@ async function waitForCalibrationIdle(deviceId, servoId, startPosition, timeout 
   const startedAt = Date.now();
   let sawMovement = false;
   while (Date.now() - startedAt < timeout) {
-    await new Promise((resolve) => window.setTimeout(resolve, 500));
+    await new Promise((resolve) => window.setTimeout(resolve, 250));
     await loadDevices();
     const device = devices.find((item) => item.id === deviceId);
     const telemetry = parseTelemetry(device?.telemetry);

@@ -38,7 +38,7 @@ def execute_blind_command(cortina, name, payload):
     elif name == 'blind.safeCalibrationDirection':
         servo_calibration.confirm_safe_direction(cortina, servo_id, payload.get('positiveIsDown'))
     elif name == 'blind.safeCalibrationStep':
-        servo_calibration.safe_step(cortina, servo_id, payload.get('direction', ''), payload.get('turns', 0.125))
+        servo_calibration.safe_step(cortina, servo_id, payload.get('direction', ''), payload.get('turns', 1.0))
     elif name == 'blind.safeCalibrationMark':
         servo_calibration.mark_safe(cortina, servo_id, payload.get('reference', ''))
     elif name == 'blind.safeCalibrationStop':
@@ -59,6 +59,7 @@ class CloudClient:
         self.retry_ms = 5000
         self.firmware_update_requested = False
         self.last_success_at = None
+        self._pending_ack = None
 
     def _socket(self):
         gc.collect()
@@ -168,7 +169,6 @@ class CloudClient:
         for servo_id in cortina.servo_ids:
             try:
                 values = cortina.multiturn_status(servo_id)
-                values['position'] = cortina.position(servo_id)
                 servos[str(servo_id)] = values
             except Exception as error:
                 print('Servo {}: {}'.format(servo_id, error))
@@ -178,6 +178,29 @@ class CloudClient:
             'directionReversed': reversed_value, 'online': True, 'servos': servos,
         })
 
+    def _execute_command(self, cortina, led_setter, command):
+        name = command.get('name')
+        payload = command.get('payload') or {}
+        if (name in ('curtain.open', 'curtain.close', 'curtain.move', 'servo.configure', 'servo.torque', 'servo.resetTurns')
+                and any(config.get('calibration_in_progress') for config in cortina.blind_config.values())):
+            raise ValueError('comando bloqueado durante la calibracion segura; usa los pasos guiados o cancela la calibracion')
+        if name == 'led.configure':
+            led_setter(bool(payload['enabled']))
+        elif name == 'direction.configure':
+            cortina.set_direction_reversed(bool(payload['reversed']))
+        elif name == 'curtain.open':
+            cortina.abrir(int(payload.get('speed', 800)), int(payload.get('acceleration', 50)))
+        elif name == 'curtain.close':
+            cortina.cerrar(int(payload.get('speed', 800)), int(payload.get('acceleration', 50)))
+        elif name == 'curtain.stop':
+            cortina.parar()
+        elif name == 'curtain.move':
+            cortina.move_blind(int(payload.get('servoId', 1)), float(payload.get('percent', payload.get('position'))), int(payload.get('speed', 800)), int(payload.get('acceleration', 50)))
+        elif name in BLIND_COMMANDS:
+            execute_blind_command(cortina, name, payload)
+        else:
+            raise ValueError('Comando no soportado: ' + str(name))
+
     def commands(self, cortina, led_setter):
         if not self.commands_enabled:
             return
@@ -186,48 +209,33 @@ class CloudClient:
         if not command:
             return
         name = command.get('name')
-        payload = command.get('payload') or {}
         error = None
+        firmware_update = name == 'firmware.update'
         try:
-            if (name in ('curtain.open', 'curtain.close', 'curtain.move', 'servo.configure', 'servo.torque', 'servo.resetTurns')
-                    and any(config.get('calibration_in_progress') for config in cortina.blind_config.values())):
-                raise ValueError('comando bloqueado durante la calibracion segura; usa los pasos guiados o cancela la calibracion')
-            if name == 'led.configure':
-                led_setter(bool(payload['enabled']))
-            elif name == 'direction.configure':
-                cortina.set_direction_reversed(bool(payload['reversed']))
-            elif name == 'curtain.open':
-                cortina.abrir(int(payload.get('speed', 800)), int(payload.get('acceleration', 50)))
-            elif name == 'curtain.close':
-                cortina.cerrar(int(payload.get('speed', 800)), int(payload.get('acceleration', 50)))
-            elif name == 'curtain.stop':
-                cortina.parar()
-            elif name == 'curtain.move':
-                cortina.move_blind(int(payload.get('servoId', 1)), float(payload.get('percent', payload.get('position'))), int(payload.get('speed', 800)), int(payload.get('acceleration', 50)))
-            elif name == 'firmware.update':
+            if firmware_update:
+                payload = command.get('payload') or {}
                 import pulsegrid_ota
                 files = ('main.py', 'cloud_client.py', 'board_led.py', 'captive_portal.py', 'cortina.py', 'servo_calibration.py', 'stservo.py', 'boot.py', 'ota_boot.py', 'pulsegrid_ota.py', 'wifi_recovery.py')
                 pulsegrid_ota.update(self.api_url, self.device_code, self.device_id, str(payload.get('version', '')), 'servo', files)
-                del pulsegrid_ota
-                import sys
-                sys.modules.pop('pulsegrid_ota', None)
-                sys.modules.pop('ota_boot', None)
-                gc.collect()
-                self.firmware_update_requested = True
-            elif name in BLIND_COMMANDS:
-                execute_blind_command(cortina, name, payload)
             else:
-                raise ValueError('Comando no soportado: ' + str(name))
+                self._execute_command(cortina, led_setter, command)
         except Exception as caught:
             error = caught
-        status = 'failed' if error else 'succeeded'
-        body = {'deviceId': self.device_id, 'status': status}
-        if error: body['error'] = str(error)[:500]
-        self.request('POST', '/api/device-commands/{}/ack'.format(command.get('id')), body)
-        if error: print('Comando rechazado:', error)
+        self._pending_ack = (command, error, firmware_update)
+        if error:
+            print('Comando rechazado:', error)
         else:
-            print('Comando ejecutado:', name)
-            if self.firmware_update_requested:
-                import machine
-                time.sleep_ms(250)
-                machine.reset()
+            print('Comando ejecutado localmente:', name)
+
+    def flush_ack(self):
+        if not self._pending_ack:
+            return
+        command, error, firmware_update = self._pending_ack
+        body = {'deviceId': self.device_id, 'status': 'failed' if error else 'succeeded'}
+        if error:
+            body['error'] = str(error)[:500]
+        result = self.request('POST', '/api/device-commands/{}/ack'.format(command.get('id')), body)
+        if result is not None:
+            self._pending_ack = None
+            if firmware_update and not error:
+                self.firmware_update_requested = True
