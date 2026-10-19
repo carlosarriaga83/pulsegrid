@@ -96,7 +96,7 @@
       const values = measureValues();
       estimate = root.BlindCalibrationModel.estimateTurns(values.height, values.diameter, values.thickness, values.ratio);
       get('calibration-estimate').textContent = `≈ ${estimate.toFixed(2)} vueltas de recorrido`;
-      get('calibration-limit').textContent = `Tope preventivo con margen: ${Math.max(0, estimate * 0.5 - Math.max(2, estimate * 0.2)).toFixed(2)} vueltas por lado desde la mitad.`;
+      get('calibration-limit').textContent = `Límite preventivo (80% de la mitad estimada): ${(estimate * 0.4).toFixed(2)} vueltas por lado desde la mitad.`;
       get('calibration-dimensions').textContent = `Ventana ${values.width} × ${values.height} cm · tubo Ø ${values.diameter} cm · paño ${values.thickness} mm · relación ${values.ratio}:1`;
       const ratio = Math.min(2.6, Math.max(.55, values.width / values.height));
       const rectWidth = Math.round(162 * Math.min(1.5, ratio));
@@ -199,7 +199,6 @@
       try {
         busy = true; render();
         status.textContent = 'Deteniendo y cancelando…';
-        await sendAndWait('blind.safeCalibrationStop', {}, false);
         await sendAndWait('blind.safeCalibrationCancel', {});
         phase = 'measure'; references.clear();
         get('calibration-midpoint-confirm').checked = false;

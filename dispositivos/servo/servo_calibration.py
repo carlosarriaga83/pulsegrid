@@ -1,8 +1,7 @@
+TEST_DIRECTION_TURNS = 1.0
+
+
 def set_motor_side(cortina, servo_id, side):
-    TEST_DIRECTION_TURNS = 1.0
-
-
-    def set_motor_side(cortina, servo_id, side):
     if servo_id not in cortina.servo_ids or side not in ('left', 'right'):
         raise ValueError('servo o lado del motor invalido')
     if cortina.multiturn_active[servo_id]:
@@ -93,7 +92,7 @@ def begin_safe(cortina, servo_id, width_cm, height_cm, tube_diameter_cm, fabric_
         'fabric_thickness_mm': thickness_mm,
         'motor_turns_per_tube_turn': ratio,
         'estimated_turns': estimated,
-        'half_travel_limit': max(0.0, estimated * 0.5 - max(2.0, estimated * 0.2)),
+        'half_travel_limit': estimated * 0.4,
         'calibration_midpoint_turns': midpoint,
         'calibration_down_direction': 0,
         'calibration_direction_pending': True,
@@ -188,10 +187,13 @@ def cancel_safe(cortina, servo_id):
     if servo_id not in cortina.servo_ids:
         raise ValueError('ID de servo no detectado')
     if cortina.multiturn_active[servo_id]:
-        raise ValueError('espera a que termine el movimiento')
+        cortina.blind_config[servo_id]['calibration_motion_fault'] = True
+        cortina._finish_multiturn(servo_id)
     config = cortina.blind_config[servo_id]
     config['calibration_in_progress'] = False
     config['calibrated'] = False
     config['calibration_motion_fault'] = False
+    config['calibration_direction_pending'] = False
+    cortina.calibration_references[servo_id] = set()
     cortina.position_recovery_required[servo_id] = True
     cortina._save_persistent_state()

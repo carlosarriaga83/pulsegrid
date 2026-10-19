@@ -17,6 +17,11 @@ test('geometry estimator rejects unsafe or missing inputs', () => {
   assert.throws(() => model.estimateTurns(150, 5, 0.5, 0), /relación/);
 });
 
+test('50 cm travel estimate leaves room for the fixed one-turn direction test', () => {
+  const estimatedTurns = model.estimateTurns(50, 3.5, 0.5, 1);
+  assert.ok(estimatedTurns * 0.4 >= 1, `preventive limit should allow one turn; estimated ${estimatedTurns} turns`);
+});
+
 test('all deployed static copies use the same estimator implementation', () => {
   const root = path.join(__dirname, '..');
   for (const folder of ['', 'public', 'public_html', 'legacy-root']) {
@@ -38,9 +43,11 @@ test('safe-calibration wizard uses bounded commands only and documents manual su
     assert.match(html, /turns: ?\.125|turns: 0\.125/);
     assert.match(html, /calibration-midpoint-confirm/);
     assert.match(html, /El encoder no detecta fuerza|no detecta fuerza/);
-    assert.match(html, /Tope preventivo con margen/);
+    assert.match(html, /Límite preventivo \(80% de la mitad estimada\)/);
     assert.match(html, /blind\.safeCalibrationStop/);
     assert.match(html, /(?:setDisabled|disable)\('calibration-stop', phase === 'measure' \|\| phase === 'done'\)/);
+    assert.match(html, /blind\.safeCalibrationCancel/);
+    assert.match(html, /phase='measure'|phase = 'measure'/);
     assert.doesNotMatch(html, /blind\.jog|blind\.configure|blind\.markRolled|blind\.markDeployed/);
   }
 });
@@ -61,10 +68,11 @@ test('servo calibration firmware enforces a geometry ceiling and persists real e
   const root = path.join(__dirname, '..', '..');
   const firmware = fs.readFileSync(path.join(root, 'dispositivos/servo/servo_calibration.py'), 'utf8');
   const cortina = fs.readFileSync(path.join(root, 'dispositivos/servo/cortina.py'), 'utf8');
-  assert.match(firmware, /'half_travel_limit': max\(0\.0, estimated \* 0\.5 - max\(2\.0, estimated \* 0\.2\)\)/);
+  assert.match(firmware, /'half_travel_limit': estimated \* 0\.4/);
   assert.match(firmware, /TEST_DIRECTION_TURNS = 1\.0/);
   assert.match(firmware, /_start_multiturn\(servo_id, TEST_DIRECTION_TURNS, cortina\.APPROACH_SPEED, 30\)/);
   assert.match(firmware, /def stop_safe\(cortina, servo_id\):/);
+  assert.match(firmware, /def cancel_safe\(cortina, servo_id\):[\s\S]*?if cortina\.multiturn_active\[servo_id\]:[\s\S]*?cortina\._finish_multiturn\(servo_id\)[\s\S]*?config\['calibration_in_progress'\] = False/);
   assert.match(firmware, /amount <= 0\.125/);
   assert.match(firmware, /cortina\._save_persistent_state\(\)/);
   assert.match(cortina, /timeout_ms/);

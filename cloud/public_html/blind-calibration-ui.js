@@ -52,7 +52,7 @@
     const calculate = () => {
       const v = values(), turns = root.BlindCalibrationModel.estimateTurns(v.height, v.diameter, v.thickness, v.ratio);
       get('calibration-estimate').textContent = `≈ ${turns.toFixed(2)} vueltas`;
-        get('calibration-limit').textContent=`Tope preventivo con margen: ${Math.max(0, turns * .5 - Math.max(2, turns * .2)).toFixed(2)} vueltas por lado.`;
+        get('calibration-limit').textContent=`Límite preventivo (80% de la mitad estimada): ${(turns * .4).toFixed(2)} vueltas por lado.`;
       get('calibration-dimensions').textContent = `Ventana ${v.width} × ${v.height} cm · tubo Ø ${v.diameter} cm · paño ${v.thickness} mm · relación ${v.ratio}:1`;
       return v;
     };
@@ -80,7 +80,7 @@
     const mark = async (reference) => { try { busy=true; render(); await send('blind.safeCalibrationMark',{reference}); refs.add(reference); if(refs.size===2){phase='done';status.textContent='Límites guardados permanentemente en el servo.';showToast('Calibración guardada');}else status.textContent='Extremo guardado. Avanza hacia el otro extremo sin forzarlo.'; } catch(e){status.textContent=e.message;} finally{busy=false;render();} };
     get('calibration-mark-rolled').addEventListener('click',()=>mark('rolled')); get('calibration-mark-deployed').addEventListener('click',()=>mark('deployed'));
     get('calibration-stop').addEventListener('click',async()=>{try{busy=true;render();await send('blind.safeCalibrationStop',{},false);status.textContent='Movimiento detenido. La calibración quedó bloqueada; cancélala y revisa el mecanismo antes de reiniciar.';}catch(e){status.textContent=e.message;}finally{busy=false;render();}});
-    get('calibration-cancel').addEventListener('click',async()=>{try{busy=true;render();await send('blind.safeCalibrationStop',{},false);await send('blind.safeCalibrationCancel',{});phase='measure';refs.clear();get('calibration-midpoint-confirm').checked=false;status.textContent='Cancelada; límites nuevos descartados.';}catch(e){status.textContent=e.message;}finally{busy=false;render();}});
+    get('calibration-cancel').addEventListener('click',async()=>{try{busy=true;render();await send('blind.safeCalibrationCancel',{});phase='measure';refs.clear();get('calibration-midpoint-confirm').checked=false;status.textContent='Cancelada; límites nuevos descartados.';}catch(e){status.textContent=e.message;}finally{busy=false;render();}});
     render(); renderIcons();
   }
   root.mountBlindCalibrationWizard = mountBlindCalibrationWizard;
