@@ -110,7 +110,7 @@ def test_safe_direction(cortina, servo_id):
         raise ValueError('la prueba de sentido solo se permite desde el punto medio')
     if config['half_travel_limit'] < TEST_DIRECTION_TURNS:
         raise ValueError('el recorrido calculado no permite una prueba de una vuelta')
-    cortina._start_multiturn(servo_id, TEST_DIRECTION_TURNS, cortina.APPROACH_SPEED, 30)
+    cortina._start_precision_multiturn(servo_id, TEST_DIRECTION_TURNS, cortina.APPROACH_SPEED, 30)
 
 
 def stop_safe(cortina, servo_id):

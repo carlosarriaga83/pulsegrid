@@ -173,6 +173,17 @@ class Cortina:
         checkpoint = False
         for servo_id in self.servo_ids:
             try:
+                task = self.multiturn_tasks[servo_id]
+                if task is not None and task.get('position_mode'):
+                    remaining = self.bus.position_signed(servo_id)
+                    task['remaining_counts'] = abs(remaining)
+                    task['moved_counts'] = max(0, task['target_counts'] - abs(remaining))
+                    self.absolute_turns[servo_id] = task['start_turns'] + task['direction'] * task['moved_counts'] / self.COUNTS_PER_TURN
+                    if remaining == 0:
+                        self._finish_multiturn(servo_id, completed=True)
+                    elif time.ticks_diff(time.ticks_ms(), task['started_at']) >= task['timeout_ms']:
+                        self._finish_multiturn(servo_id, timed_out=True)
+                    continue
                 position = self.bus.position(servo_id)
             except (STServoError, OSError):
                 task = self.multiturn_tasks[servo_id]
@@ -195,18 +206,86 @@ class Cortina:
             self._save_persistent_state()
 
     def _finish_multiturn(self, servo_id, completed=False, timed_out=False):
+        task = self.multiturn_tasks[servo_id]
+        if task is None:
+            return
         try:
-            self.bus.move_wheel(servo_id, 0, acceleration=50)
-            self.bus.torque(servo_id, False)
-            self.bus.set_mode(servo_id, 0)
+            if task.get('position_mode'):
+                if completed:
+                    hold_position = task['start_position']
+                else:
+                    remaining = self.bus.position_signed(servo_id)
+                    current_position = task['target_position'] - remaining
+                    hold_position = current_position % self.COUNTS_PER_TURN
+                self.bus.torque(servo_id, False)
+                self.bus.set_mode(servo_id, 0)
+                self.bus.torque(servo_id, True)
+                self.bus.move(servo_id, hold_position, speed=min(task['speed'], self.APPROACH_SPEED), acceleration=task['acceleration'])
+                self._last_positions[servo_id] = int(hold_position)
+            else:
+                self.bus.move_wheel(servo_id, 0, acceleration=50)
+                self.bus.torque(servo_id, False)
+                self.bus.set_mode(servo_id, 0)
         except (STServoError, OSError, ValueError):
             pass
+        if completed and task.get('position_mode'):
+            self.absolute_turns[servo_id] = task['start_turns'] + task['direction'] * task['target_counts'] / self.COUNTS_PER_TURN
         self.multiturn_tasks[servo_id] = None
         self.multiturn_active[servo_id] = False
         self.position_recovery_required[servo_id] = not (completed and self.blind_config[servo_id]['calibrated'])
         if timed_out:
             self.blind_config[servo_id]['calibration_motion_fault'] = True
         self._last_saved_turns[servo_id] = self.absolute_turns[servo_id]
+        self._save_persistent_state()
+
+    def _start_precision_multiturn(self, servo_id, turns, speed=120, acceleration=30):
+        if servo_id not in self.servo_ids:
+            raise ValueError('ID de servo no detectado')
+        if self.multiturn_active[servo_id]:
+            raise ValueError('el servo ya esta en movimiento')
+        if not -7.99 <= turns <= 7.99 or turns == 0:
+            raise ValueError('vueltas de precision fuera de rango')
+        speed = int(speed)
+        acceleration = int(acceleration)
+        if not 0 <= speed <= self.bus.MAX_SPEED or not 0 <= acceleration <= self.bus.MAX_ACCELERATION:
+            raise ValueError('velocidad o aceleracion fuera de rango')
+        self.bus.torque(servo_id, False)
+        self.bus.set_mode(servo_id, 0)
+        self.bus.torque(servo_id, True)
+        start_position = self.bus.position(servo_id)
+        self._track_position(servo_id, start_position)
+        direction = 1 if turns > 0 else -1
+        target_counts = int(round(abs(turns) * self.COUNTS_PER_TURN))
+        target_position = start_position + direction * target_counts
+        try:
+            self.bus.torque(servo_id, False)
+            self.bus.set_mode(servo_id, 3)
+            self.bus.torque(servo_id, True)
+            self.bus.move_multiturn(servo_id, turns, start_position, speed, acceleration)
+        except (STServoError, OSError, ValueError):
+            try:
+                self.bus.torque(servo_id, False)
+                self.bus.set_mode(servo_id, 0)
+                self.bus.torque(servo_id, True)
+            except (STServoError, OSError, ValueError):
+                pass
+            raise
+        self.multiturn_tasks[servo_id] = {
+            'direction': direction,
+            'target_counts': target_counts,
+            'moved_counts': 0,
+            'remaining_counts': target_counts,
+            'started_at': time.ticks_ms(),
+            'timeout_ms': max(5000, int(target_counts / max(speed, 1) * 2500 + 3000)),
+            'start_turns': self.absolute_turns[servo_id],
+            'start_position': start_position,
+            'target_position': target_position,
+            'speed': speed,
+            'acceleration': acceleration,
+            'position_mode': True,
+        }
+        self.multiturn_active[servo_id] = True
+        self.position_recovery_required[servo_id] = True
         self._save_persistent_state()
 
     def _start_multiturn(self, servo_id, turns, speed=800, acceleration=50):
@@ -312,13 +391,15 @@ class Cortina:
     def multiturn_status(self, servo_id):
         if servo_id not in self.servo_ids:
             raise ValueError('ID de servo no detectado')
-        position = self.position(servo_id)
-        self._track_position(servo_id, position)
+        task = self.multiturn_tasks[servo_id]
+        if task is None or not task.get('position_mode'):
+            position = self.position(servo_id)
+            self._track_position(servo_id, position)
         blind = self.blind_status(servo_id)
         target = self.blind_targets[servo_id]
         return {
             'absolute_turns': self.absolute_turns[servo_id],
-            'remaining_turns': self.multiturn_tasks[servo_id]['target_counts'] / self.COUNTS_PER_TURN if self.multiturn_active[servo_id] else 0.0,
+            'remaining_turns': (task.get('remaining_counts', task['target_counts']) / self.COUNTS_PER_TURN) if task else 0.0,
             'multiturn_active': self.multiturn_active[servo_id],
             'position_recovery_required': self.position_recovery_required[servo_id],
             'blind_rolled_turns': blind['rolled_turns'],

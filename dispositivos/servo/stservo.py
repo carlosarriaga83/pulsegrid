@@ -15,6 +15,10 @@ class STServoBus:
     ADDR_TORQUE_ENABLE = 40
     ADDR_ACC = 41
     ADDR_MODE = 33
+    ADDR_ID = 5
+    ADDR_LOCK = 55
+    ADDR_MIN_ANGLE = 9
+    ADDR_MAX_ANGLE = 11
     ADDR_GOAL_POSITION = 42
     ADDR_GOAL_SPEED = 46
     ADDR_PRESENT_POSITION = 56
@@ -99,9 +103,23 @@ class STServoBus:
         self.write(servo_id, self.ADDR_TORQUE_ENABLE, bytes((1 if enabled else 0,)))
 
     def set_mode(self, servo_id, mode):
-        if mode not in (0, 1):
+        if mode not in (0, 1, 3):
             raise ValueError('modo de servo invalido')
-        self.write(servo_id, self.ADDR_MODE, bytes((mode,)))
+        self.write_u8(servo_id, self.ADDR_LOCK, 0)
+        try:
+            self.write_u8(servo_id, self.ADDR_MODE, mode)
+            if mode == 0:
+                self.write_u16(servo_id, self.ADDR_MAX_ANGLE, 4095)
+            elif mode == 3:
+                self.write_u16(servo_id, self.ADDR_MIN_ANGLE, 0)
+                self.write_u16(servo_id, self.ADDR_MAX_ANGLE, 0)
+        finally:
+            self.write_u8(servo_id, self.ADDR_LOCK, 1)
+
+    def write_u16(self, servo_id, address, value):
+        if not 0 <= value <= 65535:
+            raise ValueError('valor de 16 bits fuera de rango')
+        return self.write(servo_id, address, bytes((value & 255, (value >> 8) & 255)))
 
     def move(self, servo_id, position, speed=800, acceleration=50):
         if not 0 <= position <= 4095 or not 0 <= speed <= self.MAX_SPEED or not 0 <= acceleration <= self.MAX_ACCELERATION:
@@ -116,6 +134,32 @@ class STServoBus:
         goal = abs(speed) | ((1 << 15) if speed < 0 else 0)
         return self.write(servo_id, self.ADDR_GOAL_SPEED, bytes((goal & 255, (goal >> 8) & 255)))
 
+    def move_multiturn(self, servo_id, turns, current_position=0, speed=800, acceleration=50):
+        if isinstance(turns, bool) or not isinstance(turns, (int, float)):
+            raise ValueError('vueltas debe ser un numero')
+        if not -7.99 <= turns <= 7.99:
+            raise ValueError('vueltas debe estar entre -7.99 y 7.99')
+        if not 0 <= speed <= self.MAX_SPEED or not 0 <= acceleration <= self.MAX_ACCELERATION:
+            raise ValueError('velocidad o aceleracion fuera de rango')
+        target = int(round(current_position + turns * 4096))
+        if not -32767 <= target <= 32767:
+            raise ValueError('objetivo multivuelta fuera de rango')
+        encoded_target = abs(target) | ((1 << 15) if target < 0 else 0)
+        data = bytes((
+            acceleration,
+            encoded_target & 255,
+            (encoded_target >> 8) & 255,
+            0,
+            0,
+            speed & 255,
+            (speed >> 8) & 255,
+        ))
+        return self.write(servo_id, self.ADDR_ACC, data)
+
     def position(self, servo_id):
         data = self.read(servo_id, self.ADDR_PRESENT_POSITION, 2)
         return data[0] | (data[1] << 8)
+
+    def position_signed(self, servo_id):
+        value = self.position(servo_id)
+        return -(value & 0x7FFF) if value & (1 << 15) else value

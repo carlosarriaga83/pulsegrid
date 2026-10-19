@@ -132,7 +132,7 @@ test('ESP firmware supports three-boot Wi-Fi recovery and faster command polling
   }
   assert.match(servoMain, /recovery_mode = wifi_recovery\.register_boot\(count_reset\)/);
   assert.match(servoMain, /reset_cause in \(getattr\(machine, 'PWRON_RESET', 1\), getattr\(machine, 'HARD_RESET', 2\)\)/);
-  assert.match(servoMain, /FIRMWARE_VERSION = '2026\.10\.18\.servo-r9'/);
+  assert.match(servoMain, /FIRMWARE_VERSION = '2026\.10\.19\.servo-r10'/);
   assert.match(servoMain, /if recovery_mode:\s+try:\s+wlan\.disconnect\(\)\s+wlan\.active\(False\)/);
   assert.match(servoMain, /COMMAND_POLL_MS = 1000/);
   assert.match(servoMain, /if recovery_mode or not WIFI_SSID:/);
