@@ -1,4 +1,8 @@
 def set_motor_side(cortina, servo_id, side):
+    TEST_DIRECTION_TURNS = 1.0
+
+
+    def set_motor_side(cortina, servo_id, side):
     if servo_id not in cortina.servo_ids or side not in ('left', 'right'):
         raise ValueError('servo o lado del motor invalido')
     if cortina.multiturn_active[servo_id]:
@@ -105,9 +109,19 @@ def test_safe_direction(cortina, servo_id):
     midpoint = config['calibration_midpoint_turns']
     if abs(cortina.absolute_turns[servo_id] - midpoint) > 0.02:
         raise ValueError('la prueba de sentido solo se permite desde el punto medio')
-    if config['half_travel_limit'] < 1.0:
+    if config['half_travel_limit'] < TEST_DIRECTION_TURNS:
         raise ValueError('el recorrido calculado no permite una prueba de una vuelta')
-    cortina._start_multiturn(servo_id, 1.0, cortina.APPROACH_SPEED, 30)
+    cortina._start_multiturn(servo_id, TEST_DIRECTION_TURNS, cortina.APPROACH_SPEED, 30)
+
+
+def stop_safe(cortina, servo_id):
+    if servo_id not in cortina.servo_ids:
+        raise ValueError('ID de servo no detectado')
+    if not cortina.blind_config[servo_id].get('calibration_in_progress'):
+        raise ValueError('no hay una calibracion segura en curso')
+    if cortina.multiturn_active[servo_id]:
+        cortina.blind_config[servo_id]['calibration_motion_fault'] = True
+        cortina._finish_multiturn(servo_id)
 
 
 def confirm_safe_direction(cortina, servo_id, positive_is_down):

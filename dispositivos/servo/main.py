@@ -22,6 +22,7 @@ except ImportError:
 FIRMWARE_VERSION = '2026.10.18.servo-r9'
 FIRMWARE_FILES = ('main.py', 'cloud_client.py', 'board_led.py', 'captive_portal.py', 'cortina.py', 'servo_calibration.py', 'stservo.py', 'boot.py', 'ota_boot.py', 'pulsegrid_ota.py', 'wifi_recovery.py')
 COMMAND_POLL_MS = 1000
+CALIBRATION_COMMAND_POLL_MS = 200
 WIFI_RETRY_MIN_MS = 2000
 WIFI_RETRY_MAX_MS = 60000
 WIFI_CONNECT_TIMEOUT_MS = 20000
@@ -149,7 +150,9 @@ def main():
             wifi_recovery_cleared = True
         if connected and DEVICE_CODE and not recovery_mode:
             wifi_retry_ms = WIFI_RETRY_MIN_MS
-            if time.ticks_diff(now, last_poll) >= COMMAND_POLL_MS:
+            calibration_active = any(config.get('calibration_in_progress') for config in controller.blind_config.values())
+            poll_interval = CALIBRATION_COMMAND_POLL_MS if calibration_active else COMMAND_POLL_MS
+            if time.ticks_diff(now, last_poll) >= poll_interval:
                 last_poll = now
                 client.commands(controller, board_led.set_enabled)
             if time.ticks_diff(now, last_telemetry) >= 5000:

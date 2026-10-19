@@ -7,7 +7,7 @@ import ujson
 BLIND_COMMANDS = (
     'blind.safeCalibrationBegin', 'blind.safeCalibrationTest',
     'blind.safeCalibrationDirection', 'blind.safeCalibrationStep',
-    'blind.safeCalibrationMark', 'blind.safeCalibrationCancel',
+    'blind.safeCalibrationMark', 'blind.safeCalibrationStop', 'blind.safeCalibrationCancel',
 )
 
 
@@ -41,6 +41,8 @@ def execute_blind_command(cortina, name, payload):
         servo_calibration.safe_step(cortina, servo_id, payload.get('direction', ''), payload.get('turns', 0.125))
     elif name == 'blind.safeCalibrationMark':
         servo_calibration.mark_safe(cortina, servo_id, payload.get('reference', ''))
+    elif name == 'blind.safeCalibrationStop':
+        servo_calibration.stop_safe(cortina, servo_id)
     elif name == 'blind.safeCalibrationCancel':
         servo_calibration.cancel_safe(cortina, servo_id)
 

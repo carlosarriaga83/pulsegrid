@@ -122,7 +122,7 @@
       setDisabled('calibration-step-up', phase !== 'travel' || references.has('rolled') || busy);
       setDisabled('calibration-mark-rolled', phase !== 'travel' || references.has('rolled') || busy);
       setDisabled('calibration-mark-deployed', phase !== 'travel' || references.has('deployed') || busy);
-      setDisabled('calibration-stop', phase === 'measure' || phase === 'done' || (busy && phase === 'directionConfirm'));
+      setDisabled('calibration-stop', phase === 'measure' || phase === 'done');
       setDisabled('calibration-cancel', phase === 'measure' || phase === 'done' || busy);
       ['calibration-width', 'calibration-height', 'calibration-diameter', 'calibration-thickness', 'calibration-ratio', 'calibration-servo', 'calibration-calculate'].forEach((id) => setDisabled(id, phase !== 'measure' || busy));
       get('calibration-midpoint-confirm').disabled = phase !== 'measure';
@@ -235,7 +235,7 @@
       try {
         busy = true; render();
         status.textContent = 'Enviando parada…';
-        await sendAndWait('curtain.stop', {}, false);
+        await sendAndWait('blind.safeCalibrationStop', {}, false);
         status.textContent = 'Movimiento detenido. La calibración quedó bloqueada; cancélala y revisa el mecanismo antes de reiniciar.';
       } catch (error) { status.textContent = error.message; }
       finally { busy = false; render(); }
@@ -244,7 +244,7 @@
       try {
         busy = true; render();
         status.textContent = 'Deteniendo y cancelando…';
-        await sendAndWait('curtain.stop', {}, false);
+        await sendAndWait('blind.safeCalibrationStop', {}, false);
         await sendAndWait('blind.safeCalibrationCancel', {});
         phase = 'measure'; references.clear();
         get('calibration-midpoint-confirm').checked = false;

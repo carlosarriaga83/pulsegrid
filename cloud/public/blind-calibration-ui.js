@@ -190,7 +190,7 @@
       try {
         busy = true; render();
         status.textContent = 'Enviando parada…';
-        await sendAndWait('curtain.stop', {}, false);
+        await sendAndWait('blind.safeCalibrationStop', {}, false);
         status.textContent = 'Movimiento detenido. La calibración quedó bloqueada; cancélala y revisa el mecanismo antes de reiniciar.';
       } catch (error) { status.textContent = error.message; }
       finally { busy = false; render(); }
@@ -199,7 +199,7 @@
       try {
         busy = true; render();
         status.textContent = 'Deteniendo y cancelando…';
-        await sendAndWait('curtain.stop', {}, false);
+        await sendAndWait('blind.safeCalibrationStop', {}, false);
         await sendAndWait('blind.safeCalibrationCancel', {});
         phase = 'measure'; references.clear();
         get('calibration-midpoint-confirm').checked = false;

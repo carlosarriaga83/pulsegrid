@@ -63,7 +63,7 @@ test('servo cloud dispatcher explicitly recognizes calibration wizard commands',
   const calibrationCommands = [
     'blind.safeCalibrationBegin', 'blind.safeCalibrationTest',
     'blind.safeCalibrationDirection', 'blind.safeCalibrationStep',
-    'blind.safeCalibrationMark', 'blind.safeCalibrationCancel'
+    'blind.safeCalibrationMark', 'blind.safeCalibrationStop', 'blind.safeCalibrationCancel'
   ];
   assert.match(cloudClient, /BLIND_COMMANDS = \(/);
   assert.match(cloudClient, /elif name in BLIND_COMMANDS:\s+execute_blind_command\(cortina, name, payload\)/);

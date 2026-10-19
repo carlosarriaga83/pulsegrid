@@ -1201,7 +1201,7 @@ app.get('/api/device-commands', apiReady, async (request, response) => {
   const authenticated = await deviceForCode(request.get('x-device-code'), deviceId);
   if (!authenticated) return fail(response, 401, 'Invalid device code');
   const db = database();
-  const [commands] = await db.execute("SELECT id, command_name AS name, payload FROM commands WHERE device_id = ? AND status IN ('queued', 'delivered') ORDER BY created_at ASC LIMIT 1", [authenticated.id]);
+  const [commands] = await db.execute("SELECT id, command_name AS name, payload FROM commands WHERE device_id = ? AND status IN ('queued', 'delivered') ORDER BY CASE WHEN command_name IN ('blind.safeCalibrationStop', 'curtain.stop') THEN 0 ELSE 1 END, created_at ASC LIMIT 1", [authenticated.id]);
   if (!commands[0]) return response.json({ command: null });
   await db.execute("UPDATE commands SET status = 'delivered' WHERE id = ? AND status = 'queued'", [commands[0].id]);
   response.json({ command: { id: commands[0].id, name: commands[0].name, payload: typeof commands[0].payload === 'string' ? JSON.parse(commands[0].payload) : commands[0].payload } });

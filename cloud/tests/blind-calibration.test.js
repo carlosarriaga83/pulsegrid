@@ -39,7 +39,8 @@ test('safe-calibration wizard uses bounded commands only and documents manual su
     assert.match(html, /calibration-midpoint-confirm/);
     assert.match(html, /El encoder no detecta fuerza|no detecta fuerza/);
     assert.match(html, /Tope preventivo con margen/);
-    assert.match(html, /curtain\.stop.{0,20}false/s);
+    assert.match(html, /blind\.safeCalibrationStop/);
+    assert.match(html, /(?:setDisabled|disable)\('calibration-stop', phase === 'measure' \|\| phase === 'done'\)/);
     assert.doesNotMatch(html, /blind\.jog|blind\.configure|blind\.markRolled|blind\.markDeployed/);
   }
 });
@@ -61,11 +62,23 @@ test('servo calibration firmware enforces a geometry ceiling and persists real e
   const firmware = fs.readFileSync(path.join(root, 'dispositivos/servo/servo_calibration.py'), 'utf8');
   const cortina = fs.readFileSync(path.join(root, 'dispositivos/servo/cortina.py'), 'utf8');
   assert.match(firmware, /'half_travel_limit': max\(0\.0, estimated \* 0\.5 - max\(2\.0, estimated \* 0\.2\)\)/);
+  assert.match(firmware, /TEST_DIRECTION_TURNS = 1\.0/);
+  assert.match(firmware, /_start_multiturn\(servo_id, TEST_DIRECTION_TURNS, cortina\.APPROACH_SPEED, 30\)/);
+  assert.match(firmware, /def stop_safe\(cortina, servo_id\):/);
   assert.match(firmware, /amount <= 0\.125/);
   assert.match(firmware, /cortina\._save_persistent_state\(\)/);
   assert.match(cortina, /timeout_ms/);
   assert.match(cortina, /calibration_motion_fault/);
   assert.match(cortina, /movimiento normal bloqueado durante la calibracion segura/);
+  const cloudClient = fs.readFileSync(path.join(root, 'dispositivos/servo/cloud_client.py'), 'utf8');
+  const main = fs.readFileSync(path.join(root, 'dispositivos/servo/main.py'), 'utf8');
+  assert.match(cloudClient, /blind\.safeCalibrationStop/);
+  assert.match(main, /CALIBRATION_COMMAND_POLL_MS = 200/);
+});
+
+test('cloud command queue prioritizes emergency curtain and calibration stops', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+  assert.match(source, /ORDER BY CASE WHEN command_name IN \('blind\.safeCalibrationStop', 'curtain\.stop'\) THEN 0 ELSE 1 END, created_at ASC/);
 });
 
 test('all dashboard copies provide a distinct timed GA25 calibration flow', () => {
