@@ -608,6 +608,13 @@ function validateCloudBlindCalibration(device, command, payload) {
   if (!Number.isFinite(payload.estimatedTurns) || Math.abs(payload.estimatedTurns - estimated) > 0.01) throw new Error('Las vueltas estimadas no coinciden con las medidas');
 }
 
+function validateServoEncoderReference(device, command, payload) {
+  if (command !== 'blind.encoderReferenceRecover' || device.provider === 'tuya') throw new Error('La referencia de encoder solo aplica a servos Pulsegrid');
+  if (!payload || Object.keys(payload).length !== 2 || Object.keys(payload).some((key) => !['servoId', 'atMidpoint'].includes(key)) || payload.servoId !== 1 && payload.servoId !== 2 || payload.atMidpoint !== true) {
+    throw new Error('Confirma que servoId es 1 o 2 y que la cortina esta centrada');
+  }
+}
+
 async function validateAutomationDevices(db, email, target, rule) {
   if (rule.commandName) validateTuyaCommand(target, rule.commandName, rule.commandPayload, rule.valueSource);
   else {
@@ -658,6 +665,13 @@ async function dispatchDeviceCommand(db, device, command, payload, context = {})
       const telemetry = typeof latest === 'string' ? JSON.parse(latest) : latest;
       validateCloudBlindCalibration({ ...device, telemetry }, command, payload);
       if (String(telemetry?.firmwareTarget || '').toLowerCase() !== 'servo') throw new Error('La calibracion geometrica requiere firmware Servo');
+    }
+    if (command === 'blind.encoderReferenceRecover') {
+      const [readings] = await db.execute('SELECT payload FROM telemetry WHERE device_id = ? ORDER BY created_at DESC, id DESC LIMIT 1', [device.id]);
+      const latest = readings[0]?.payload;
+      const telemetry = typeof latest === 'string' ? JSON.parse(latest) : latest;
+      if (String(telemetry?.firmwareTarget || '').toLowerCase() !== 'servo') throw new Error('La recuperacion de referencia requiere firmware Servo');
+      validateServoEncoderReference({ ...device, telemetry }, command, payload);
     }
     if (command === 'led.configure') {
       const [readings] = await db.execute('SELECT payload FROM telemetry WHERE device_id = ? ORDER BY created_at DESC, id DESC LIMIT 1', [device.id]);

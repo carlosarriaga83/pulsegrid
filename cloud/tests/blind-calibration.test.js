@@ -51,6 +51,32 @@ test('cloud-first wizard sends one cloud-computed configuration without directio
   }
 });
 
+test('cloud exposes explicit no-movement encoder recovery only for online Servo r23+', () => {
+  const root = path.join(__dirname, '..');
+  for (const folder of ['', 'public', 'public_html', 'legacy-root']) {
+    const ui = fs.readFileSync(path.join(root, folder, 'cloud-blind-calibration-ui.js'), 'utf8');
+    assert.match(ui, /blind\.encoderReferenceRecover/);
+    assert.match(ui, /device\?\.status !== 'online'/);
+    assert.match(ui, /servo-r\(\\d\+\)/);
+    assert.match(ui, /Number\(match\[1\]\) >= 23/);
+    assert.match(ui, /atMidpoint: true/);
+    assert.match(ui, /waitForReferenceTelemetry/);
+    assert.match(ui, /device\?\.status !== 'online'/);
+  }
+  const server = fs.readFileSync(path.join(root, 'server.js'), 'utf8');
+  assert.match(server, /function validateServoEncoderReference\(/);
+  assert.match(server, /command === 'blind\.encoderReferenceRecover'/);
+  assert.match(server, /validateServoEncoderReference\(\{ \.\.\.device, telemetry \}, command, payload\)/);
+  const firmware = fs.readFileSync(path.join(root, '..', 'dispositivos/servo/cloud_client.py'), 'utf8');
+  const cortina = fs.readFileSync(path.join(root, '..', 'dispositivos/servo/cortina.py'), 'utf8');
+  assert.match(firmware, /blind\.encoderReferenceRecover/);
+  assert.match(firmware, /cortina\.recover_position_reference\(servo_id\)/);
+  assert.match(cortina, /def recover_position_reference\(/);
+  assert.match(cortina, /self\.absolute_turns\[servo_id\] = 0\.0/);
+  assert.match(cortina, /establece una referencia fiable del encoder antes de mover/);
+  assert.match(fs.readFileSync(path.join(root, '..', 'dispositivos/servo/main.py'), 'utf8'), /servo-r23/);
+});
+
 test('Servo cloud calibration applies limits without starting or polling for movement', () => {
   const root = path.join(__dirname, '..');
   for (const folder of ['', 'public', 'public_html', 'legacy-root']) {

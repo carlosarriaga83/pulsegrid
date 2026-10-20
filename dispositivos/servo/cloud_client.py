@@ -5,7 +5,8 @@ import ujson
 
 
 BLIND_COMMANDS = (
-    'blind.cloudCalibrationConfigure', 'blind.safeCalibrationStop', 'blind.safeCalibrationCancel',
+    'blind.cloudCalibrationConfigure', 'blind.encoderReferenceRecover',
+    'blind.safeCalibrationStop', 'blind.safeCalibrationCancel',
 )
 def _send_all(client, data):
     sent = 0
@@ -34,6 +35,10 @@ def execute_blind_command(cortina, name, payload):
         servo_calibration.configure_cloud_estimate(
             cortina, servo_id, payload['heightCm'], payload['tubeDiameterCm'],
             payload['fabricThicknessMm'], payload['motorTurnsPerTubeTurn'], payload['estimatedTurns'])
+    elif name == 'blind.encoderReferenceRecover':
+        if len(payload) != 2 or set(payload) != {'servoId', 'atMidpoint'} or payload.get('atMidpoint') is not True:
+            raise ValueError('confirma que la cortina esta centrada para recuperar la referencia')
+        cortina.recover_position_reference(servo_id)
     elif name == 'blind.safeCalibrationBegin':
         servo_calibration.begin_safe(cortina, servo_id, payload.get('heightCm'), payload.get('tubeDiameterCm'), payload.get('fabricThicknessMm'), payload.get('motorTurnsPerTubeTurn', 1.0))
     elif name == 'blind.safeCalibrationTest':
