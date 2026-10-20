@@ -1380,7 +1380,7 @@ function getCalibrationPosition(deviceId, servoId) {
   return Number.isFinite(position) ? position : null;
 }
 
-async function waitForCalibrationIdle(deviceId, servoId, startPosition, timeout = 120000) {
+async function waitForCalibrationIdle(deviceId, servoId, startPosition, timeout = 240000) {
   const startedAt = Date.now();
   let sawMovement = false;
   while (Date.now() - startedAt < timeout) {

@@ -19,7 +19,7 @@ except ImportError:
     COMMANDS_ENABLED = True
     DIRECTION_REVERSED = False
 
-FIRMWARE_VERSION = '2026.10.21.servo-r18'
+FIRMWARE_VERSION = '2026.10.21.servo-r19'
 FIRMWARE_FILES = ('main.py', 'cloud_client.py', 'board_led.py', 'captive_portal.py', 'cortina.py', 'servo_calibration.py', 'stservo.py', 'boot.py', 'ota_boot.py', 'pulsegrid_ota.py', 'wifi_recovery.py')
 COMMAND_POLL_MS = 1000
 CALIBRATION_COMMAND_POLL_MS = 200

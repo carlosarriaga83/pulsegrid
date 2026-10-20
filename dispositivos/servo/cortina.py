@@ -183,7 +183,7 @@ class Cortina:
                     task['encoder_read_error_at'] = None
                     delta = self._track_position(servo_id, position)
                     task['net_counts'] += delta
-                    task['moved_counts'] += max(0, delta * task['direction'])
+                    task['moved_counts'] = abs(task['net_counts'])
                     if delta != 0:
                         task['last_progress_at'] = time.ticks_ms()
                     task['remaining_counts'] = max(0, task['target_counts'] - task['moved_counts'])
@@ -295,7 +295,7 @@ class Cortina:
             'started_at': time.ticks_ms(),
             'last_progress_at': time.ticks_ms(),
             'encoder_read_error_at': None,
-            'timeout_ms': max(5000, int(target_counts / max(speed, 1) * 2500 + 3000)),
+            'timeout_ms': max(15000, int(target_counts / max(speed, 1) * 5000 + 10000)),
             'start_turns': self.absolute_turns[servo_id],
             'start_position': start_position,
             'target_position': target_position,

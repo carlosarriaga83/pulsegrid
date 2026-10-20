@@ -65,9 +65,10 @@ test('all dashboard copies verify encoder displacement and surface motion faults
     assert.match(app, /blind_calibration_motion_fault/);
     assert.match(app, /blind_calibration_motion_fault_reason/);
     assert.match(app, /Math\.abs\(position - startPosition\) >= 0\.02/);
+    assert.match(app, /waitForCalibrationIdle\(deviceId, servoId, startPosition, timeout = 240000\)/);
     assert.match(app, /waitForCalibrationCommand\(commandId, timeout = 30000\)/);
     assert.match(wizard, /getCalibrationPosition/);
-    assert.match(wizard, /waitForCalibrationCommand\(result\.commandId, movement \? 120000 : undefined\)|movement\?120000:undefined/);
+    assert.match(wizard, /waitForCalibrationCommand\(result\.commandId, movement \? 240000 : undefined\)|movement\?240000:undefined/);
     assert.match(wizard, /waitForCalibrationIdle\([^\n]*startPosition/s);
   }
 });
@@ -90,7 +91,7 @@ test('servo calibration firmware enforces a geometry ceiling and persists real e
   assert.match(cortina, /self\.bus\.set_mode\(servo_id, 3\)/);
   assert.match(cortina, /self\.bus\.set_mode\(servo_id, 0\)[\s\S]*?start_position = self\.bus\.position\(servo_id\)/);
   assert.match(cortina, /self\.bus\.move_multiturn\(servo_id, turns, start_position, speed, acceleration\)/);
-  assert.match(cortina, /position = self\.bus\.position\(servo_id\)[\s\S]*?delta = self\._track_position\(servo_id, position\)[\s\S]*?task\['net_counts'\] \+= delta[\s\S]*?task\['moved_counts'\] \+= max\(0, delta \* task\['direction'\]\)/);
+  assert.match(cortina, /position = self\.bus\.position\(servo_id\)[\s\S]*?delta = self\._track_position\(servo_id, position\)[\s\S]*?task\['net_counts'\] \+= delta[\s\S]*?task\['moved_counts'\] = abs\(task\['net_counts'\]\)/);
   assert.match(cortina, /if task\['moved_counts'\] >= task\['target_counts'\]:/);
   assert.match(cortina, /PRECISION_STALL_TIMEOUT_MS = 15000/);
   assert.match(cortina, /if delta != 0:[\s\S]*?task\['last_progress_at'\] = time\.ticks_ms\(\)/);
@@ -98,6 +99,7 @@ test('servo calibration firmware enforces a geometry ceiling and persists real e
   assert.match(cortina, /fault_reason='encoder_read'/);
   assert.match(cortina, /'encoder_read_error_at': None/);
   assert.match(cortina, /'net_counts': 0/);
+  assert.match(cortina, /'timeout_ms': max\(15000, int\(target_counts \/ max\(speed, 1\) \* 5000 \+ 10000\)\)/);
   assert.match(cortina, /self\.bus\.torque\(servo_id, False\)[\s\S]*?self\.bus\.set_mode\(servo_id, 0\)[\s\S]*?hold_position = self\.bus\.position\(servo_id\)/);
   assert.doesNotMatch(cortina, /position_signed\(servo_id\)/);
   assert.match(cortina, /def multiturn_status\(self, servo_id\):[\s\S]*?position = self\._last_positions\.get\(servo_id, 0\)/);

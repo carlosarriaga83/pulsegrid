@@ -57,7 +57,18 @@ def _servo(cortina, servo_id):
     if not config.get('calibration_in_progress'):
         raise ValueError('no hay una calibracion segura en curso')
     if config.get('calibration_motion_fault'):
-        raise ValueError('movimiento detenido por falta de avance del encoder; cancela y revisa el mecanismo')
+        reason = config.get('calibration_motion_fault_reason', '')
+        if reason == 'encoder_read':
+            detail = 'no se pudo leer el encoder'
+        elif reason == 'encoder_stall':
+            detail = 'el encoder no registró cambios durante 15 segundos'
+        elif reason == 'movement_timeout':
+            detail = 'se excedió el tiempo máximo de movimiento'
+        elif reason == 'user_stop':
+            detail = 'el movimiento fue detenido manualmente'
+        else:
+            detail = 'falta de avance del encoder'
+        raise ValueError('movimiento detenido: {}; cancela y revisa el mecanismo'.format(detail))
     return config
 
 
