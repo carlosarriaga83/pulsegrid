@@ -80,6 +80,7 @@ def begin_safe(cortina, servo_id, height_cm, tube_diameter_cm, fabric_thickness_
     midpoint = round(cortina.absolute_turns[servo_id], 4)
     config = cortina.blind_config[servo_id]
     config['calibration_motion_fault'] = False
+    config['calibration_motion_fault_reason'] = ''
     config.update({
         'rolled_turns': midpoint,
         'unrolled_turns': midpoint,
@@ -118,6 +119,7 @@ def stop_safe(cortina, servo_id):
         raise ValueError('no hay una calibracion segura en curso')
     if cortina.multiturn_active[servo_id]:
         cortina.blind_config[servo_id]['calibration_motion_fault'] = True
+        cortina.blind_config[servo_id]['calibration_motion_fault_reason'] = 'user_stop'
         cortina._finish_multiturn(servo_id)
 
 
@@ -191,6 +193,7 @@ def cancel_safe(cortina, servo_id):
     config['calibration_in_progress'] = False
     config['calibrated'] = False
     config['calibration_motion_fault'] = False
+    config['calibration_motion_fault_reason'] = ''
     config['calibration_direction_pending'] = False
     cortina.calibration_references[servo_id] = set()
     cortina.position_recovery_required[servo_id] = True

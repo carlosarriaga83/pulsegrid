@@ -19,10 +19,11 @@ except ImportError:
     COMMANDS_ENABLED = True
     DIRECTION_REVERSED = False
 
-FIRMWARE_VERSION = '2026.10.19.servo-r15'
+FIRMWARE_VERSION = '2026.10.21.servo-r18'
 FIRMWARE_FILES = ('main.py', 'cloud_client.py', 'board_led.py', 'captive_portal.py', 'cortina.py', 'servo_calibration.py', 'stservo.py', 'boot.py', 'ota_boot.py', 'pulsegrid_ota.py', 'wifi_recovery.py')
 COMMAND_POLL_MS = 1000
 CALIBRATION_COMMAND_POLL_MS = 200
+MOVEMENT_STOP_POLL_MS = 1000
 WIFI_RETRY_MIN_MS = 2000
 WIFI_RETRY_MAX_MS = 60000
 WIFI_CONNECT_TIMEOUT_MS = 20000
@@ -128,10 +129,13 @@ def main():
         if connected:
             wifi_connect_pending = False
             wifi_connect_started = None
+        moving = any(controller.multiturn_active.values())
         if recovery_mode:
             board_led.set_status('recovery')
         elif not DEVICE_CODE:
             board_led.set_status('provisioning')
+        elif moving:
+            board_led.set_status('moving')
         elif not connected or not client.is_online():
             board_led.set_status('offline')
         else:
@@ -141,7 +145,6 @@ def main():
             wifi_recovery_cleared = True
         if connected and DEVICE_CODE and not recovery_mode:
             wifi_retry_ms = WIFI_RETRY_MIN_MS
-            moving = any(controller.multiturn_active.values())
             calibrating = any(config.get('calibration_in_progress') for config in controller.blind_config.values())
             if not moving:
                 poll_interval = CALIBRATION_COMMAND_POLL_MS if calibrating else COMMAND_POLL_MS
@@ -154,6 +157,9 @@ def main():
                 if not any(controller.multiturn_active.values()) and time.ticks_diff(now, last_state_publish) >= telemetry_interval:
                     last_state_publish = time.ticks_ms()
                     client.telemetry(controller, FIRMWARE_VERSION, board_led.is_enabled(), bool(controller.direction_reversed))
+            elif time.ticks_diff(now, last_cloud_poll) >= MOVEMENT_STOP_POLL_MS:
+                last_cloud_poll = now
+                client.commands(controller, board_led.set_enabled, priority_only=True)
         else:
             if not recovery_mode and not connected and time.ticks_diff(now, next_wifi_retry) >= 0:
                 connected = connect_wifi(wlan)

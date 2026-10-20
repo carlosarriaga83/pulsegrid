@@ -153,7 +153,7 @@
       let startPosition = null;
       if (movement) { await loadDevices(); startPosition = getCalibrationPosition(selectedDevice, servoId()); }
       const result = await queue(command, payload);
-      await waitForCalibrationCommand(result.commandId);
+      await waitForCalibrationCommand(result.commandId, movement ? 120000 : undefined);
       if (movement) await waitForCalibrationIdle(selectedDevice, servoId(), startPosition);
       await loadDevices();
     };

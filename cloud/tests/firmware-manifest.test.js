@@ -132,10 +132,11 @@ test('ESP firmware supports three-boot Wi-Fi recovery and faster command polling
   }
   assert.match(servoMain, /recovery_mode = wifi_recovery\.register_boot\(count_reset\)/);
   assert.match(servoMain, /reset_cause in \(getattr\(machine, 'PWRON_RESET', 1\), getattr\(machine, 'HARD_RESET', 2\)\)/);
-  assert.match(servoMain, /FIRMWARE_VERSION = '2026\.10\.19\.servo-r15'/);
+  assert.match(servoMain, /FIRMWARE_VERSION = '2026\.10\.21\.servo-r18'/);
   assert.match(servoMain, /if recovery_mode:\s+try:\s+wlan\.disconnect\(\)\s+wlan\.active\(False\)/);
   assert.match(servoMain, /captive_portal\.start_background\(controller, recovery_mode\)/);
   assert.match(servoMain, /moving = any\(controller\.multiturn_active\.values\(\)\)[\s\S]*?if not moving:/);
+  assert.match(servoMain, /elif time\.ticks_diff\(now, last_cloud_poll\) >= MOVEMENT_STOP_POLL_MS[\s\S]*?priority_only=True/);
   assert.match(servoMain, /client\.telemetry\(controller, FIRMWARE_VERSION/);
   assert.match(servoMain, /time\.sleep_ms\(10\)/);
   assert.match(servoPortal, /def run\(controller=None, force_ap=False\)/);
@@ -148,9 +149,15 @@ test('ESP firmware supports three-boot Wi-Fi recovery and faster command polling
   assert.match(servoPortal, /encoded = body\.encode\(\)[\s\S]*?len\(encoded\)/);
   assert.match(servoPortal, /def _calibration\(values\):[\s\S]*?servo_calibration\.safe_step\([\s\S]*?if station\.isconnected\(\) and not force_ap:[\s\S]*?PORTAL_HOST = station\.ifconfig\(\)\[0\]/);
   assert.match(servoLed, /'recovery': \(32, 14, 0\)/);
+  assert.match(servoLed, /'moving': \(0, 0, 24\)/);
   assert.match(servoLed, /def tick\(\)/);
   assert.match(servoCloud, /'wifi_recovery\.py'/);
   assert.match(servoCloud, /def flush_ack\(self\):[\s\S]*?self\.request\('POST', '\/api\/device-commands/);
+  assert.match(servoCloud, /def commands\(self, cortina, led_setter, priority_only=False\)/);
+  assert.match(servoCloud, /priorityOnly=1/);
+  assert.match(servoCloud, /timeout=3 if priority_only else 8/);
+  assert.match(servoCloud, /self\._deferred_acks = \[\]/);
+  assert.match(servoCloud, /self\._deferred_acks\.append\(ack\)/);
   assert.doesNotMatch(servoCloud, /_thread|_network_loop/);
   assert.match(ga25Main, /POLL_MS = 1000/);
   assert.match(ga25Main, /recovery_mode = wifi_recovery\.register_boot\(count_reset\)/);

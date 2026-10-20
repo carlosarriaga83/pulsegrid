@@ -13,6 +13,7 @@ _colors = {
     'provisioning': (24, 16, 0),
     'recovery': (32, 14, 0),
     'offline': (24, 0, 0),
+    'moving': (0, 0, 24),
 }
 _last_rendered = None
 _recovery_visible = True

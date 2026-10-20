@@ -60,8 +60,9 @@ class CloudClient:
         self.firmware_update_requested = False
         self.last_success_at = None
         self._pending_ack = None
+        self._deferred_acks = []
 
-    def _socket(self):
+    def _socket(self, timeout=8):
         gc.collect()
         host = self.api_url.split('://', 1)[-1].split('/', 1)[0]
         parts = host.split(':', 1)
@@ -72,7 +73,7 @@ class CloudClient:
             client.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 512)
         except (AttributeError, OSError):
             pass
-        client.settimeout(8)
+        client.settimeout(timeout)
         phase = 'TCP connect'
         try:
             client.connect((parts[0], port))
@@ -105,7 +106,7 @@ class CloudClient:
         except Exception:
             pass
 
-    def request(self, method, path, payload=None):
+    def request(self, method, path, payload=None, timeout=8):
         if time.ticks_diff(time.ticks_ms(), self.next_request_at) < 0:
             return None
         if not self.api_url.startswith('https://'):
@@ -113,7 +114,7 @@ class CloudClient:
             return None
         client = None
         try:
-            client, host = self._socket()
+            client, host = self._socket(timeout)
             body = ujson.dumps(payload) if payload is not None else ''
             request = '{} {} HTTP/1.1\r\nHost: {}\r\nX-Device-Code: {}\r\nConnection: close\r\n'.format(method, path, host, self.device_code)
             if body:
@@ -201,10 +202,13 @@ class CloudClient:
         else:
             raise ValueError('Comando no soportado: ' + str(name))
 
-    def commands(self, cortina, led_setter):
+    def commands(self, cortina, led_setter, priority_only=False):
         if not self.commands_enabled:
             return
-        result = self.request('GET', '/api/device-commands?deviceId=' + self.device_id)
+        path = '/api/device-commands?deviceId=' + self.device_id
+        if priority_only:
+            path += '&priorityOnly=1'
+        result = self.request('GET', path, timeout=3 if priority_only else 8)
         command = result.get('command') if result else None
         if not command:
             return
@@ -221,13 +225,22 @@ class CloudClient:
                 self._execute_command(cortina, led_setter, command)
         except Exception as caught:
             error = caught
-        self._pending_ack = (command, error, firmware_update)
+        ack = (command, error, firmware_update)
+        if self._pending_ack:
+            self._deferred_acks.append(ack)
+        else:
+            self._pending_ack = ack
         if error:
             print('Comando rechazado:', error)
         else:
             print('Comando ejecutado localmente:', name)
 
     def flush_ack(self):
+        if not self._pending_ack:
+            if self._deferred_acks:
+                self._pending_ack = self._deferred_acks.pop(0)
+            else:
+                return
         if not self._pending_ack:
             return
         command, error, firmware_update = self._pending_ack
@@ -236,6 +249,6 @@ class CloudClient:
             body['error'] = str(error)[:500]
         result = self.request('POST', '/api/device-commands/{}/ack'.format(command.get('id')), body)
         if result is not None:
-            self._pending_ack = None
+            self._pending_ack = self._deferred_acks.pop(0) if self._deferred_acks else None
             if firmware_update and not error:
                 self.firmware_update_requested = True

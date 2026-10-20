@@ -1389,7 +1389,17 @@ async function waitForCalibrationIdle(deviceId, servoId, startPosition, timeout 
     const device = devices.find((item) => item.id === deviceId);
     const telemetry = parseTelemetry(device?.telemetry);
     const servo = telemetry.servos?.[String(servoId)] || telemetry.servos?.[servoId];
-    if (servo?.blind_calibration_motion_fault) throw new Error('Movimiento detenido: el encoder no detectó avance. Revisa el mecanismo antes de cancelar.');
+    if (servo?.blind_calibration_motion_fault) {
+      const reason = servo.blind_calibration_motion_fault_reason;
+      const detail = reason === 'encoder_stall'
+        ? 'el encoder no registró movimiento durante 15 segundos'
+        : reason === 'encoder_read'
+          ? 'el servo no respondió a las lecturas del encoder'
+          : reason === 'user_stop'
+            ? 'el movimiento fue detenido manualmente'
+          : 'se agotó el tiempo permitido para el movimiento';
+      throw new Error(`Movimiento detenido: ${detail}. Revisa el servo, el cableado y el mecanismo antes de cancelar.`);
+    }
     if (servo?.multiturn_active) sawMovement = true;
     const position = Number(servo?.absolute_turns);
     const encoderMoved = Number.isFinite(startPosition) && Number.isFinite(position) && Math.abs(position - startPosition) >= 0.02;
