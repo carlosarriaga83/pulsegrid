@@ -19,7 +19,7 @@ except ImportError:
     COMMANDS_ENABLED = True
     DIRECTION_REVERSED = False
 
-FIRMWARE_VERSION = '2026.10.21.servo-r23'
+FIRMWARE_VERSION = '2026.10.21.servo-r24'
 FIRMWARE_FILES = ('main.py', 'cloud_client.py', 'board_led.py', 'captive_portal.py', 'cortina.py', 'servo_calibration.py', 'stservo.py', 'boot.py', 'ota_boot.py', 'pulsegrid_ota.py', 'wifi_recovery.py')
 COMMAND_POLL_MS = 1000
 CALIBRATION_COMMAND_POLL_MS = 200
@@ -176,10 +176,6 @@ def main():
                     client.flush_ack()
                     if not client._pending_ack:
                         client.commands(controller, board_led.set_enabled)
-                telemetry_interval = 500 if calibrating else 2000
-                if not any(controller.multiturn_active.values()) and time.ticks_diff(now, last_state_publish) >= telemetry_interval:
-                    last_state_publish = time.ticks_ms()
-                    client.telemetry(controller, FIRMWARE_VERSION, board_led.is_enabled(), bool(controller.direction_reversed))
             elif calibrating:
                 if client._pending_ack and time.ticks_diff(now, last_cloud_poll) >= MOVEMENT_STOP_POLL_MS:
                     last_cloud_poll = now
@@ -190,6 +186,11 @@ def main():
             elif time.ticks_diff(now, last_cloud_poll) >= MOVEMENT_STOP_POLL_MS:
                 last_cloud_poll = now
                 client.commands(controller, board_led.set_enabled, priority_only=True)
+            if not moving and not any(controller.multiturn_active.values()):
+                telemetry_interval = 500 if calibrating else 2000
+                if time.ticks_diff(now, last_state_publish) >= telemetry_interval:
+                    last_state_publish = time.ticks_ms()
+                    client.telemetry(controller, FIRMWARE_VERSION, board_led.is_enabled(), bool(controller.direction_reversed))
         else:
             if not recovery_mode and not connected and time.ticks_diff(now, next_wifi_retry) >= 0:
                 connected = connect_wifi(wlan)

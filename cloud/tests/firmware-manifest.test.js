@@ -137,13 +137,14 @@ test('ESP firmware supports three-boot Wi-Fi recovery and faster command polling
   }
   assert.match(servoMain, /recovery_mode = wifi_recovery\.register_boot\(count_reset\)/);
   assert.match(servoMain, /reset_cause in \(getattr\(machine, 'PWRON_RESET', 1\), getattr\(machine, 'HARD_RESET', 2\)\)/);
-  assert.match(servoMain, /FIRMWARE_VERSION = '2026\.10\.21\.servo-r23'/);
+  assert.match(servoMain, /FIRMWARE_VERSION = '2026\.10\.21\.servo-r24'/);
   assert.match(servoMain, /if not connected and wifi_connect_pending:[\s\S]*?while \(not connected[\s\S]*?WIFI_CONNECT_TIMEOUT_MS\):\s+time\.sleep_ms\(100\)\s+connected = wlan\.isconnected\(\)/);
   assert.match(servoMain, /if recovery_mode:\s+try:\s+wlan\.disconnect\(\)\s+wlan\.active\(False\)/);
   assert.match(servoMain, /local_portal_enabled = recovery_mode or not connected or not DEVICE_CODE\s+if local_portal_enabled:\s+captive_portal\.start_background\(controller, recovery_mode\)/);
   assert.match(servoMain, /moving = any\(controller\.multiturn_active\.values\(\)\)[\s\S]*?if not moving:/);
   assert.match(servoMain, /elif time\.ticks_diff\(now, last_cloud_poll\) >= MOVEMENT_STOP_POLL_MS[\s\S]*?priority_only=True/);
   assert.match(servoMain, /client\.telemetry\(controller, FIRMWARE_VERSION/);
+  assert.match(servoMain, /elif time\.ticks_diff\(now, last_cloud_poll\) >= MOVEMENT_STOP_POLL_MS:[\s\S]*?if not moving and not any\(controller\.multiturn_active\.values\(\)\):[\s\S]*?client\.telemetry\(controller, FIRMWARE_VERSION/);
   assert.match(servoMain, /time\.sleep_ms\(10\)/);
   assert.match(servoPortal, /def run\(controller=None, force_ap=False\)/);
   assert.match(servoPortal, /_thread\.stack_size\(8192\)/);

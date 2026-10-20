@@ -77,7 +77,7 @@ test('cloud exposes explicit no-movement encoder recovery only for online Servo 
   assert.match(cortina, /self\.absolute_turns\[servo_id\] = 0\.0/);
   assert.match(cortina, /self\.blind_config\[servo_id\]\['calibration_in_progress'\] = False/);
   assert.match(cortina, /establece una referencia fiable del encoder antes de mover/);
-  assert.match(fs.readFileSync(path.join(root, '..', 'dispositivos/servo/main.py'), 'utf8'), /servo-r23/);
+  assert.match(fs.readFileSync(path.join(root, '..', 'dispositivos/servo/main.py'), 'utf8'), /servo-r24/);
 });
 
 test('Servo cloud calibration applies limits without starting or polling for movement', () => {
@@ -146,7 +146,7 @@ test('servo firmware accepts cloud estimates only with reliable encoder state an
   const led = fs.readFileSync(path.join(root, 'dispositivos/servo/board_led.py'), 'utf8');
   assert.match(cloudClient, /blind\.safeCalibrationStop/);
   assert.match(main, /controller\.update_multiturn\(\)[\s\S]*?moving = any\(controller\.multiturn_active\.values\(\)\)[\s\S]*?if not moving:/);
-  assert.match(main, /if not any\(controller\.multiturn_active\.values\(\)\) and time\.ticks_diff/);
+  assert.match(main, /if not moving and not any\(controller\.multiturn_active\.values\(\)\):[\s\S]*?if time\.ticks_diff\(now, last_state_publish\) >= telemetry_interval:[\s\S]*?client\.telemetry\(controller, FIRMWARE_VERSION/);
   assert.match(main, /elif moving:[\s\S]*?board_led\.set_status\('moving'\)/);
   assert.match(led, /'moving': \(0, 0, 24\)/);
   assert.match(main, /time\.sleep_ms\(10\)/);
