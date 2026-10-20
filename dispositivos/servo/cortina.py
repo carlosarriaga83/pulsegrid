@@ -25,7 +25,7 @@ class Cortina:
         self.blind_config = {
             servo_id: {
                 'rolled_turns': 0.0, 'unrolled_turns': 10.0, 'motor_side': 'left', 'calibrated': False,
-                'calibration_in_progress': False, 'window_width_cm': 0.0, 'window_height_cm': 0.0,
+                'calibration_in_progress': False, 'window_height_cm': 0.0,
                 'tube_diameter_cm': 0.0, 'fabric_thickness_mm': 0.0, 'motor_turns_per_tube_turn': 1.0,
                 'estimated_turns': 0.0, 'half_travel_limit': 0.0,
                 'calibration_midpoint_turns': 0.0, 'calibration_down_direction': 0,
@@ -69,7 +69,7 @@ class Cortina:
                 config['unrolled_turns'] = float(saved.get('unrolled_turns', config['unrolled_turns']))
                 config['motor_side'] = str(saved.get('motor_side', config['motor_side'])) if saved.get('motor_side', config['motor_side']) in ('left', 'right') else 'left'
                 config['calibrated'] = bool(saved.get('calibrated', False))
-                for key in ('window_width_cm', 'window_height_cm', 'tube_diameter_cm', 'fabric_thickness_mm', 'motor_turns_per_tube_turn', 'estimated_turns', 'half_travel_limit', 'calibration_midpoint_turns'):
+                for key in ('window_height_cm', 'tube_diameter_cm', 'fabric_thickness_mm', 'motor_turns_per_tube_turn', 'estimated_turns', 'half_travel_limit', 'calibration_midpoint_turns'):
                     try:
                         config[key] = float(saved.get(key, config[key]))
                     except (TypeError, ValueError):

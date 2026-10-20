@@ -67,7 +67,6 @@
       <div class="panel-heading"><div><h2>Calibración segura de persiana</h2><p>El cálculo orienta el recorrido; los extremos definitivos se guardan desde el encoder.</p></div><span class="secure-badge">Guiado</span></div>
       <div class="calibration-steps"><div class="calibration-step active" data-calibration-step="1"><b>1</b><span>Medidas</span></div><div class="calibration-step" data-calibration-step="2"><b>2</b><span>Sentido</span></div><div class="calibration-step" data-calibration-step="3"><b>3</b><span>Extremos</span></div><div class="calibration-step" data-calibration-step="4"><b>4</b><span>Guardado</span></div></div>
       <div class="calibration-settings">
-        <label>Ancho de ventana (cm)<input id="calibration-width" type="number" min="20" max="1000" step="0.1" value="120"></label>
         <label>Alto de ventana (cm)<input id="calibration-height" type="number" min="20" max="1000" step="0.1" value="150"></label>
         <label>Diámetro exterior del tubo (cm)<input id="calibration-diameter" type="number" min="1" max="30" step="0.1" value="5"></label>
         <label>Grosor del paño (mm)<input id="calibration-thickness" type="number" min="0.01" max="5" step="0.01" value="0.5"></label>
@@ -126,29 +125,22 @@
       setDisabled('calibration-mark-deployed', phase !== 'travel' || references.has('deployed') || busy);
       setDisabled('calibration-stop', phase === 'measure' || phase === 'done');
       setDisabled('calibration-cancel', phase === 'measure' || phase === 'done' || busy);
-      ['calibration-width', 'calibration-height', 'calibration-diameter', 'calibration-thickness', 'calibration-ratio', 'calibration-servo', 'calibration-calculate'].forEach((id) => setDisabled(id, phase !== 'measure' || busy));
+      ['calibration-height', 'calibration-diameter', 'calibration-thickness', 'calibration-ratio', 'calibration-servo', 'calibration-calculate'].forEach((id) => setDisabled(id, phase !== 'measure' || busy));
       get('calibration-midpoint-confirm').disabled = phase !== 'measure';
       get('calibration-start').disabled = phase !== 'measure' || busy || !get('calibration-midpoint-confirm').checked;
       get('calibration-shade').setAttribute('height', phase === 'done' ? '196' : phase === 'travel' ? '116' : '98');
     };
 
     const measureValues = () => {
-      const width = Number(get('calibration-width').value);
       const height = Number(get('calibration-height').value);
-      if (!Number.isFinite(width) || width < 20 || width > 1000) throw new Error('El ancho debe estar entre 20 y 1000 cm.');
-      return { width, height, diameter: Number(get('calibration-diameter').value), thickness: Number(get('calibration-thickness').value), ratio: Number(get('calibration-ratio').value) };
+      return { height, diameter: Number(get('calibration-diameter').value), thickness: Number(get('calibration-thickness').value), ratio: Number(get('calibration-ratio').value) };
     };
     const calculate = () => {
       const values = measureValues();
       estimate = root.BlindCalibrationModel.estimateTurns(values.height, values.diameter, values.thickness, values.ratio);
       get('calibration-estimate').textContent = `≈ ${estimate.toFixed(2)} vueltas de recorrido`;
       get('calibration-limit').textContent = `Límite preventivo (80% de la mitad estimada): ${(estimate * 0.4).toFixed(2)} vueltas por lado desde la mitad.`;
-      get('calibration-dimensions').textContent = `Ventana ${values.width} × ${values.height} cm · tubo Ø ${values.diameter} cm · paño ${values.thickness} mm · relación ${values.ratio}:1`;
-      const ratio = Math.min(2.6, Math.max(.55, values.width / values.height));
-      const rectWidth = Math.round(162 * Math.min(1.5, ratio));
-      const rectX = Math.round(150 - rectWidth / 2);
-      const frame = get('calibration-shade');
-      frame.setAttribute('x', String(rectX)); frame.setAttribute('width', String(rectWidth));
+      get('calibration-dimensions').textContent = `Alto ${values.height} cm · tubo Ø ${values.diameter} cm · paño ${values.thickness} mm · relación ${values.ratio}:1`;
       return values;
     };
     const queue = (command, payload) => {
@@ -177,7 +169,7 @@
         const values = calculate();
         get('calibration-start').disabled = true;
         status.textContent = 'Guardando medidas y registrando la posición actual como mitad…';
-        await sendAndWait('blind.safeCalibrationBegin', { widthCm: values.width, heightCm: values.height, tubeDiameterCm: values.diameter, fabricThicknessMm: values.thickness, motorTurnsPerTubeTurn: values.ratio });
+        await sendAndWait('blind.safeCalibrationBegin', { heightCm: values.height, tubeDiameterCm: values.diameter, fabricThicknessMm: values.thickness, motorTurnsPerTubeTurn: values.ratio });
         references.clear(); phase = 'direction';
         status.textContent = 'Confirma que la persiana está aproximadamente a mitad del recorrido y prueba una vuelta lenta.';
       } catch (error) { status.textContent = error.message; }

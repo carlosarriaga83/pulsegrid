@@ -5,3 +5,8 @@ CONFIG_MBEDTLS_SSL_PROTO_DTLS=n
 # This avoids reserving both full-size record buffers for the entire connection.
 CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
 
+# Keep Wi-Fi RX capacity at its minimum practical value for this low-throughput
+# controller. Six static frames match the ESP32 RX block-ack window and return
+# several kilobytes of scarce internal heap to TLS during the handshake.
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=6
+

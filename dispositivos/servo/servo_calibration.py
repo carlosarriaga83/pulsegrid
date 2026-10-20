@@ -61,18 +61,17 @@ def _servo(cortina, servo_id):
     return config
 
 
-def begin_safe(cortina, servo_id, width_cm, height_cm, tube_diameter_cm, fabric_thickness_mm, motor_turns_per_tube_turn=1.0):
+def begin_safe(cortina, servo_id, height_cm, tube_diameter_cm, fabric_thickness_mm, motor_turns_per_tube_turn=1.0):
     if servo_id not in cortina.servo_ids:
         raise ValueError('ID de servo no detectado')
     if cortina.multiturn_active[servo_id]:
         raise ValueError('espera a que termine el movimiento')
-    width = float(width_cm)
     height = float(height_cm)
     diameter = float(tube_diameter_cm)
     thickness_mm = float(fabric_thickness_mm)
     ratio = float(motor_turns_per_tube_turn)
     thickness_cm = thickness_mm / 10.0
-    if not 20.0 <= width <= 1000.0 or not 20.0 <= height <= 1000.0 or not 1.0 <= diameter <= 30.0 or not 0.01 <= thickness_mm <= 5.0 or not 0.1 <= ratio <= 20.0:
+    if not 20.0 <= height <= 1000.0 or not 1.0 <= diameter <= 30.0 or not 0.01 <= thickness_mm <= 5.0 or not 0.1 <= ratio <= 20.0:
         raise ValueError('medidas fuera de rango')
     estimated = ((-diameter + (diameter * diameter + 4.0 * thickness_cm * height / 3.141592653589793) ** 0.5) / (2.0 * thickness_cm)) * ratio
     if estimated < 1.0 or estimated > cortina.MAX_LONG_TURNS:
@@ -86,7 +85,6 @@ def begin_safe(cortina, servo_id, width_cm, height_cm, tube_diameter_cm, fabric_
         'unrolled_turns': midpoint,
         'calibrated': False,
         'calibration_in_progress': True,
-        'window_width_cm': width,
         'window_height_cm': height,
         'tube_diameter_cm': diameter,
         'fabric_thickness_mm': thickness_mm,

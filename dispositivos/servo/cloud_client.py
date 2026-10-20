@@ -32,7 +32,7 @@ def execute_blind_command(cortina, name, payload):
     import servo_calibration
     servo_id = int(payload.get('servoId', 1))
     if name == 'blind.safeCalibrationBegin':
-        servo_calibration.begin_safe(cortina, servo_id, payload.get('widthCm'), payload.get('heightCm'), payload.get('tubeDiameterCm'), payload.get('fabricThicknessMm'), payload.get('motorTurnsPerTubeTurn', 1.0))
+        servo_calibration.begin_safe(cortina, servo_id, payload.get('heightCm'), payload.get('tubeDiameterCm'), payload.get('fabricThicknessMm'), payload.get('motorTurnsPerTubeTurn', 1.0))
     elif name == 'blind.safeCalibrationTest':
         servo_calibration.test_safe_direction(cortina, servo_id)
     elif name == 'blind.safeCalibrationDirection':

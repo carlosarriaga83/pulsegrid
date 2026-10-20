@@ -284,6 +284,7 @@ test('Servo low-memory MicroPython profile enables dynamic TLS buffers without r
   assert.match(board, /sdkconfig\.tls-lowmem/);
   assert.match(sdkconfig, /CONFIG_MBEDTLS_SSL_PROTO_DTLS=n/);
   assert.match(sdkconfig, /CONFIG_MBEDTLS_DYNAMIC_BUFFER=y/);
+  assert.match(sdkconfig, /CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=6/);
   assert.doesNotMatch(sdkconfig, /CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN=/);
   assert.match(notes, /no establece un tamaño máximo de registro inferior/);
   assert.match(notes, /blind_state\.py.*multiturn_state\.py/);

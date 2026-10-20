@@ -30,6 +30,9 @@ test('all deployed static copies use the same estimator implementation', () => {
     assert.match(source, /tubeTurns \* ratio/);
     const copy = require(path.join(root, folder, 'blind-calibration-model.js'));
     assert.equal(copy.estimateTurns(150, 5, 0.5, 2), model.estimateTurns(150, 5, 0.5, 2));
+    const wizard = fs.readFileSync(path.join(root, folder, 'blind-calibration-ui.js'), 'utf8');
+    assert.doesNotMatch(wizard, /calibration-width|widthCm|Ancho de ventana/);
+    assert.match(wizard, /heightCm/);
   }
 });
 
