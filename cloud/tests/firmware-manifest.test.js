@@ -190,6 +190,25 @@ test('Cloud dashboard commands have an authenticated API route and validate LED 
   assert.match(cloudServer, /typeof payload\.enabled !== 'boolean'/);
 });
 
+test('authenticated ESP32 polls and command ACKs refresh the online heartbeat', () => {
+  const cloudServer = fs.readFileSync(path.join(root, 'cloud/server.js'), 'utf8');
+  const pollRouteStart = cloudServer.indexOf("app.get('/api/device-commands'");
+  const ackRouteStart = cloudServer.indexOf("app.post('/api/device-commands/:commandId/ack'");
+  const versionRouteStart = cloudServer.indexOf("app.get('/api/version'");
+  assert.notEqual(pollRouteStart, -1);
+  assert.ok(ackRouteStart > pollRouteStart);
+  assert.ok(versionRouteStart > ackRouteStart);
+  const pollRoute = cloudServer.slice(pollRouteStart, ackRouteStart);
+  const ackRoute = cloudServer.slice(ackRouteStart, versionRouteStart);
+  for (const route of [pollRoute, ackRoute]) {
+    assert.match(route, /deviceForCode\(request\.get\('x-device-code'\), deviceId\)/);
+    assert.match(route, /if \(!authenticated\) return fail\(response, 401, 'Invalid device code'\)/);
+    assert.match(route, /UPDATE devices SET status = 'online', last_seen = NOW\(\) WHERE id = \?/);
+  }
+  const devicesRoute = cloudServer.slice(cloudServer.indexOf("app.get('/api/devices'"), cloudServer.indexOf("app.post('/api/devices'"));
+  assert.match(devicesRoute, /devices\.last_seen >= DATE_SUB\(NOW\(\), INTERVAL 90 SECOND\)/);
+});
+
 test('burner and firmware use per-device codes over HTTPS while captive portals save Wi-Fi only', () => {
   const servoMain = fs.readFileSync(path.join(root, 'dispositivos/servo/main.py'), 'utf8');
   const servoCloud = fs.readFileSync(path.join(root, 'dispositivos/servo/cloud_client.py'), 'utf8');

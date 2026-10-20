@@ -1236,6 +1236,7 @@ app.get('/api/device-commands', apiReady, async (request, response) => {
   const authenticated = await deviceForCode(request.get('x-device-code'), deviceId);
   if (!authenticated) return fail(response, 401, 'Invalid device code');
   const db = database();
+  await db.execute("UPDATE devices SET status = 'online', last_seen = NOW() WHERE id = ?", [authenticated.id]);
   const priorityOnly = String(request.query.priorityOnly || '') === '1';
   const [commands] = priorityOnly
     ? await db.execute("SELECT id, command_name AS name, payload FROM commands WHERE device_id = ? AND status IN ('queued', 'delivered') AND command_name IN ('blind.safeCalibrationStop', 'blind.safeCalibrationCancel', 'curtain.stop') ORDER BY created_at ASC LIMIT 1", [authenticated.id])
@@ -1253,7 +1254,9 @@ app.post('/api/device-commands/:commandId/ack', apiReady, async (request, respon
   if (!deviceId || !['succeeded', 'failed'].includes(status)) return fail(response, 422, 'deviceId y estado valido son obligatorios');
   const authenticated = await deviceForCode(request.get('x-device-code'), deviceId);
   if (!authenticated) return fail(response, 401, 'Invalid device code');
-  const [result] = await database().execute('UPDATE commands SET status = ?, error_message = ? WHERE id = ? AND device_id = ?', [status, status === 'failed' ? errorMessage : null, request.params.commandId, authenticated.id]);
+  const db = database();
+  await db.execute("UPDATE devices SET status = 'online', last_seen = NOW() WHERE id = ?", [authenticated.id]);
+  const [result] = await db.execute('UPDATE commands SET status = ?, error_message = ? WHERE id = ? AND device_id = ?', [status, status === 'failed' ? errorMessage : null, request.params.commandId, authenticated.id]);
   if (!result.affectedRows) return fail(response, 404, 'Comando no encontrado');
   response.json({ ok: true });
 });
