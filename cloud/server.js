@@ -8,6 +8,7 @@ const crypto = require('crypto');
 const https = require('https');
 const cloudVersion = require('./package.json').version;
 const AutomationModel = require('./automation-model');
+const BlindCalibrationModel = require('./blind-calibration-model');
 const OpenMeteo = require('./open-meteo');
 
 require('dotenv').config({ path: path.join(__dirname, '.env', 'local.env') });
@@ -598,6 +599,15 @@ function validateLedConfiguration(device, command, payload) {
   if (!payload || typeof payload.enabled !== 'boolean' || Object.keys(payload).some((key) => key !== 'enabled')) throw new Error('enabled debe ser booleano');
 }
 
+function validateCloudBlindCalibration(device, command, payload) {
+  if (command !== 'blind.cloudCalibrationConfigure' || device.provider === 'tuya') throw new Error('La calibracion geometrica solo aplica a servos Pulsegrid');
+  const keys = ['servoId', 'heightCm', 'tubeDiameterCm', 'fabricThicknessMm', 'motorTurnsPerTubeTurn', 'estimatedTurns'];
+  if (!payload || Object.keys(payload).length !== keys.length || keys.some((key) => !Object.hasOwn(payload, key))) throw new Error('Payload de calibracion incompleto o invalido');
+  if (![1, 2].includes(payload.servoId)) throw new Error('servoId debe ser 1 o 2');
+  const estimated = BlindCalibrationModel.estimateTurns(payload.heightCm, payload.tubeDiameterCm, payload.fabricThicknessMm, payload.motorTurnsPerTubeTurn);
+  if (!Number.isFinite(payload.estimatedTurns) || Math.abs(payload.estimatedTurns - estimated) > 0.01) throw new Error('Las vueltas estimadas no coinciden con las medidas');
+}
+
 async function validateAutomationDevices(db, email, target, rule) {
   if (rule.commandName) validateTuyaCommand(target, rule.commandName, rule.commandPayload, rule.valueSource);
   else {
@@ -638,6 +648,16 @@ async function dispatchDeviceCommand(db, device, command, payload, context = {})
       const [readings] = await db.execute('SELECT payload FROM telemetry WHERE device_id = ? ORDER BY created_at DESC, id DESC LIMIT 1', [device.id]);
       const latestTelemetry = readings[0]?.payload;
       validateDirectionConfiguration({ ...device, telemetry: latestTelemetry }, command, payload);
+    }
+    if (command.startsWith('blind.safeCalibration') && !['blind.safeCalibrationStop', 'blind.safeCalibrationCancel'].includes(command)) {
+      throw new Error('La calibracion anterior fue reemplazada por la calibracion geometrica desde el cloud');
+    }
+    if (command === 'blind.cloudCalibrationConfigure') {
+      const [readings] = await db.execute('SELECT payload FROM telemetry WHERE device_id = ? ORDER BY created_at DESC, id DESC LIMIT 1', [device.id]);
+      const latest = readings[0]?.payload;
+      const telemetry = typeof latest === 'string' ? JSON.parse(latest) : latest;
+      validateCloudBlindCalibration({ ...device, telemetry }, command, payload);
+      if (String(telemetry?.firmwareTarget || '').toLowerCase() !== 'servo') throw new Error('La calibracion geometrica requiere firmware Servo');
     }
     if (command === 'led.configure') {
       const [readings] = await db.execute('SELECT payload FROM telemetry WHERE device_id = ? ORDER BY created_at DESC, id DESC LIMIT 1', [device.id]);

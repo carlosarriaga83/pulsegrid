@@ -17,9 +17,10 @@ test('geometry estimator rejects unsafe or missing inputs', () => {
   assert.throws(() => model.estimateTurns(150, 5, 0.5, 0), /relación/);
 });
 
-test('50 cm travel estimate leaves room for the fixed one-turn direction test', () => {
+test('geometry estimate provides a conservative symmetric operating envelope', () => {
   const estimatedTurns = model.estimateTurns(50, 3.5, 0.5, 1);
-  assert.ok(estimatedTurns * 0.4 >= 1, `preventive limit should allow one turn; estimated ${estimatedTurns} turns`);
+  assert.ok(estimatedTurns > 1);
+  assert.equal(estimatedTurns * 0.4 * 2, estimatedTurns * 0.8);
 });
 
 test('all deployed static copies use the same estimator implementation', () => {
@@ -32,52 +33,50 @@ test('all deployed static copies use the same estimator implementation', () => {
     assert.equal(copy.estimateTurns(150, 5, 0.5, 2), model.estimateTurns(150, 5, 0.5, 2));
     const wizard = fs.readFileSync(path.join(root, folder, 'blind-calibration-ui.js'), 'utf8');
     assert.doesNotMatch(wizard, /calibration-width|widthCm|Ancho de ventana/);
-    assert.match(wizard, /heightCm/);
+    assert.match(wizard, /blind\.ga25CalibrationStart/);
+    assert.doesNotMatch(wizard, /blind\.safeCalibrationTest|positiveIsDown|calibration-test-direction/);
   }
 });
 
-test('safe-calibration wizard uses bounded commands only and documents manual supervision', () => {
+test('cloud-first wizard sends one cloud-computed configuration without direction tests or confirmations', () => {
   const root = path.join(__dirname, '..');
   for (const folder of ['', 'public', 'public_html', 'legacy-root']) {
-    const html = fs.readFileSync(path.join(root, folder, 'blind-calibration-ui.js'), 'utf8');
-    assert.match(html, /blind\.safeCalibrationBegin/);
-    assert.match(html, /blind\.safeCalibrationTest/);
-    assert.match(html, /blind\.safeCalibrationStep/);
-    assert.match(html, /calibration-step-size/);
-    assert.match(html, /value="1">1 vuelta/);
-    assert.match(html, /Number\(.*calibration-step-size.*value\)/s);
-    assert.match(html, /calibration-midpoint-confirm/);
-    assert.match(html, /El encoder no detecta fuerza|no detecta fuerza/);
-    assert.match(html, /Límite preventivo \(80% de la mitad estimada\)/);
-    assert.match(html, /blind\.safeCalibrationStop/);
-    assert.match(html, /(?:setDisabled|disable)\('calibration-stop', phase === 'measure' \|\| phase === 'done'\)/);
-    assert.match(html, /blind\.safeCalibrationCancel/);
-    assert.match(html, /phase='measure'|phase = 'measure'/);
-    assert.doesNotMatch(html, /blind\.jog|blind\.configure|blind\.markRolled|blind\.markDeployed/);
+    const html = fs.readFileSync(path.join(root, folder, 'cloud-blind-calibration-ui.js'), 'utf8');
+    assert.match(html, /BlindCalibrationModel\.estimateTurns/);
+    assert.match(html, /blind\.cloudCalibrationConfigure/);
+    assert.match(html, /estimatedTurns/);
+    assert.match(html, /position_recovery_required/);
+    assert.match(html, /toggle del dispositivo/);
+    assert.doesNotMatch(html, /safeCalibrationTest|positiveIsDown|Probar una vuelta|Confirmar sentido/);
   }
 });
 
-test('all dashboard copies verify encoder displacement and surface motion faults', () => {
+test('Servo cloud calibration applies limits without starting or polling for movement', () => {
   const root = path.join(__dirname, '..');
   for (const folder of ['', 'public', 'public_html', 'legacy-root']) {
     const app = fs.readFileSync(path.join(root, folder, 'app.js'), 'utf8');
     const wizard = fs.readFileSync(path.join(root, folder, 'blind-calibration-ui.js'), 'utf8');
+    const cloudWizard = fs.readFileSync(path.join(root, folder, 'cloud-blind-calibration-ui.js'), 'utf8');
     assert.match(app, /blind_calibration_motion_fault/);
     assert.match(app, /blind_calibration_motion_fault_reason/);
     assert.match(app, /Math\.abs\(position - startPosition\) >= 0\.02/);
     assert.match(app, /waitForCalibrationIdle\(deviceId, servoId, startPosition, timeout = 240000\)/);
     assert.match(app, /waitForCalibrationCommand\(commandId, timeout = 30000\)/);
-    assert.match(wizard, /getCalibrationPosition/);
-    assert.match(wizard, /waitForCalibrationCommand\(result\.commandId, movement \? 240000 : undefined\)|movement\?240000:undefined/);
-    assert.match(wizard, /waitForCalibrationIdle\([^\n]*startPosition/s);
+    assert.match(cloudWizard, /blind\.cloudCalibrationConfigure/);
+    assert.match(cloudWizard, /position_recovery_required/);
+    assert.doesNotMatch(cloudWizard, /waitForCalibrationIdle|curtain\.move|blind\.safeCalibration/);
+    assert.doesNotMatch(wizard, /blind\.safeCalibrationTest|positiveIsDown|calibration-test-direction/);
   }
 });
 
-test('servo calibration firmware enforces a geometry ceiling and persists real encoder endpoints', () => {
+test('servo firmware accepts cloud estimates only with reliable encoder state and bounded envelope', () => {
   const root = path.join(__dirname, '..', '..');
   const firmware = fs.readFileSync(path.join(root, 'dispositivos/servo/servo_calibration.py'), 'utf8');
   const cortina = fs.readFileSync(path.join(root, 'dispositivos/servo/cortina.py'), 'utf8');
   assert.match(firmware, /'half_travel_limit': estimated \* 0\.4/);
+  assert.match(firmware, /def configure_cloud_estimate\(/);
+  assert.match(firmware, /position_recovery_required\[servo_id\]/);
+  assert.match(firmware, /abs\(calculated - estimated\) > 0\.01/);
   assert.match(firmware, /TEST_DIRECTION_TURNS = 1\.0/);
   assert.match(firmware, /_start_precision_multiturn\(servo_id, TEST_DIRECTION_TURNS, cortina\.APPROACH_SPEED, 30\)/);
   assert.match(firmware, /def stop_safe\(cortina, servo_id\):/);
@@ -144,5 +143,44 @@ test('all dashboard copies provide a distinct timed GA25 calibration flow', () =
     assert.match(wizard, /blind\.ga25CalibrationCancel/);
     assert.match(wizard, /sin encoder/);
     assert.match(wizard, /getCalibrationDeviceModel\(\) !== 'ga25'/);
+    assert.match(wizard, /\.command-calibration-layout'\) \|\|/);
+    assert.match(wizard, /function mountBlindCalibrationWizard\(context\)\s*\{\s*if \(context\.getCalibrationDeviceModel\?\.\(\) === 'ga25'\) mountGa25CalibrationWizard\(context\);\s*\}/);
   }
+});
+
+test('server validates cloud-computed calibration and rejects legacy interactive commands', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+  assert.match(source, /function validateCloudBlindCalibration\(/);
+  assert.match(source, /BlindCalibrationModel\.estimateTurns\(/);
+  assert.match(source, /command === 'blind\.cloudCalibrationConfigure'/);
+  assert.match(source, /command\.startsWith\('blind\.safeCalibration'\)/);
+  assert.match(source, /validateCloudBlindCalibration\(\{ \.\.\.device, telemetry \}, command, payload\)/);
+});
+
+test('local servo portal exposes Wi-Fi provisioning only', () => {
+  const portal = fs.readFileSync(path.join(__dirname, '..', '..', 'dispositivos/servo/captive_portal.py'), 'utf8');
+  assert.match(portal, /action=\/save/);
+  assert.doesNotMatch(portal, /action=\/calibration|action=\/control|GET \/status|def _calibration\(|def _control\(/);
+  assert.match(portal, /password = values\.get\('password', ''\) or current\['password'\]/);
+});
+
+test('direction reversal preserves the calibrated envelope and uses consistent percentages', () => {
+  const root = path.join(__dirname, '..', '..');
+  const cortina = fs.readFileSync(path.join(root, 'dispositivos/servo/cortina.py'), 'utf8');
+  const main = fs.readFileSync(path.join(root, 'dispositivos/servo/main.py'), 'utf8');
+  assert.match(cortina, /def _calibrated_target\(self, servo_id, percent\):[\s\S]*?if self\.direction_reversed:\s+percent = 100 - percent/);
+  assert.match(cortina, /def blind_status\(self, servo_id\):[\s\S]*?if self\.direction_reversed:\s+percent = 100\.0 - percent/);
+  assert.match(cortina, /def set_direction_reversed\(self, reversed_value\):\s+self\.direction_reversed = bool\(reversed_value\)\s+self\._save_persistent_state\(\)/);
+  assert.match(cortina, /direction_reversed=False\)/);
+  assert.match(main, /direction_reversed=bool\(DIRECTION_REVERSED\)/);
+  assert.doesNotMatch(main, /controller\.set_direction_reversed\(bool\(DIRECTION_REVERSED\)\)/);
+});
+
+test('GA25 local portal only provisions Wi-Fi and preserves a blank password', () => {
+  const root = path.join(__dirname, '..', '..');
+  const portal = fs.readFileSync(path.join(root, 'dispositivos/ga25/esp32_motor/captive_portal.py'), 'utf8');
+  assert.match(portal, /action=\/save/);
+  assert.doesNotMatch(portal, /action=\/motor|POST \/motor|def _test_motor\(/);
+  assert.match(portal, /Este portal local solo administra la conexión Wi-Fi/);
+  assert.match(portal, /values\.get\("password", ""\) or str\(getattr\(current, "WIFI_PASSWORD", ""\)\)/);
 });

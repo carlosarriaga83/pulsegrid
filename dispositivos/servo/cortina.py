@@ -14,13 +14,13 @@ class Cortina:
     FRONT_GEAR_CLOCKWISE_TURNS = -1
     FRONT_GEAR_COUNTERCLOCKWISE_TURNS = 1
 
-    def __init__(self, uart, i2c=None, min_position=300, max_position=3700, servo_ids=(1, 2)):
+    def __init__(self, uart, i2c=None, min_position=300, max_position=3700, servo_ids=(1, 2), direction_reversed=False):
         if not 0 <= min_position < max_position <= 4095:
             raise ValueError('limites de posicion invalidos')
         self.bus = STServoBus(uart)
         self.min_position = min_position
         self.max_position = max_position
-        self.direction_reversed = False
+        self.direction_reversed = bool(direction_reversed)
         self.known_servo_ids = tuple(servo_ids)
         self.absolute_turns = {servo_id: 0.0 for servo_id in self.known_servo_ids}
         self.position_recovery_required = {servo_id: True for servo_id in self.known_servo_ids}
@@ -401,6 +401,8 @@ class Cortina:
         config = self.blind_config[servo_id]
         span = config['unrolled_turns'] - config['rolled_turns']
         percent = 0.0 if not span else (self.absolute_turns[servo_id] - config['rolled_turns']) * 100 / span
+        if self.direction_reversed:
+            percent = 100.0 - percent
         return {
             'rolled_turns': config['rolled_turns'],
             'unrolled_turns': config['unrolled_turns'],

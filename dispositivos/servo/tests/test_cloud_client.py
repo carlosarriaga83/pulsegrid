@@ -28,22 +28,25 @@ class FakeTime:
 class FakeSocket:
     instances = []
     responses = []
+    connect_failures = set()
 
     def __init__(self):
         self.requests = []
         self.response = b''
         self.closed = False
         self.timeout = None
+        self.options = []
         self.__class__.instances.append(self)
 
-    def setsockopt(self, *_args):
-        pass
+    def setsockopt(self, *args):
+        self.options.append(args)
 
     def settimeout(self, timeout):
         self.timeout = timeout
 
-    def connect(self, _address):
-        pass
+    def connect(self, address):
+        if address[0] in self.__class__.connect_failures:
+            raise OSError(116, 'ETIMEDOUT')
 
     def write(self, data):
         self.requests.append(data)
@@ -63,10 +66,15 @@ class FakeSocketModule(types.ModuleType):
     SOL_SOCKET = 1
     SO_RCVBUF = 2
     SO_SNDBUF = 3
+    SOCK_STREAM = 1
 
     def __init__(self):
         super().__init__('socket')
         self.created = 0
+        self.addresses = [('192.0.2.10', 443)]
+
+    def getaddrinfo(self, _host, port, *_args):
+        return [(2, self.SOCK_STREAM, 6, '', (address, port)) for address, _ in self.addresses]
 
     def socket(self):
         self.created += 1
@@ -78,13 +86,16 @@ class CloudClientConnectionTests(unittest.TestCase):
         self.previous_modules = {name: sys.modules.get(name) for name in ('socket', 'time', 'ujson', 'ussl')}
         FakeSocket.instances = []
         FakeSocket.responses = []
+        FakeSocket.connect_failures = set()
         FakeTime.now = 100000
         self.socket_module = FakeSocketModule()
         self.tls_module = types.ModuleType('ussl')
         self.tls_module.handshakes = 0
+        self.tls_module.server_names = []
 
         def wrap_socket(sock, server_hostname=None):
             self.tls_module.handshakes += 1
+            self.tls_module.server_names.append(server_hostname)
             return sock
 
         self.tls_module.wrap_socket = wrap_socket
@@ -122,17 +133,20 @@ class CloudClientConnectionTests(unittest.TestCase):
         return (b'HTTP/1.1 200 OK\r\n' + framing +
                 b'Connection: ' + connection.encode() + b'\r\n\r\n' + body)
 
-    def test_successive_http_requests_reuse_the_tls_handshake(self):
+    def test_successive_http_requests_open_fresh_tls_connections(self):
         FakeSocket.responses = [self.response(), self.response()]
 
         self.assertEqual(self.client.request('GET', '/api/device-commands'), {'ok': True})
         self.assertEqual(self.client.request('POST', '/api/telemetry', {'v': 1}), {'ok': True})
 
-        self.assertEqual(self.socket_module.created, 1)
-        self.assertEqual(self.tls_module.handshakes, 1)
-        self.assertEqual(len(FakeSocket.instances[0].requests), 2)
-        self.assertIn(b'Connection: keep-alive', FakeSocket.instances[0].requests[0])
-        self.assertFalse(FakeSocket.instances[0].closed)
+        self.assertEqual(self.socket_module.created, 2)
+        self.assertEqual(self.tls_module.handshakes, 2)
+        self.assertEqual(len(FakeSocket.instances[0].requests), 1)
+        self.assertEqual(len(FakeSocket.instances[1].requests), 1)
+        self.assertIn(b'Connection: close', FakeSocket.instances[0].requests[0])
+        self.assertEqual(FakeSocket.instances[0].options, [])
+        self.assertTrue(FakeSocket.instances[0].closed)
+        self.assertTrue(FakeSocket.instances[1].closed)
 
     def test_connection_close_response_renews_tls_on_next_request(self):
         FakeSocket.responses = [self.response('close'), self.response()]
@@ -145,25 +159,35 @@ class CloudClientConnectionTests(unittest.TestCase):
         self.assertEqual(self.tls_module.handshakes, 2)
         self.assertTrue(FakeSocket.instances[0].closed)
 
-    def test_chunked_response_is_fully_consumed_before_reuse(self):
+    def test_chunked_response_is_fully_consumed_before_connection_close(self):
         FakeSocket.responses = [self.response(chunked=True), self.response()]
 
         self.assertEqual(self.client.request('GET', '/api/version'), {'ok': True})
         self.assertEqual(self.client.request('GET', '/api/version'), {'ok': True})
 
-        self.assertEqual(self.socket_module.created, 1)
-        self.assertEqual(self.tls_module.handshakes, 1)
+        self.assertEqual(self.socket_module.created, 2)
+        self.assertEqual(self.tls_module.handshakes, 2)
 
-    def test_connection_is_renewed_after_its_maximum_lifetime(self):
+    def test_each_request_renews_the_tls_connection(self):
         FakeSocket.responses = [self.response(), self.response()]
         self.assertEqual(self.client.request('GET', '/api/version'), {'ok': True})
-
-        FakeTime.now += self.client_module.TLS_MAX_CONNECTION_AGE_MS
         self.assertEqual(self.client.request('GET', '/api/version'), {'ok': True})
 
         self.assertEqual(self.socket_module.created, 2)
         self.assertEqual(self.tls_module.handshakes, 2)
         self.assertTrue(FakeSocket.instances[0].closed)
+
+    def test_unreachable_dns_address_falls_through_to_next_address(self):
+        self.socket_module.addresses = [('192.0.2.10', 443), ('198.51.100.20', 443)]
+        FakeSocket.connect_failures = {'192.0.2.10'}
+        FakeSocket.responses = [self.response()]
+
+        self.assertEqual(self.client.request('GET', '/api/version'), {'ok': True})
+
+        self.assertEqual(self.socket_module.created, 2)
+        self.assertTrue(FakeSocket.instances[0].closed)
+        self.assertEqual(self.tls_module.handshakes, 1)
+        self.assertEqual(self.tls_module.server_names, ['pulse.example'])
 
 
 if __name__ == '__main__':

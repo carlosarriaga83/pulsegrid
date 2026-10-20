@@ -56,27 +56,26 @@ test('servo confirms and feeds the transactional OTA watchdog', () => {
   assert.match(source, /ota_boot\.feed\(\)/);
 });
 
-test('servo cloud dispatcher explicitly recognizes calibration wizard commands', () => {
+test('servo cloud dispatcher explicitly recognizes cloud-first calibration and emergency actions', () => {
   const cloudClient = fs.readFileSync(path.join(root, 'dispositivos/servo/cloud_client.py'), 'utf8');
   const dashboard = fs.readFileSync(path.join(root, 'cloud/app.js'), 'utf8');
-  const calibrationUi = fs.readFileSync(path.join(root, 'cloud/blind-calibration-ui.js'), 'utf8');
+  const calibrationUi = fs.readFileSync(path.join(root, 'cloud/cloud-blind-calibration-ui.js'), 'utf8');
   const calibrationCommands = [
-    'blind.safeCalibrationBegin', 'blind.safeCalibrationTest',
-    'blind.safeCalibrationDirection', 'blind.safeCalibrationStep',
-    'blind.safeCalibrationMark', 'blind.safeCalibrationStop', 'blind.safeCalibrationCancel'
+    'blind.cloudCalibrationConfigure', 'blind.safeCalibrationStop', 'blind.safeCalibrationCancel'
   ];
   assert.match(cloudClient, /BLIND_COMMANDS = \(/);
   assert.match(cloudClient, /elif name in BLIND_COMMANDS:\s+execute_blind_command\(cortina, name, payload\)/);
   assert.match(cloudClient, /def execute_blind_command\(cortina, name, payload\):/);
   assert.match(cloudClient, /Comando de calibracion no soportado:/);
   assert.doesNotMatch(cloudClient, /'blind\.jog'/);
-  assert.match(cloudClient, /blind\.safeCalibrationBegin/);
-  assert.match(cloudClient, /blind\.safeCalibrationStep/);
+  assert.match(cloudClient, /blind\.cloudCalibrationConfigure/);
   for (const command of calibrationCommands) {
     assert.ok(cloudClient.includes(`'${command}'`), `servo dispatcher must recognize ${command}`);
-    if (command !== 'blind.safeCalibrationCancel') assert.ok(calibrationUi.includes(`'${command}'`), `dashboard must send ${command}`);
+    if (command === 'blind.cloudCalibrationConfigure') assert.ok(calibrationUi.includes(command), `dashboard must send ${command}`);
   }
-  assert.match(dashboard, /mountBlindCalibrationWizard/);
+  assert.match(dashboard, /mountCloudBlindCalibrationWizard/);
+  assert.match(calibrationUi, /BlindCalibrationModel\.estimateTurns/);
+  assert.doesNotMatch(calibrationUi, /safeCalibrationTest|positiveIsDown|Probar una vuelta|Confirmar sentido/);
 });
 
 test('calibration wizard selects a timed GA25 flow without sending servo commands', () => {
@@ -88,6 +87,7 @@ test('calibration wizard selects a timed GA25 flow without sending servo command
     assert.match(source, /getCalibrationDeviceModel/);
     assert.match(source, /mountBlindCalibrationWizard\(\{ \$, \$\$, apiRequest, loadDevices, getCalibrationPosition, waitForCalibrationCommand, waitForCalibrationIdle, getCalibrationDeviceModel, showToast, renderIcons \}\)/, folder || 'cloud root');
     const calibrationUi = fs.readFileSync(path.join(root, 'cloud', folder, 'blind-calibration-ui.js'), 'utf8');
+    const cloudCalibrationUi = fs.readFileSync(path.join(root, 'cloud', folder, 'cloud-blind-calibration-ui.js'), 'utf8');
     assert.match(calibrationUi, /blind\.ga25CalibrationStart/);
     assert.match(calibrationUi, /blind\.ga25CalibrationStop/);
     assert.match(calibrationUi, /blind\.ga25CalibrationCancel/);
@@ -95,6 +95,10 @@ test('calibration wizard selects a timed GA25 flow without sending servo command
     assert.doesNotMatch(source, /'blind\.configure':|'<option value="blind\.configure"/);
     assert.match(source, /const isGa25Device = targetModel === 'ga25' \|\| \(!targetModel && \/ga25\/i\.test\(selectedIdentity\)\)/, folder || 'cloud root');
     assert.match(source, /configureDeviceCommands\(\);\s+renderCalibrationWizard\(\);/, folder || 'cloud root');
+    assert.match(source, /mountCloudBlindCalibrationWizard/);
+    assert.match(source, /command-calibration-layout/);
+    assert.match(cloudCalibrationUi, /blind\.cloudCalibrationConfigure/);
+    assert.match(cloudCalibrationUi, /position_recovery_required/);
   }
 });
 
@@ -132,9 +136,10 @@ test('ESP firmware supports three-boot Wi-Fi recovery and faster command polling
   }
   assert.match(servoMain, /recovery_mode = wifi_recovery\.register_boot\(count_reset\)/);
   assert.match(servoMain, /reset_cause in \(getattr\(machine, 'PWRON_RESET', 1\), getattr\(machine, 'HARD_RESET', 2\)\)/);
-  assert.match(servoMain, /FIRMWARE_VERSION = '2026\.10\.21\.servo-r21'/);
+  assert.match(servoMain, /FIRMWARE_VERSION = '2026\.10\.21\.servo-r22'/);
+  assert.match(servoMain, /if not connected and wifi_connect_pending:[\s\S]*?while \(not connected[\s\S]*?WIFI_CONNECT_TIMEOUT_MS\):\s+time\.sleep_ms\(100\)\s+connected = wlan\.isconnected\(\)/);
   assert.match(servoMain, /if recovery_mode:\s+try:\s+wlan\.disconnect\(\)\s+wlan\.active\(False\)/);
-  assert.match(servoMain, /captive_portal\.start_background\(controller, recovery_mode\)/);
+  assert.match(servoMain, /local_portal_enabled = recovery_mode or not connected or not DEVICE_CODE\s+if local_portal_enabled:\s+captive_portal\.start_background\(controller, recovery_mode\)/);
   assert.match(servoMain, /moving = any\(controller\.multiturn_active\.values\(\)\)[\s\S]*?if not moving:/);
   assert.match(servoMain, /elif time\.ticks_diff\(now, last_cloud_poll\) >= MOVEMENT_STOP_POLL_MS[\s\S]*?priority_only=True/);
   assert.match(servoMain, /client\.telemetry\(controller, FIRMWARE_VERSION/);
@@ -143,11 +148,12 @@ test('ESP firmware supports three-boot Wi-Fi recovery and faster command polling
   assert.match(servoPortal, /_thread\.stack_size\(8192\)/);
   assert.match(servoPortal, /data = client\.recv\(512\)[\s\S]*?if length > 1024/);
   assert.match(servoPortal, /values\['ssid'\] and not force_ap/);
-  assert.match(servoPortal, /password=''/);
+  assert.match(servoPortal, /name=password type=password value=''/);
   assert.match(servoPortal, /password = values\.get\('password', ''\) or current\['password'\]/);
-  assert.match(servoPortal, /refreshStatus\(\);setInterval\(refreshStatus,500\)/);
+  assert.doesNotMatch(servoPortal, /refreshStatus|blind_calibration|action=\/calibration|action=\/control/);
   assert.match(servoPortal, /encoded = body\.encode\(\)[\s\S]*?len\(encoded\)/);
-  assert.match(servoPortal, /def _calibration\(values\):[\s\S]*?servo_calibration\.safe_step\([\s\S]*?if station\.isconnected\(\) and not force_ap:[\s\S]*?PORTAL_HOST = station\.ifconfig\(\)\[0\]/);
+  assert.doesNotMatch(servoPortal, /def _calibration\(|def _control\(|GET \/status/);
+  assert.match(servoPortal, /action=\/save/);
   assert.match(servoLed, /'recovery': \(32, 14, 0\)/);
   assert.match(servoLed, /'moving': \(0, 0, 24\)/);
   assert.match(servoLed, /def tick\(\)/);
@@ -158,11 +164,9 @@ test('ESP firmware supports three-boot Wi-Fi recovery and faster command polling
   assert.match(servoCloud, /timeout=3 if priority_only else 8/);
   assert.match(servoCloud, /self\._deferred_acks = \[\]/);
   assert.match(servoCloud, /self\._deferred_acks\.append\(ack\)/);
-  assert.match(servoCloud, /TLS_MAX_CONNECTION_AGE_MS = 900000/);
   assert.match(servoCloud, /self\._connection = None/);
-  assert.match(servoCloud, /Connection: keep-alive/);
+  assert.match(servoCloud, /Connection: close/);
   assert.match(servoCloud, /self\._connection = client/);
-  assert.doesNotMatch(servoCloud, /Connection: close/);
   assert.match(cloudServer, /server\.keepAliveTimeout = 15000/);
   assert.match(cloudServer, /server\.headersTimeout = 20000/);
   assert.doesNotMatch(servoCloud, /_thread|_network_loop/);
@@ -262,16 +266,14 @@ test('servo NeoPixel reflects cloud/provisioning/offline state and OTA retries t
   assert.match(main, /board_led\.set_status\('offline'\)/);
   assert.match(main, /board_led\.set_status\('online'\)/);
   assert.match(cloud, /def is_online\(self, max_age_ms=30000\)/);
-  assert.match(cloud, /self\.retry_ms = min\(self\.retry_ms \* 2, 60000\)/);
-  assert.match(cloud, /self\.retry_ms = 5000/);
-  assert.match(cloud, /phase = 'TLS handshake'\s+self\._log_heap\('antes del handshake TLS'\)\s+secure_client = tls\.wrap_socket/);
-  assert.match(cloud, /socket\.SO_RCVBUF, 512/);
-  assert.match(cloud, /socket\.SO_SNDBUF, 512/);
+  assert.match(cloud, /delay = 1000/);
+  assert.match(cloud, /phase = 'TLS handshake \{\}'\.format\(destination\[0\]\)\s+self\._log_heap\('antes del handshake TLS'\)\s+secure_client = tls\.wrap_socket/);
+  assert.doesNotMatch(cloud, /socket\.SO_RCVBUF, 512|socket\.SO_SNDBUF, 512/);
   assert.match(cloud, /self\._log_heap\('antes del handshake TLS'\)/);
   assert.match(cloud, /self\._log_heap\('tras recuperar'\)/);
   assert.match(cloud, /def _send_all\(client, data\):[\s\S]*?writer = getattr\(client, 'write', None\)[\s\S]*?writer\(data\[sent:\]\)/);
   assert.match(cloud, /def _recv\(client, size\):[\s\S]*?reader = getattr\(client, 'read', None\)[\s\S]*?reader\(size\)/);
-  assert.match(cloud, /Connection: keep-alive/);
+  assert.match(cloud, /Connection: close/);
   assert.match(cloud, /_send_all\(client, \(request \+ '\\r\\n'\)\.encode\(\) \+ body_bytes\)/);
   assert.doesNotMatch(cloud, /client\.sendall\(/);
   assert.match(cloud, /Heap ESP32 \{\} \(total, libre, bloque mayor, minimo libre\)/);

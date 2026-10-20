@@ -1579,6 +1579,15 @@ function renderLegacyCalibrationWizard() {
 
 function renderCalibrationWizard() {
   const layout = $('.command-layout');
+  if (!layout) return;
+  let workspace = $('.command-calibration-layout');
+  if (!workspace) {
+    workspace = document.createElement('div');
+    workspace.className = 'command-calibration-layout';
+    const history = $('.command-history');
+    layout.append(workspace);
+    if (history) workspace.append(history);
+  }
   const selectedDevice = devices.find((device) => device.id === $('#command-device')?.value);
   const telemetry = parseTelemetry(selectedDevice?.telemetry);
   const targetModel = String(telemetry.firmwareTarget || '').toLowerCase();
@@ -1586,7 +1595,12 @@ function renderCalibrationWizard() {
   const supportsServo = targetModel === 'servo' || (!targetModel && !/ga25/i.test(identity));
   const supportsGa25 = targetModel === 'ga25' || (!targetModel && /ga25/i.test(identity));
   if (!supportsServo && !supportsGa25) { $('#calibration-wizard')?.remove(); return; }
-  if (!layout || $('#calibration-wizard') || typeof window.mountBlindCalibrationWizard !== 'function') return;
+  if ($('#calibration-wizard')) return;
+  if (supportsServo && typeof window.mountCloudBlindCalibrationWizard === 'function') {
+    window.mountCloudBlindCalibrationWizard({ $, apiRequest, loadDevices, waitForCalibrationCommand, showToast, renderIcons, devices: () => devices, parseTelemetry });
+    return;
+  }
+  if (typeof window.mountBlindCalibrationWizard !== 'function') return;
   const getCalibrationDeviceModel = () => {
     const device = devices.find((item) => item.id === $('#command-device')?.value);
     const model = String(parseTelemetry(device?.telemetry).firmwareTarget || '').toLowerCase();
@@ -1713,6 +1727,7 @@ $('#execute-command').addEventListener('click', async () => {
   }
 });
 $('#command-device').addEventListener('change', renderCommandDeviceState);
+$('#command-device').addEventListener('change', () => { $('#calibration-wizard')?.remove(); renderCalibrationWizard(); });
 $('#send-command').addEventListener('click', () => {
   navigate('commands');
   const composer = $('.command-compose');

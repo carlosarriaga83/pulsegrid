@@ -19,7 +19,7 @@ except ImportError:
     COMMANDS_ENABLED = True
     DIRECTION_REVERSED = False
 
-FIRMWARE_VERSION = '2026.10.21.servo-r21'
+FIRMWARE_VERSION = '2026.10.21.servo-r22'
 FIRMWARE_FILES = ('main.py', 'cloud_client.py', 'board_led.py', 'captive_portal.py', 'cortina.py', 'servo_calibration.py', 'stservo.py', 'boot.py', 'ota_boot.py', 'pulsegrid_ota.py', 'wifi_recovery.py')
 COMMAND_POLL_MS = 1000
 CALIBRATION_COMMAND_POLL_MS = 200
@@ -62,8 +62,10 @@ def build_controller():
     import cortina as cortina_module
     uart = UART(1, baudrate=1000000, bits=8, parity=None, stop=1, rx=18, tx=19)
     i2c = I2C(0, scl=Pin(22), sda=Pin(21), freq=100000)
-    controller = cortina_module.Cortina(uart, i2c, min_position=300, max_position=3700, servo_ids=(1, 2))
-    controller.set_direction_reversed(bool(DIRECTION_REVERSED))
+    controller = cortina_module.Cortina(
+        uart, i2c, min_position=300, max_position=3700, servo_ids=(1, 2),
+        direction_reversed=bool(DIRECTION_REVERSED),
+    )
     cortina_module = None
     sys.modules.pop('cortina', None)
     gc.collect()
@@ -97,10 +99,23 @@ def main():
         connected = False
     else:
         connected = connect_wifi(wlan)
+        if not connected and wifi_connect_pending:
+            wifi_wait_started = time.ticks_ms()
+            while (not connected
+                   and time.ticks_diff(time.ticks_ms(), wifi_wait_started) < WIFI_CONNECT_TIMEOUT_MS):
+                time.sleep_ms(100)
+                connected = wlan.isconnected()
+            if connected:
+                wifi_connect_pending = False
+                wifi_connect_started = None
     wifi_retry_ms = WIFI_RETRY_MIN_MS
     next_wifi_retry = time.ticks_add(time.ticks_ms(), wifi_retry_ms)
     import captive_portal
-    captive_portal.start_background(controller, recovery_mode)
+    local_portal_enabled = recovery_mode or not connected or not DEVICE_CODE
+    if local_portal_enabled:
+        captive_portal.start_background(controller, recovery_mode)
+    else:
+        print('Portal local en pausa para reservar heap ESP-IDF para TLS; use recuperacion Wi-Fi para abrirlo')
     if recovery_mode:
         print('Recuperacion Wi-Fi : cambie la red en el portal Pulsegrid y guarde para reiniciar')
     elif connected and DEVICE_CODE:
@@ -148,9 +163,15 @@ def main():
         if connected and DEVICE_CODE and not recovery_mode:
             wifi_retry_ms = WIFI_RETRY_MIN_MS
             calibrating = any(config.get('calibration_in_progress') for config in controller.blind_config.values())
-            if not moving:
+            if not moving and calibrating:
                 poll_interval = CALIBRATION_COMMAND_POLL_MS if calibrating else COMMAND_POLL_MS
                 if time.ticks_diff(now, last_cloud_poll) >= poll_interval:
+                    last_cloud_poll = now
+                    client.flush_ack()
+                    if not client._pending_ack:
+                        client.commands(controller, board_led.set_enabled)
+            elif not moving:
+                if time.ticks_diff(now, last_cloud_poll) >= COMMAND_POLL_MS:
                     last_cloud_poll = now
                     client.flush_ack()
                     if not client._pending_ack:
@@ -159,6 +180,13 @@ def main():
                 if not any(controller.multiturn_active.values()) and time.ticks_diff(now, last_state_publish) >= telemetry_interval:
                     last_state_publish = time.ticks_ms()
                     client.telemetry(controller, FIRMWARE_VERSION, board_led.is_enabled(), bool(controller.direction_reversed))
+            elif calibrating:
+                if client._pending_ack and time.ticks_diff(now, last_cloud_poll) >= MOVEMENT_STOP_POLL_MS:
+                    last_cloud_poll = now
+                    client.flush_ack()
+                if time.ticks_diff(now, last_cloud_poll) >= CALIBRATION_COMMAND_POLL_MS:
+                    last_cloud_poll = now
+                    client.commands(controller, board_led.set_enabled, priority_only=True)
             elif time.ticks_diff(now, last_cloud_poll) >= MOVEMENT_STOP_POLL_MS:
                 last_cloud_poll = now
                 client.commands(controller, board_led.set_enabled, priority_only=True)

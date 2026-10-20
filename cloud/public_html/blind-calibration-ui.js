@@ -1,95 +1,70 @@
 (function (root) {
   'use strict';
+
   function mountGa25CalibrationWizard(context) {
     const { $, apiRequest, loadDevices, waitForCalibrationCommand, showToast, getCalibrationDeviceModel } = context;
-    const layout = $('.command-layout');
+    const layout = $('.command-calibration-layout') || $('.command-layout');
     if (!layout || $('#calibration-wizard')) return;
-    layout.insertAdjacentHTML('beforeend', `<div class="panel calibration-wizard" id="calibration-wizard"><div class="panel-heading"><div><h2>Calibración de recorrido GA25</h2><p>Recorrido temporizado, sin encoder.</p></div><span class="secure-badge">Supervisada</span></div><p class="calibration-safety-note"><strong>Antes de iniciar:</strong> coloca manualmente la cortina cerrada. Observa todo el recorrido y pulsa Guardar tiempo y parar al llegar al extremo abierto. No dejes que el motor empuje contra topes mecánicos.</p><p id="ga25-calibration-status" class="form-status" aria-live="polite">La calibración reemplazará el tiempo guardado.</p><div class="calibration-stage-actions"><button class="primary-button" id="ga25-calibration-start" type="button">Iniciar desde cerrado</button><button class="secondary-button calibration-stop" id="ga25-calibration-stop" type="button" disabled>Guardar tiempo y parar</button><button class="secondary-button" id="ga25-calibration-cancel" type="button" disabled>Cancelar sin guardar</button></div></div>`);
-    const status = $('#ga25-calibration-status'), startButton = $('#ga25-calibration-start'), stopButton = $('#ga25-calibration-stop'), cancelButton = $('#ga25-calibration-cancel');
-    let active = false, busy = false;
+    layout.insertAdjacentHTML('beforeend', `<div class="panel calibration-wizard" id="calibration-wizard">
+      <div class="panel-heading"><div><h2>Calibración de recorrido GA25</h2><p>Se mide el tiempo real entre extremos; la posición seguirá siendo una estimación temporizada, sin encoder.</p></div><span class="secure-badge">Supervisada</span></div>
+      <p class="calibration-safety-note"><strong>Antes de iniciar:</strong> coloca manualmente la cortina completamente cerrada. Pulsa Iniciar y observa todo el recorrido; pulsa Guardar y parar justo cuando llegue al extremo abierto. No dejes que el motor empuje contra topes mecánicos.</p>
+      <p id="ga25-calibration-status" class="form-status" aria-live="polite">La calibración reemplazará el tiempo de recorrido guardado.</p>
+      <div class="calibration-stage-actions"><button class="primary-button" id="ga25-calibration-start" type="button">Iniciar desde cerrado</button><button class="secondary-button calibration-stop" id="ga25-calibration-stop" type="button" disabled>Guardar tiempo y parar</button><button class="secondary-button" id="ga25-calibration-cancel" type="button" disabled>Cancelar sin guardar</button></div>
+    </div>`);
+    const status = $('#ga25-calibration-status');
+    const startButton = $('#ga25-calibration-start');
+    const stopButton = $('#ga25-calibration-stop');
+    const cancelButton = $('#ga25-calibration-cancel');
+    let active = false;
+    let busy = false;
     const send = async (command, payload = {}) => {
       const deviceId = $('#command-device')?.value;
       if (!deviceId || getCalibrationDeviceModel() !== 'ga25') throw new Error('Selecciona un dispositivo GA25.');
       const result = await apiRequest('commands', { method: 'POST', body: JSON.stringify({ deviceId, command, payload }) });
-      await waitForCalibrationCommand(result.commandId); await loadDevices();
+      await waitForCalibrationCommand(result.commandId);
+      await loadDevices();
     };
-    const render = () => { startButton.disabled = busy || active; stopButton.disabled = busy || !active; cancelButton.disabled = busy || !active; };
-    startButton.addEventListener('click', async () => { try { busy = true; render(); status.textContent = 'Arrancando desde cerrado. Supervisa el movimiento y detenlo en el extremo abierto.'; await send('blind.ga25CalibrationStart', { from: 'closed' }); active = true; status.textContent = 'En movimiento. Pulsa Guardar tiempo y parar al llegar al extremo abierto.'; } catch (error) { status.textContent = error.message; } finally { busy = false; render(); } });
-    stopButton.addEventListener('click', async () => { try { busy = true; render(); await send('blind.ga25CalibrationStop'); active = false; status.textContent = 'Tiempo guardado. La posición seguirá siendo una estimación por tiempo.'; showToast('Tiempo de recorrido GA25 guardado'); } catch (error) { status.textContent = error.message; } finally { busy = false; render(); } });
-    cancelButton.addEventListener('click', async () => { try { busy = true; render(); await send('blind.ga25CalibrationCancel'); active = false; status.textContent = 'Detenida sin guardar cambios.'; } catch (error) { status.textContent = error.message; } finally { busy = false; render(); } });
+    const render = () => {
+      startButton.disabled = busy || active;
+      stopButton.disabled = busy || !active;
+      cancelButton.disabled = busy || !active;
+    };
+    startButton.addEventListener('click', async () => {
+      try {
+        busy = true; render();
+        status.textContent = 'Arrancando desde el extremo cerrado. Supervisa el movimiento y detenlo en el extremo abierto.';
+        await send('blind.ga25CalibrationStart', { from: 'closed' });
+        active = true;
+        status.textContent = 'Motor en movimiento. Al llegar visualmente al extremo abierto, pulsa Guardar tiempo y parar.';
+      } catch (error) { status.textContent = error.message; }
+      finally { busy = false; render(); }
+    });
+    stopButton.addEventListener('click', async () => {
+      try {
+        busy = true; render();
+        await send('blind.ga25CalibrationStop');
+        active = false;
+        status.textContent = 'Tiempo completo guardado en el GA25. La posición se calcula por tiempo y puede requerir repetir la medición.';
+        showToast('Tiempo de recorrido GA25 guardado');
+      } catch (error) { status.textContent = error.message; }
+      finally { busy = false; render(); }
+    });
+    cancelButton.addEventListener('click', async () => {
+      try {
+        busy = true; render();
+        await send('blind.ga25CalibrationCancel');
+        active = false;
+        status.textContent = 'Calibración detenida sin guardar cambios.';
+      } catch (error) { status.textContent = error.message; }
+      finally { busy = false; render(); }
+    });
     render();
   }
 
   function mountBlindCalibrationWizard(context) {
-    const { $, $$, apiRequest, loadDevices, getCalibrationPosition, waitForCalibrationCommand, waitForCalibrationIdle, showToast, renderIcons } = context;
-    const markup = `<div class="panel calibration-wizard" id="calibration-wizard"><div class="panel-heading"><div><h2>Calibración segura de persiana</h2><p>La geometría estima el recorrido; los topes reales se guardan desde el encoder.</p></div><span class="secure-badge">Guiado</span></div><div class="calibration-steps"><div class="calibration-step active" data-calibration-step="1"><b>1</b><span>Medidas</span></div><div class="calibration-step" data-calibration-step="2"><b>2</b><span>Sentido</span></div><div class="calibration-step" data-calibration-step="3"><b>3</b><span>Extremos</span></div><div class="calibration-step" data-calibration-step="4"><b>4</b><span>Guardado</span></div></div><div class="calibration-settings"><label>Alto de ventana (cm)<input id="calibration-height" type="number" min="20" max="1000" step="0.1" value="150"></label><label>Diámetro exterior del tubo (cm)<input id="calibration-diameter" type="number" min="1" max="30" step="0.1" value="5"></label><label>Grosor del paño (mm)<input id="calibration-thickness" type="number" min="0.01" max="5" step="0.01" value="0.5"></label><label>Vueltas de motor por vuelta de tubo<input id="calibration-ratio" type="number" min="0.1" max="20" step="0.01" value="1"></label><label>Servo<select id="calibration-servo"><option value="1">Servo 1</option><option value="2">Servo 2</option></select></label><label><input id="calibration-midpoint-confirm" type="checkbox"> Confirmo que la persiana está a mitad del recorrido.</label><button class="secondary-button" id="calibration-calculate" type="button">Calcular vueltas estimadas</button><button class="primary-button" id="calibration-start" type="button">Guardar medidas e iniciar</button></div><div class="blind-calibration-layout"><div class="blind-calibration-diagram"><svg viewBox="0 0 300 280" role="img" aria-label="Diagrama de ventana con persiana vertical"><rect x="57" y="38" width="186" height="220" rx="5" fill="none" stroke="currentColor" stroke-width="5"/><rect x="69" y="50" width="162" height="196" fill="rgba(120,170,220,.1)"/><rect x="69" y="50" width="162" height="98" fill="rgba(200,247,107,.48)" id="calibration-shade"/><path d="M67 35h166" stroke="currentColor" stroke-width="8"/><circle cx="232" cy="35" r="13" fill="none" stroke="currentColor" stroke-width="4"/><path d="M45 54v188m-6-8 6 8 6-8m-12-180 6-8 6 8" fill="none" stroke="currentColor" stroke-width="2"/><text x="18" y="150" fill="currentColor" font-size="12" transform="rotate(-90 18 150)">alto</text></svg></div><div class="blind-calibration-readout"><span>Estimación geométrica</span><strong id="calibration-estimate">Ingresa las medidas</strong><span id="calibration-limit" class="calibration-progress">El cálculo no es un tope mecánico.</span><span id="calibration-dimensions" class="calibration-progress">La persiana debe estar a mitad del recorrido.</span></div></div><p class="calibration-safety-note"><strong>Movimiento supervisado:</strong> prueba lenta de una vuelta; después pasos de 1/8. Observa la persiana y pulsa Parar ante cualquier anomalía. El encoder no detecta fuerza ni atascos.</p><p id="calibration-status" class="form-status" aria-live="polite">Introduce las medidas para comenzar.</p><div class="calibration-stage-actions"><button class="secondary-button" id="calibration-test-direction" type="button" disabled>Probar una vuelta lenta</button><button class="secondary-button" id="calibration-positive-down" type="button" hidden>La prueba bajó</button><button class="secondary-button" id="calibration-positive-up" type="button" hidden>La prueba subió</button><button class="secondary-button" id="calibration-step-down" type="button" disabled>Desenrollar 1/8</button><button class="secondary-button" id="calibration-step-up" type="button" disabled>Enrollar 1/8</button><button class="secondary-button" id="calibration-mark-rolled" type="button" disabled>Guardar extremo abierto</button><button class="secondary-button" id="calibration-mark-deployed" type="button" disabled>Guardar extremo cerrado</button><button class="secondary-button calibration-stop" id="calibration-stop" type="button" disabled>Parar movimiento</button><button class="secondary-button" id="calibration-cancel" type="button" disabled>Cancelar calibración</button></div></div>`;
-    const layout = $('.command-layout');
-    if (!layout || $('#calibration-wizard')) return; if (context.getCalibrationDeviceModel?.() === 'ga25') { mountGa25CalibrationWizard(context); return; }
-    layout.insertAdjacentHTML('beforeend', markup);
-    const get = (id) => $(`#${id}`), status = $('#calibration-status');
-    const stepSize = document.createElement('select');
-    stepSize.id = 'calibration-step-size';
-    stepSize.innerHTML = '<option value="0.125">1/8 de vuelta</option><option value="0.25">1/4 de vuelta</option><option value="0.5" selected>1/2 vuelta</option><option value="1">1 vuelta</option>';
-    const stepSizeLabel = document.createElement('label');
-    stepSizeLabel.className = 'calibration-step-size-label';
-    stepSizeLabel.append('Avance por paso', stepSize);
-    get('calibration-step-down').before(stepSizeLabel);
-    let phase = 'measure', busy = false;
-    const refs = new Set(), servoId = () => Number(get('calibration-servo').value), deviceId = () => $('#command-device')?.value;
-    const disable = (id, value) => { get(id).disabled = value; };
-    const render = () => {
-      const stage = { measure: 1, direction: 2, directionConfirm: 2, travel: 3, done: 4 }[phase];
-      $$('.calibration-step').forEach((node) => node.classList.toggle('active', Number(node.dataset.calibrationStep) === stage));
-      disable('calibration-test-direction', phase !== 'direction' || busy);
-      ['calibration-positive-down', 'calibration-positive-up'].forEach((id) => { get(id).hidden = phase !== 'directionConfirm'; });
-      disable('calibration-step-down', phase !== 'travel' || refs.has('deployed') || busy);
-      disable('calibration-step-up', phase !== 'travel' || refs.has('rolled') || busy);
-      disable('calibration-step-size', phase !== 'travel' || busy);
-      disable('calibration-mark-deployed', phase !== 'travel' || refs.has('deployed') || busy);
-      disable('calibration-mark-rolled', phase !== 'travel' || refs.has('rolled') || busy);
-      disable('calibration-stop', phase === 'measure' || phase === 'done'); disable('calibration-cancel', phase === 'measure' || phase === 'done' || busy);
-      ['calibration-height','calibration-diameter','calibration-thickness','calibration-ratio','calibration-servo','calibration-calculate','calibration-midpoint-confirm'].forEach((id) => disable(id, phase !== 'measure' || busy));
-      disable('calibration-start', phase !== 'measure' || busy || !get('calibration-midpoint-confirm').checked);
-      get('calibration-shade').setAttribute('height', phase === 'done' ? '196' : phase === 'travel' ? '116' : '98');
-    };
-    const values = () => {
-      const result = { height: Number(get('calibration-height').value), diameter: Number(get('calibration-diameter').value), thickness: Number(get('calibration-thickness').value), ratio: Number(get('calibration-ratio').value) };
-      if (!Number.isFinite(result.height) || result.height < 20 || result.height > 1000) throw new Error('Alto debe ser 20–1000 cm.');
-      return result;
-    };
-    const calculate = () => {
-      const v = values(), turns = root.BlindCalibrationModel.estimateTurns(v.height, v.diameter, v.thickness, v.ratio);
-      get('calibration-estimate').textContent = `≈ ${turns.toFixed(2)} vueltas`;
-        get('calibration-limit').textContent=`Límite preventivo (80% de la mitad estimada): ${(turns * .4).toFixed(2)} vueltas por lado.`;
-      get('calibration-dimensions').textContent = `Alto ${v.height} cm · tubo Ø ${v.diameter} cm · paño ${v.thickness} mm · relación ${v.ratio}:1`;
-      return v;
-    };
-    const queue = (name, payload) => {
-      if (!deviceId()) throw new Error('Selecciona el dispositivo Servo.');
-      return apiRequest('commands', { method: 'POST', body: JSON.stringify({ deviceId: deviceId(), command: name, payload: { servoId: servoId(), ...payload } }) });
-    };
-    const send = async (name, payload, movement = false) => {
-      const id = deviceId();
-      let startPosition = null;
-      if (movement) { await loadDevices(); startPosition = getCalibrationPosition(id, servoId()); }
-      const result = await queue(name, payload);
-      await waitForCalibrationCommand(result.commandId, movement ? 240000 : undefined);
-      if (movement) await waitForCalibrationIdle(id, servoId(), startPosition);
-      await loadDevices();
-    };
-    get('calibration-calculate').addEventListener('click', () => { try { calculate(); status.textContent = 'Estimación lista; verifica las medidas.'; } catch (e) { status.textContent = e.message; } });
-    get('calibration-midpoint-confirm').addEventListener('change', render);
-    get('calibration-start').addEventListener('click', async () => { try { busy = true; render(); const v = calculate(); await send('blind.safeCalibrationBegin', { heightCm:v.height, tubeDiameterCm:v.diameter, fabricThicknessMm:v.thickness, motorTurnsPerTubeTurn:v.ratio }); refs.clear(); phase = 'direction'; status.textContent = 'Ahora prueba una vuelta lenta y observa el sentido.'; } catch (e) { status.textContent=e.message; } finally { busy=false; render(); } });
-    get('calibration-test-direction').addEventListener('click', async () => { try { busy=true; render(); status.textContent='Prueba lenta en curso; observa la persiana.'; await send('blind.safeCalibrationTest', {}, true); phase='directionConfirm'; status.textContent='¿La persiana bajó o subió?'; } catch(e) { status.textContent=e.message; } finally { busy=false; render(); } });
-    const confirm = async (down) => { try { busy=true; render(); await send('blind.safeCalibrationDirection',{positiveIsDown:down}); phase='travel'; status.textContent='Avanza en pasos supervisados; no fuerces los topes.'; } catch(e) { status.textContent=e.message; } finally { busy=false; render(); } };
-    get('calibration-positive-down').addEventListener('click',()=>confirm(true)); get('calibration-positive-up').addEventListener('click',()=>confirm(false));
-    const step = async (direction) => { try { busy=true; render(); const turns=Number(stepSize.value); status.textContent=`Avance supervisado de ${turns} vuelta(s)…`; await send('blind.safeCalibrationStep',{direction,turns},true); status.textContent='Paso completado. Revisa visualmente antes de continuar.'; } catch(e) { status.textContent=e.message; } finally { busy=false; render(); } };
-    get('calibration-step-down').addEventListener('click',()=>step('down')); get('calibration-step-up').addEventListener('click',()=>step('up'));
-    const mark = async (reference) => { try { busy=true; render(); await send('blind.safeCalibrationMark',{reference}); refs.add(reference); if(refs.size===2){phase='done';status.textContent='Límites guardados permanentemente en el servo.';showToast('Calibración guardada');}else status.textContent='Extremo guardado. Avanza hacia el otro extremo sin forzarlo.'; } catch(e){status.textContent=e.message;} finally{busy=false;render();} };
-    get('calibration-mark-rolled').addEventListener('click',()=>mark('rolled')); get('calibration-mark-deployed').addEventListener('click',()=>mark('deployed'));
-    get('calibration-stop').addEventListener('click',async()=>{try{busy=true;render();await send('blind.safeCalibrationStop',{},false);status.textContent='Movimiento detenido. La calibración quedó bloqueada; cancélala y revisa el mecanismo antes de reiniciar.';}catch(e){status.textContent=e.message;}finally{busy=false;render();}});
-    get('calibration-cancel').addEventListener('click',async()=>{try{busy=true;render();await send('blind.safeCalibrationCancel',{});phase='measure';refs.clear();get('calibration-midpoint-confirm').checked=false;status.textContent='Cancelada; límites nuevos descartados.';}catch(e){status.textContent=e.message;}finally{busy=false;render();}});
-    render(); renderIcons();
+    if (context.getCalibrationDeviceModel?.() === 'ga25') mountGa25CalibrationWizard(context);
   }
+
+  root.mountGa25CalibrationWizard = mountGa25CalibrationWizard;
   root.mountBlindCalibrationWizard = mountBlindCalibrationWizard;
 })(typeof window !== 'undefined' ? window : globalThis);

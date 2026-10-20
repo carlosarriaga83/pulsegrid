@@ -5,13 +5,8 @@ import ujson
 
 
 BLIND_COMMANDS = (
-    'blind.safeCalibrationBegin', 'blind.safeCalibrationTest',
-    'blind.safeCalibrationDirection', 'blind.safeCalibrationStep',
-    'blind.safeCalibrationMark', 'blind.safeCalibrationStop', 'blind.safeCalibrationCancel',
+    'blind.cloudCalibrationConfigure', 'blind.safeCalibrationStop', 'blind.safeCalibrationCancel',
 )
-TLS_MAX_CONNECTION_AGE_MS = 900000
-
-
 def _send_all(client, data):
     sent = 0
     while sent < len(data):
@@ -32,7 +27,14 @@ def execute_blind_command(cortina, name, payload):
         raise ValueError('Comando de calibracion no soportado: ' + str(name))
     import servo_calibration
     servo_id = int(payload.get('servoId', 1))
-    if name == 'blind.safeCalibrationBegin':
+    if name == 'blind.cloudCalibrationConfigure':
+        expected = ('servoId', 'heightCm', 'tubeDiameterCm', 'fabricThicknessMm', 'motorTurnsPerTubeTurn', 'estimatedTurns')
+        if len(payload) != len(expected) or any(key not in payload for key in expected):
+            raise ValueError('payload de calibracion incompleto o invalido')
+        servo_calibration.configure_cloud_estimate(
+            cortina, servo_id, payload['heightCm'], payload['tubeDiameterCm'],
+            payload['fabricThicknessMm'], payload['motorTurnsPerTubeTurn'], payload['estimatedTurns'])
+    elif name == 'blind.safeCalibrationBegin':
         servo_calibration.begin_safe(cortina, servo_id, payload.get('heightCm'), payload.get('tubeDiameterCm'), payload.get('fabricThicknessMm'), payload.get('motorTurnsPerTubeTurn', 1.0))
     elif name == 'blind.safeCalibrationTest':
         servo_calibration.test_safe_direction(cortina, servo_id)
@@ -57,7 +59,6 @@ class CloudClient:
         self.next_request_at = 0
         self.last_poll = 0
         self.last_telemetry = 0
-        self.retry_ms = 5000
         self.firmware_update_requested = False
         self.last_success_at = None
         self._pending_ack = None
@@ -157,30 +158,56 @@ class CloudClient:
         host = self.api_url.split('://', 1)[-1].split('/', 1)[0]
         parts = host.split(':', 1)
         port = int(parts[1]) if len(parts) > 1 else 443
-        client = socket.socket()
+        phase = 'DNS lookup'
         try:
-            client.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 512)
-            client.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 512)
-        except (AttributeError, OSError):
-            pass
-        client.settimeout(timeout)
-        phase = 'TCP connect'
-        try:
-            client.connect((parts[0], port))
-            gc.collect()
+            try:
+                addresses = socket.getaddrinfo(parts[0], port, 0, socket.SOCK_STREAM)
+            except AttributeError:
+                addresses = ()
+            if addresses:
+                destinations = []
+                for address in addresses:
+                    sockaddr = address[4]
+                    if sockaddr not in destinations:
+                        destinations.append(sockaddr)
+                    if len(destinations) >= 4:
+                        break
+            else:
+                destinations = [(parts[0], port)]
+
             phase = 'TLS module import'
             try:
                 import ussl as tls
             except ImportError:
                 import ssl as tls
             gc.collect()
-            phase = 'TLS handshake'
-            self._log_heap('antes del handshake TLS')
-            secure_client = tls.wrap_socket(client, server_hostname=parts[0])
-            return secure_client, parts[0]
+            last_error = None
+            for destination in destinations:
+                client = socket.socket()
+                try:
+                    client.settimeout(min(timeout, 3))
+                    phase = 'TCP connect {}'.format(destination[0])
+                    client.connect(destination)
+                    client.settimeout(timeout)
+                    gc.collect()
+                    phase = 'TLS handshake {}'.format(destination[0])
+                    self._log_heap('antes del handshake TLS')
+                    secure_client = tls.wrap_socket(client, server_hostname=parts[0])
+                    return secure_client, parts[0]
+                except Exception as error:
+                    last_error = error
+                    print('Pulsegrid transporte fallo en {}: {}'.format(phase, error))
+                    try:
+                        client.close()
+                    except OSError:
+                        pass
+                    gc.collect()
+            if last_error:
+                raise last_error
+            raise OSError('DNS no devolvio direcciones para el servidor')
         except Exception as error:
-            print('Pulsegrid transporte fallo en {}: {}'.format(phase, error))
-            client.close()
+            if phase in ('DNS lookup', 'TLS module import'):
+                print('Pulsegrid transporte fallo en {}: {}'.format(phase, error))
             gc.collect()
             raise
 
@@ -202,39 +229,24 @@ class CloudClient:
         if not self.api_url.startswith('https://'):
             print('Pulsegrid: HTTPS es obligatorio')
             return None
-        client = self._connection
-        reused = client is not None
         try:
-            if client is not None and time.ticks_diff(time.ticks_ms(), self._connection_started_at) >= TLS_MAX_CONNECTION_AGE_MS:
-                self.close()
-                client = None
-                reused = False
-            if client is None:
-                client, host = self._socket(timeout)
-                self._connection = client
-                self._connection_host = host
-                self._connection_started_at = time.ticks_ms()
-            else:
-                host = self._connection_host
-                try:
-                    client.settimeout(timeout)
-                except (AttributeError, OSError):
-                    pass
+            client, host = self._socket(timeout)
+            self._connection = client
+            self._connection_host = host
+            self._connection_started_at = time.ticks_ms()
 
             body = ujson.dumps(payload) if payload is not None else ''
             body_bytes = body.encode()
-            request = '{} {} HTTP/1.1\r\nHost: {}\r\nX-Device-Code: {}\r\nConnection: keep-alive\r\n'.format(method, path, host, self.device_code)
+            request = '{} {} HTTP/1.1\r\nHost: {}\r\nX-Device-Code: {}\r\nConnection: close\r\n'.format(method, path, host, self.device_code)
             if body:
                 request += 'Content-Type: application/json\r\nContent-Length: {}\r\n'.format(len(body_bytes))
             _send_all(client, (request + '\r\n').encode() + body_bytes)
             status, headers, response_body, connection_close = self._read_response(client)
-            if connection_close:
-                self.close()
+            self.close()
             if status < 200 or status >= 300:
                 raise ValueError('HTTP {}'.format(status))
             result = ujson.loads(response_body) if response_body else {}
             self.last_success_at = time.ticks_ms()
-            self.retry_ms = 5000
             return result
         except Exception as error:
             self.close()
@@ -242,10 +254,8 @@ class CloudClient:
             if getattr(error, 'errno', None) == 12:
                 gc.collect()
                 self._log_heap('tras recuperar')
-            delay = 1000 if reused else self.retry_ms
+            delay = 1000
             self.next_request_at = time.ticks_add(time.ticks_ms(), delay)
-            if not reused:
-                self.retry_ms = min(self.retry_ms * 2, 60000)
             return None
         finally:
             gc.collect()

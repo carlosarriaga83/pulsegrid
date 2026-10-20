@@ -54,3 +54,15 @@
     width: 100%;
   }
 }
+
+.command-layout { grid-template-columns: minmax(0, 1fr); }
+.command-compose { grid-column: 1 / -1; }
+.command-calibration-layout { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: start; min-width: 0; }
+.command-calibration-layout > * { min-width: 0; }
+.command-calibration-layout .calibration-settings { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.command-calibration-layout .calibration-settings label { min-width: 0; }
+.command-calibration-layout input,
+.command-calibration-layout select { box-sizing: border-box; width: 100%; min-width: 0; }
+.command-calibration-layout .calibration-wizard { padding: 22px; }
+.command-calibration-layout .calibration-wizard .full-width { margin-top: 14px; }
+@media (max-width: 900px) { .command-calibration-layout { grid-template-columns: minmax(0, 1fr); } }

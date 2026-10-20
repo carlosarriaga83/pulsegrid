@@ -1,6 +1,53 @@
 TEST_DIRECTION_TURNS = 1.0
 
 
+def configure_cloud_estimate(cortina, servo_id, height_cm, tube_diameter_cm, fabric_thickness_mm, motor_turns_per_tube_turn, estimated_turns):
+    if servo_id not in cortina.servo_ids:
+        raise ValueError('ID de servo no detectado')
+    if cortina.multiturn_active[servo_id]:
+        raise ValueError('espera a que termine el movimiento')
+    values = (height_cm, tube_diameter_cm, fabric_thickness_mm, motor_turns_per_tube_turn, estimated_turns)
+    if any(isinstance(value, bool) for value in values):
+        raise ValueError('medidas de calibracion invalidas')
+    height = float(height_cm)
+    diameter = float(tube_diameter_cm)
+    thickness = float(fabric_thickness_mm)
+    ratio = float(motor_turns_per_tube_turn)
+    estimated = float(estimated_turns)
+    if any(value != value or abs(value) > 1000000.0 for value in (height, diameter, thickness, ratio, estimated)):
+        raise ValueError('medidas de calibracion no finitas')
+    if not 20.0 <= height <= 1000.0 or not 1.0 <= diameter <= 30.0 or not 0.01 <= thickness <= 5.0 or not 0.1 <= ratio <= 20.0:
+        raise ValueError('medidas fuera de rango')
+    thickness_cm = thickness / 10.0
+    calculated = ((-diameter + (diameter * diameter + 4.0 * thickness_cm * height / 3.141592653589793) ** 0.5) / (2.0 * thickness_cm)) * ratio
+    if estimated < 1.0 or estimated > cortina.MAX_LONG_TURNS or abs(calculated - estimated) > 0.01:
+        raise ValueError('vueltas calculadas fuera del rango seguro')
+    cortina.update_multiturn()
+    if cortina.position_recovery_required[servo_id]:
+        raise ValueError('recupera primero una referencia fiable del encoder antes de calibrar')
+    midpoint = round(cortina.absolute_turns[servo_id], 4)
+    half_limit = estimated * 0.4
+    config = cortina.blind_config[servo_id]
+    config.update({
+        'rolled_turns': midpoint - half_limit,
+        'unrolled_turns': midpoint + half_limit,
+        'calibrated': True,
+        'calibration_in_progress': False,
+        'window_height_cm': height,
+        'tube_diameter_cm': diameter,
+        'fabric_thickness_mm': thickness,
+        'motor_turns_per_tube_turn': ratio,
+        'estimated_turns': estimated,
+        'half_travel_limit': half_limit,
+        'calibration_midpoint_turns': midpoint,
+        'calibration_down_direction': 0,
+        'calibration_direction_pending': False,
+        'calibration_motion_fault': False,
+        'calibration_motion_fault_reason': '',
+    })
+    cortina._save_persistent_state()
+
+
 def set_motor_side(cortina, servo_id, side):
     if servo_id not in cortina.servo_ids or side not in ('left', 'right'):
         raise ValueError('servo o lado del motor invalido')
