@@ -9,6 +9,7 @@ class Cortina:
     MAX_LONG_TURNS = 999.99
     APPROACH_SPEED = 120
     CALIBRATION_STEP_SPEED = 240
+    PRECISION_COMPLETION_TOLERANCE_COUNTS = 16
     PRECISION_STALL_TIMEOUT_MS = 15000
     FRONT_GEAR_CLOCKWISE_TURNS = -1
     FRONT_GEAR_COUNTERCLOCKWISE_TURNS = 1
@@ -188,7 +189,7 @@ class Cortina:
                         task['last_progress_at'] = time.ticks_ms()
                     task['remaining_counts'] = max(0, task['target_counts'] - task['moved_counts'])
                     self.absolute_turns[servo_id] = task['start_turns'] + task['net_counts'] / self.COUNTS_PER_TURN
-                    if task['moved_counts'] >= task['target_counts']:
+                    if task['moved_counts'] >= task['target_counts'] - self.PRECISION_COMPLETION_TOLERANCE_COUNTS:
                         self._finish_multiturn(servo_id, completed=True)
                     elif time.ticks_diff(time.ticks_ms(), task['last_progress_at']) >= self.PRECISION_STALL_TIMEOUT_MS:
                         self._finish_multiturn(servo_id, timed_out=True, fault_reason='encoder_stall')

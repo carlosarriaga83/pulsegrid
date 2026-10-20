@@ -1,5 +1,6 @@
 const path = require('path');
 const express = require('express');
+const http = require('http');
 const cookieSession = require('cookie-session');
 const mysql = require('mysql2/promise');
 const bcrypt = require('bcryptjs');
@@ -1230,7 +1231,10 @@ app.get('/', (request, response) => response.sendFile(path.join(publicRoot, 'ind
 app.all('/api/*splat', (request, response) => fail(response, 404, 'Unknown action'));
 app.use((request, response) => response.status(404).send('Not found'));
 
-app.listen(port, () => {
+const server = http.createServer(app);
+server.keepAliveTimeout = 15000;
+server.headersTimeout = 20000;
+server.listen(port, () => {
   console.log(`Pulsegrid running on port ${port}`);
   runScheduledAutomations();
   setInterval(runScheduledAutomations, automationSchedulerIntervalMs);

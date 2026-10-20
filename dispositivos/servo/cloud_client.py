@@ -9,6 +9,7 @@ BLIND_COMMANDS = (
     'blind.safeCalibrationDirection', 'blind.safeCalibrationStep',
     'blind.safeCalibrationMark', 'blind.safeCalibrationStop', 'blind.safeCalibrationCancel',
 )
+TLS_MAX_CONNECTION_AGE_MS = 900000
 
 
 def _send_all(client, data):
@@ -61,6 +62,95 @@ class CloudClient:
         self.last_success_at = None
         self._pending_ack = None
         self._deferred_acks = []
+        self._connection = None
+        self._connection_host = None
+        self._connection_started_at = None
+
+    def close(self):
+        client = self._connection
+        self._connection = None
+        self._connection_host = None
+        self._connection_started_at = None
+        if client:
+            try:
+                client.close()
+            except OSError:
+                pass
+
+    @staticmethod
+    def _read_until(client, buffer, marker, max_bytes):
+        while marker not in buffer:
+            chunk = _recv(client, 256)
+            if not chunk:
+                raise OSError('Conexion cerrada antes de completar la respuesta HTTP')
+            buffer += chunk
+            if len(buffer) > max_bytes:
+                raise ValueError('Respuesta HTTP demasiado grande')
+        index = buffer.find(marker)
+        return buffer[:index], buffer[index + len(marker):]
+
+    def _read_response(self, client):
+        header, body = self._read_until(client, b'', b'\r\n\r\n', 4096)
+        lines = header.split(b'\r\n')
+        if not lines or len(lines[0]) < 12:
+            raise ValueError('Estado HTTP invalido')
+        status = int(lines[0][9:12])
+        headers = {}
+        for line in lines[1:]:
+            separator = line.find(b':')
+            if separator > 0:
+                key = line[:separator].strip().lower()
+                headers[key] = line[separator + 1:].strip().lower()
+
+        connection_close = headers.get(b'connection') == b'close'
+        transfer_encoding = headers.get(b'transfer-encoding', b'')
+        if b'chunked' in transfer_encoding:
+            decoded = bytearray()
+            while True:
+                chunk_line, body = self._read_until(client, body, b'\r\n', 128)
+                size_text = chunk_line.split(b';', 1)[0].strip()
+                size = int(size_text, 16)
+                if size == 0:
+                    while True:
+                        trailer, body = self._read_until(client, body, b'\r\n', 1024)
+                        if not trailer:
+                            break
+                    break
+                while len(body) < size + 2:
+                    part = _recv(client, 256)
+                    if not part:
+                        raise OSError('Respuesta chunked incompleta')
+                    body += part
+                if body[size:size + 2] != b'\r\n':
+                    raise ValueError('Separador chunked invalido')
+                decoded.extend(body[:size])
+                body = body[size + 2:]
+            body = bytes(decoded)
+        elif b'content-length' in headers:
+            content_length = int(headers[b'content-length'])
+            if content_length < 0 or content_length > 16384:
+                raise ValueError('Longitud de respuesta HTTP fuera de rango')
+            while len(body) < content_length:
+                chunk = _recv(client, min(512, content_length - len(body)))
+                if not chunk:
+                    raise OSError('Respuesta HTTP incompleta')
+                body += chunk
+            body = body[:content_length]
+        elif status in (204, 304):
+            body = b''
+        else:
+            connection_close = True
+            while True:
+                chunk = _recv(client, 256)
+                if not chunk:
+                    break
+                body += chunk
+                if len(body) > 16384:
+                    raise ValueError('Respuesta HTTP demasiado grande')
+
+        if lines[0].startswith(b'HTTP/1.0') and headers.get(b'connection') != b'keep-alive':
+            connection_close = True
+        return status, headers, body, connection_close
 
     def _socket(self, timeout=8):
         gc.collect()
@@ -112,53 +202,52 @@ class CloudClient:
         if not self.api_url.startswith('https://'):
             print('Pulsegrid: HTTPS es obligatorio')
             return None
-        client = None
+        client = self._connection
+        reused = client is not None
         try:
-            client, host = self._socket(timeout)
+            if client is not None and time.ticks_diff(time.ticks_ms(), self._connection_started_at) >= TLS_MAX_CONNECTION_AGE_MS:
+                self.close()
+                client = None
+                reused = False
+            if client is None:
+                client, host = self._socket(timeout)
+                self._connection = client
+                self._connection_host = host
+                self._connection_started_at = time.ticks_ms()
+            else:
+                host = self._connection_host
+                try:
+                    client.settimeout(timeout)
+                except (AttributeError, OSError):
+                    pass
+
             body = ujson.dumps(payload) if payload is not None else ''
-            request = '{} {} HTTP/1.1\r\nHost: {}\r\nX-Device-Code: {}\r\nConnection: close\r\n'.format(method, path, host, self.device_code)
+            body_bytes = body.encode()
+            request = '{} {} HTTP/1.1\r\nHost: {}\r\nX-Device-Code: {}\r\nConnection: keep-alive\r\n'.format(method, path, host, self.device_code)
             if body:
-                request += 'Content-Type: application/json\r\nContent-Length: {}\r\n'.format(len(body))
-            _send_all(client, (request + '\r\n' + body).encode())
-            header = b''
-            while b'\r\n\r\n' not in header:
-                chunk = _recv(client, 256)
-                if not chunk:
-                    break
-                header += chunk
-                if len(header) > 4096:
-                    raise ValueError('Encabezado HTTP demasiado grande')
-            separator = header.find(b'\r\n\r\n')
-            status = int(header[9:12]) if len(header) >= 12 else 0
+                request += 'Content-Type: application/json\r\nContent-Length: {}\r\n'.format(len(body_bytes))
+            _send_all(client, (request + '\r\n').encode() + body_bytes)
+            status, headers, response_body, connection_close = self._read_response(client)
+            if connection_close:
+                self.close()
             if status < 200 or status >= 300:
                 raise ValueError('HTTP {}'.format(status))
-            body = header[separator + 4:] if separator >= 0 else b''
-            content_length = None
-            for line in header[:separator].lower().split(b'\r\n'):
-                if line.startswith(b'content-length:'):
-                    content_length = int(line.split(b':', 1)[1].strip())
-            if content_length is not None:
-                while len(body) < content_length:
-                    chunk = _recv(client, 256)
-                    if not chunk:
-                        break
-                    body += chunk
-                body = body[:content_length]
-            result = ujson.loads(body) if body else {}
+            result = ujson.loads(response_body) if response_body else {}
             self.last_success_at = time.ticks_ms()
             self.retry_ms = 5000
             return result
         except Exception as error:
+            self.close()
             print('Pulsegrid (TLS/HTTP):', error)
             if getattr(error, 'errno', None) == 12:
                 gc.collect()
                 self._log_heap('tras recuperar')
-            self.next_request_at = time.ticks_add(time.ticks_ms(), self.retry_ms)
-            self.retry_ms = min(self.retry_ms * 2, 60000)
+            delay = 1000 if reused else self.retry_ms
+            self.next_request_at = time.ticks_add(time.ticks_ms(), delay)
+            if not reused:
+                self.retry_ms = min(self.retry_ms * 2, 60000)
             return None
         finally:
-            if client:
-                client.close()
             gc.collect()
 
     def is_online(self, max_age_ms=30000):

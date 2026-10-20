@@ -93,6 +93,8 @@ test('servo calibration firmware enforces a geometry ceiling and persists real e
   assert.match(cortina, /self\.bus\.move_multiturn\(servo_id, turns, start_position, speed, acceleration\)/);
   assert.match(cortina, /position = self\.bus\.position\(servo_id\)[\s\S]*?delta = self\._track_position\(servo_id, position\)[\s\S]*?task\['net_counts'\] \+= delta[\s\S]*?task\['moved_counts'\] = abs\(task\['net_counts'\]\)/);
   assert.match(cortina, /if task\['moved_counts'\] >= task\['target_counts'\]:/);
+  assert.match(cortina, /PRECISION_COMPLETION_TOLERANCE_COUNTS = 16/);
+  assert.match(cortina, /task\['moved_counts'\] >= task\['target_counts'\] - self\.PRECISION_COMPLETION_TOLERANCE_COUNTS/);
   assert.match(cortina, /PRECISION_STALL_TIMEOUT_MS = 15000/);
   assert.match(cortina, /if delta != 0:[\s\S]*?task\['last_progress_at'\] = time\.ticks_ms\(\)/);
   assert.match(cortina, /fault_reason='encoder_stall'/);

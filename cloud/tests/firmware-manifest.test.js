@@ -132,7 +132,7 @@ test('ESP firmware supports three-boot Wi-Fi recovery and faster command polling
   }
   assert.match(servoMain, /recovery_mode = wifi_recovery\.register_boot\(count_reset\)/);
   assert.match(servoMain, /reset_cause in \(getattr\(machine, 'PWRON_RESET', 1\), getattr\(machine, 'HARD_RESET', 2\)\)/);
-  assert.match(servoMain, /FIRMWARE_VERSION = '2026\.10\.21\.servo-r19'/);
+  assert.match(servoMain, /FIRMWARE_VERSION = '2026\.10\.21\.servo-r21'/);
   assert.match(servoMain, /if recovery_mode:\s+try:\s+wlan\.disconnect\(\)\s+wlan\.active\(False\)/);
   assert.match(servoMain, /captive_portal\.start_background\(controller, recovery_mode\)/);
   assert.match(servoMain, /moving = any\(controller\.multiturn_active\.values\(\)\)[\s\S]*?if not moving:/);
@@ -158,6 +158,13 @@ test('ESP firmware supports three-boot Wi-Fi recovery and faster command polling
   assert.match(servoCloud, /timeout=3 if priority_only else 8/);
   assert.match(servoCloud, /self\._deferred_acks = \[\]/);
   assert.match(servoCloud, /self\._deferred_acks\.append\(ack\)/);
+  assert.match(servoCloud, /TLS_MAX_CONNECTION_AGE_MS = 900000/);
+  assert.match(servoCloud, /self\._connection = None/);
+  assert.match(servoCloud, /Connection: keep-alive/);
+  assert.match(servoCloud, /self\._connection = client/);
+  assert.doesNotMatch(servoCloud, /Connection: close/);
+  assert.match(cloudServer, /server\.keepAliveTimeout = 15000/);
+  assert.match(cloudServer, /server\.headersTimeout = 20000/);
   assert.doesNotMatch(servoCloud, /_thread|_network_loop/);
   assert.match(ga25Main, /POLL_MS = 1000/);
   assert.match(ga25Main, /recovery_mode = wifi_recovery\.register_boot\(count_reset\)/);
@@ -264,7 +271,8 @@ test('servo NeoPixel reflects cloud/provisioning/offline state and OTA retries t
   assert.match(cloud, /self\._log_heap\('tras recuperar'\)/);
   assert.match(cloud, /def _send_all\(client, data\):[\s\S]*?writer = getattr\(client, 'write', None\)[\s\S]*?writer\(data\[sent:\]\)/);
   assert.match(cloud, /def _recv\(client, size\):[\s\S]*?reader = getattr\(client, 'read', None\)[\s\S]*?reader\(size\)/);
-  assert.match(cloud, /_send_all\(client, \(request \+ '\\r\\n' \+ body\)\.encode\(\)\)/);
+  assert.match(cloud, /Connection: keep-alive/);
+  assert.match(cloud, /_send_all\(client, \(request \+ '\\r\\n'\)\.encode\(\) \+ body_bytes\)/);
   assert.doesNotMatch(cloud, /client\.sendall\(/);
   assert.match(cloud, /Heap ESP32 \{\} \(total, libre, bloque mayor, minimo libre\)/);
   assert.match(cloud, /idf_heap_info/);
