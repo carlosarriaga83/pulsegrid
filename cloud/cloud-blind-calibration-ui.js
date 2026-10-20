@@ -33,13 +33,21 @@
       }
       throw new Error('El dispositivo confirmó el comando, pero aún no publicó la referencia recuperada. Actualiza el estado e inténtalo de nuevo.');
     };
+    const apply = get('calibration-apply');
     const updateRecoveryAction = () => {
       const { device, telemetry, servo } = selectedState();
-      const needsRecovery = telemetry.firmwareTarget === 'servo' && servo?.position_recovery_required === true;
+      const isServo = String(telemetry.firmwareTarget || '').toLowerCase() === 'servo';
+      const needsRecovery = isServo && servo?.position_recovery_required === true;
+      const supportsRecovery = supportsReferenceRecovery(telemetry.firmwareVersion);
       recover.hidden = !needsRecovery;
-      recover.disabled = !needsRecovery || device?.status !== 'online' || !supportsReferenceRecovery(telemetry.firmwareVersion);
-      if (needsRecovery && device?.status !== 'online') status.textContent = 'El dispositivo está fuera de línea; no se envió nada. Conéctalo al cloud para recuperar el encoder.';
-      else if (needsRecovery && !supportsReferenceRecovery(telemetry.firmwareVersion)) status.textContent = 'El firmware actual no admite recuperar el encoder desde el cloud. Actualiza a Servo r23 o posterior.';
+      recover.disabled = !needsRecovery || device?.status !== 'online' || !supportsRecovery;
+      apply.disabled = !device || device.status !== 'online' || !isServo || servo?.position_recovery_required !== false;
+      if (!device) status.textContent = 'Selecciona el dispositivo Servo para consultar si puede recibir la calibración.';
+      else if (device.status !== 'online') status.textContent = 'El cloud no recibe conexión reciente del dispositivo. No se envió ningún comando; conecta el ESP32 al cloud.';
+      else if (!isServo) status.textContent = 'El dispositivo seleccionado no reporta firmware Servo.';
+      else if (needsRecovery && !supportsRecovery) status.textContent = `El encoder necesita una referencia, pero ${telemetry.firmwareVersion || 'el firmware actual'} no admite recuperarla desde el cloud. Actualiza a Servo r23 o posterior.`;
+      else if (needsRecovery) status.textContent = 'El encoder requiere una referencia fiable. Coloca manualmente la cortina cerca de la mitad; el botón establecerá el origen sin mover el motor.';
+      else if (servo?.position_recovery_required !== false) status.textContent = 'Falta telemetría actual del encoder; aún no se envió la calibración.';
     };
     recover.addEventListener('click', async () => {
       const { device, telemetry, servoId } = selectedState();
@@ -57,6 +65,8 @@
       finally { updateRecoveryAction(); }
     });
     get('calibration-servo').addEventListener('change', updateRecoveryAction);
+    $('#command-device')?.addEventListener('change', updateRecoveryAction);
+    window.setInterval(updateRecoveryAction, 2000);
     const inputs = ['calibration-height', 'calibration-diameter', 'calibration-thickness', 'calibration-ratio'];
     const values = () => ({ height: Number(get('calibration-height').value), diameter: Number(get('calibration-diameter').value), thickness: Number(get('calibration-thickness').value), ratio: Number(get('calibration-ratio').value) });
     const calculate = () => {
@@ -67,11 +77,11 @@
       return { ...value, turns };
     };
     const updateEstimate = () => {
-      try { calculate(); status.textContent = 'Estimación lista; revisa el punto de partida y las medidas.'; }
+      try { calculate(); }
       catch (error) { get('calibration-estimate').textContent = 'Medidas no válidas'; status.textContent = error.message; }
+      updateRecoveryAction();
     };
     inputs.forEach((id) => get(id).addEventListener('input', updateEstimate));
-    const apply = get('calibration-apply');
     apply.addEventListener('click', async () => {
       const deviceId = $('#command-device')?.value;
       const servoId = Number(get('calibration-servo').value);
@@ -92,7 +102,7 @@
         status.textContent = 'Configuración aplicada. No se inició movimiento; dirección ajustable desde el toggle del dispositivo.';
         showToast('Calibración geométrica aplicada');
       } catch (error) { status.textContent = error.message; }
-      finally { apply.disabled = false; }
+      finally { updateRecoveryAction(); }
     });
     try { calculate(); } catch (error) { status.textContent = error.message; }
     updateRecoveryAction();

@@ -69,7 +69,7 @@ class CalibrationCompletionTests(unittest.TestCase):
         controller.servo_ids = (1,)
         controller.bus = FakeBus(position=1420)
         controller.multiturn_active = {1: False}
-        controller.blind_config = {1: {'calibration_in_progress': False, 'calibrated': True,
+        controller.blind_config = {1: {'calibration_in_progress': True, 'calibrated': True,
                                        'calibration_motion_fault': True, 'calibration_motion_fault_reason': 'encoder_read'}}
         controller.blind_targets = {1: {'percent': 85.0, 'speed': 900, 'acceleration': 60}}
         controller.absolute_turns = {1: 12.75}
@@ -85,6 +85,7 @@ class CalibrationCompletionTests(unittest.TestCase):
         self.assertEqual(controller._last_saved_turns[1], 0.0)
         self.assertFalse(controller.position_recovery_required[1])
         self.assertFalse(controller.blind_config[1]['calibrated'])
+        self.assertFalse(controller.blind_config[1]['calibration_in_progress'])
         self.assertFalse(controller.blind_config[1]['calibration_motion_fault'])
         self.assertEqual(controller.blind_targets[1]['percent'], 50.0)
         self.assertEqual(controller.bus.calls, [])

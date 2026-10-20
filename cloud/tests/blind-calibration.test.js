@@ -61,7 +61,9 @@ test('cloud exposes explicit no-movement encoder recovery only for online Servo 
     assert.match(ui, /Number\(match\[1\]\) >= 23/);
     assert.match(ui, /atMidpoint: true/);
     assert.match(ui, /waitForReferenceTelemetry/);
-    assert.match(ui, /device\?\.status !== 'online'/);
+    assert.match(ui, /Actualiza a Servo r23 o posterior/);
+    assert.match(ui, /No se envió ningún comando/);
+    assert.match(ui, /apply\.disabled = !device \|\| device\.status !== 'online'/);
   }
   const server = fs.readFileSync(path.join(root, 'server.js'), 'utf8');
   assert.match(server, /function validateServoEncoderReference\(/);
@@ -73,6 +75,7 @@ test('cloud exposes explicit no-movement encoder recovery only for online Servo 
   assert.match(firmware, /cortina\.recover_position_reference\(servo_id\)/);
   assert.match(cortina, /def recover_position_reference\(/);
   assert.match(cortina, /self\.absolute_turns\[servo_id\] = 0\.0/);
+  assert.match(cortina, /self\.blind_config\[servo_id\]\['calibration_in_progress'\] = False/);
   assert.match(cortina, /establece una referencia fiable del encoder antes de mover/);
   assert.match(fs.readFileSync(path.join(root, '..', 'dispositivos/servo/main.py'), 'utf8'), /servo-r23/);
 });

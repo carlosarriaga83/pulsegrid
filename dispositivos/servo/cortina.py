@@ -163,8 +163,8 @@ class Cortina:
     def recover_position_reference(self, servo_id):
         if servo_id not in self.servo_ids:
             raise ValueError('ID de servo no detectado')
-        if self.multiturn_active[servo_id] or self.blind_config[servo_id].get('calibration_in_progress'):
-            raise ValueError('no se puede recuperar la referencia durante un movimiento o calibracion')
+        if self.multiturn_active[servo_id]:
+            raise ValueError('no se puede recuperar la referencia durante un movimiento')
         position = self.bus.position(servo_id)
         self._last_positions[servo_id] = position
         self.absolute_turns[servo_id] = 0.0
@@ -173,6 +173,7 @@ class Cortina:
         self.blind_config[servo_id]['calibrated'] = False
         self.blind_config[servo_id]['calibration_motion_fault'] = False
         self.blind_config[servo_id]['calibration_motion_fault_reason'] = ''
+        self.blind_config[servo_id]['calibration_in_progress'] = False
         self.blind_targets[servo_id] = {'percent': 50.0, 'speed': 800, 'acceleration': 50}
         self._save_persistent_state()
 
