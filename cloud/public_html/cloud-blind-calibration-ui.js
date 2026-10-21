@@ -50,7 +50,9 @@
       } catch (error) { status.textContent = error.message; }
       finally { updateRecoveryAction(); }
     });
-    get('calibration-servo').addEventListener('change', updateRecoveryAction);
+    const motorSide = get('calibration-motor-side');
+    const syncMotorSide = () => { const { servo } = selectedState(); if (servo?.blind_motor_side === 'left' || servo?.blind_motor_side === 'right') motorSide.value = servo.blind_motor_side; };
+    get('calibration-servo').addEventListener('change', () => { syncMotorSide(); updateRecoveryAction(); });
     $('#command-device')?.addEventListener('change', updateRecoveryAction);
     window.setInterval(updateRecoveryAction, 2000);
     const inputs = ['calibration-height', 'calibration-diameter', 'calibration-thickness', 'calibration-ratio'];
@@ -67,11 +69,12 @@
         if (String(telemetry.firmwareTarget || '').toLowerCase() !== 'servo') throw new Error('Selecciona un dispositivo con firmware Servo.');
         if (servo?.position_recovery_required !== false) throw new Error('El encoder requiere recuperar una referencia fiable antes de configurar límites. No se envió ningún movimiento.');
         const estimate = calculate(); apply.disabled = true; status.textContent = 'Enviando cálculo y límites estimados al ESP32…';
-        const result = await apiRequest('commands', { method: 'POST', body: JSON.stringify({ deviceId, command: 'blind.cloudCalibrationConfigure', payload: { servoId, heightCm: estimate.height, tubeDiameterCm: estimate.diameter, fabricThicknessMm: estimate.thickness, motorTurnsPerTubeTurn: estimate.ratio, estimatedTurns: estimate.turns } }) });
+        const result = await apiRequest('commands', { method: 'POST', body: JSON.stringify({ deviceId, command: 'blind.cloudCalibrationConfigure', payload: { servoId, heightCm: estimate.height, tubeDiameterCm: estimate.diameter, fabricThicknessMm: estimate.thickness, motorTurnsPerTubeTurn: estimate.ratio, estimatedTurns: estimate.turns, motorSide: motorSide.value } }) });
         await waitForCalibrationCommand(result.commandId); await loadDevices(); status.textContent = 'Configuración aplicada. No se inició movimiento; dirección ajustable desde el toggle del dispositivo.'; showToast('Calibración geométrica aplicada');
       } catch (error) { status.textContent = error.message; } finally { updateRecoveryAction(); }
     });
     try { calculate(); } catch (error) { status.textContent = error.message; }
+    syncMotorSide();
     updateRecoveryAction();
     renderIcons();
   }

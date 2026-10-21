@@ -361,7 +361,10 @@ class Cortina:
         config = self.blind_config[servo_id]
         start = config['rolled_turns']
         end = config['unrolled_turns']
+        reverse_percent = config.get('motor_side', 'left') == 'right'
         if self.direction_reversed:
+            reverse_percent = not reverse_percent
+        if reverse_percent:
             percent = 100 - percent
         return start + (end - start) * percent / 100
 
@@ -422,7 +425,10 @@ class Cortina:
         config = self.blind_config[servo_id]
         span = config['unrolled_turns'] - config['rolled_turns']
         percent = 0.0 if not span else (self.absolute_turns[servo_id] - config['rolled_turns']) * 100 / span
+        reverse_percent = config.get('motor_side', 'left') == 'right'
         if self.direction_reversed:
+            reverse_percent = not reverse_percent
+        if reverse_percent:
             percent = 100.0 - percent
         return {
             'rolled_turns': config['rolled_turns'],

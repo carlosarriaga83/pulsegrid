@@ -63,6 +63,47 @@ def load_cortina_module(name):
 
 
 class CalibrationCompletionTests(unittest.TestCase):
+    def test_calibrated_targets_and_reported_percentages_respect_each_motor_side(self):
+        module = load_cortina_module('cortina_motor_side_direction_test')
+        controller = object.__new__(module.Cortina)
+        controller.servo_ids = (1, 2)
+        controller.direction_reversed = False
+        controller.blind_config = {
+            1: {'rolled_turns': 0.0, 'unrolled_turns': 1.0, 'motor_side': 'left', 'calibrated': True, 'calibration_in_progress': False},
+            2: {'rolled_turns': 0.0, 'unrolled_turns': 1.0, 'motor_side': 'right', 'calibrated': True, 'calibration_in_progress': False},
+        }
+        controller.position_recovery_required = {1: False, 2: False}
+        controller.absolute_turns = {1: 0.5, 2: 0.5}
+        controller.blind_targets = {1: {'percent': 50.0}, 2: {'percent': 50.0}}
+        controller.multiturn_active = {1: False, 2: False}
+        controller.update_multiturn = lambda: None
+        targets = []
+        controller._start_multiturn = lambda servo_id, turns, speed, acceleration: targets.append((servo_id, turns))
+        controller._save_persistent_state = lambda: None
+
+        controller.move_blind(1, 51)
+        controller.move_blind(2, 51)
+        self.assertEqual([servo_id for servo_id, _ in targets], [1, 2])
+        self.assertAlmostEqual(targets[0][1], 0.01)
+        self.assertAlmostEqual(targets[1][1], -0.01)
+        self.assertEqual(controller.blind_status(1)['percent'], 50.0)
+        self.assertEqual(controller.blind_status(2)['percent'], 50.0)
+
+        for percent in (52, 53):
+            for servo_id in (1, 2):
+                current = controller.absolute_turns[servo_id]
+                controller.move_blind(servo_id, percent)
+                controller.absolute_turns[servo_id] = controller._calibrated_target(servo_id, percent)
+                self.assertGreater((controller.absolute_turns[servo_id] - current) * (1 if servo_id == 1 else -1), 0)
+        self.assertEqual([1 if turns > 0 else -1 for _, turns in targets], [1, -1, 1, -1, 1, -1])
+
+        controller.absolute_turns = {1: 0.5, 2: 0.5}
+        controller.direction_reversed = True
+        self.assertAlmostEqual(controller._calibrated_target(1, 51), 0.49)
+        self.assertAlmostEqual(controller._calibrated_target(2, 51), 0.51)
+        self.assertEqual(controller.blind_status(1)['percent'], 50.0)
+        self.assertEqual(controller.blind_status(2)['percent'], 50.0)
+
     def test_cloud_encoder_reference_recovery_is_stationary_and_invalidates_old_limits(self):
         module = load_cortina_module('cortina_reference_recovery_test')
         controller = object.__new__(module.Cortina)

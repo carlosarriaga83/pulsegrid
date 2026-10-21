@@ -29,12 +29,12 @@ def execute_blind_command(cortina, name, payload):
     import servo_calibration
     servo_id = int(payload.get('servoId', 1))
     if name == 'blind.cloudCalibrationConfigure':
-        expected = ('servoId', 'heightCm', 'tubeDiameterCm', 'fabricThicknessMm', 'motorTurnsPerTubeTurn', 'estimatedTurns')
+        expected = ('servoId', 'heightCm', 'tubeDiameterCm', 'fabricThicknessMm', 'motorTurnsPerTubeTurn', 'estimatedTurns', 'motorSide')
         if len(payload) != len(expected) or any(key not in payload for key in expected):
             raise ValueError('payload de calibracion incompleto o invalido')
         servo_calibration.configure_cloud_estimate(
             cortina, servo_id, payload['heightCm'], payload['tubeDiameterCm'],
-            payload['fabricThicknessMm'], payload['motorTurnsPerTubeTurn'], payload['estimatedTurns'])
+            payload['fabricThicknessMm'], payload['motorTurnsPerTubeTurn'], payload['estimatedTurns'], payload['motorSide'])
     elif name == 'blind.encoderReferenceRecover':
         if len(payload) != 2 or set(payload) != {'servoId', 'atMidpoint'} or payload.get('atMidpoint') is not True:
             raise ValueError('confirma que la cortina esta centrada para recuperar la referencia')

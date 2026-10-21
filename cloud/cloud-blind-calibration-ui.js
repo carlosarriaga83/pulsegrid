@@ -5,7 +5,7 @@
     const { $, apiRequest, loadDevices, waitForCalibrationCommand, showToast, renderIcons } = context;
     const layout = $('.command-calibration-layout');
     if (!layout || $('#calibration-wizard')) return;
-    layout.insertAdjacentHTML('beforeend', `<div class="panel calibration-wizard" id="calibration-wizard"><div class="panel-heading"><div><h2>Calibración geométrica</h2><p>El cloud calcula el recorrido y envía los límites estimados al servo.</p></div><span class="secure-badge">Cloud-first</span></div><div class="calibration-settings"><label>Alto de ventana (cm)<input id="calibration-height" type="number" min="20" max="1000" step="0.1" value="150"></label><label>Diámetro exterior del tubo (cm)<input id="calibration-diameter" type="number" min="1" max="30" step="0.1" value="5"></label><label>Grosor del paño (mm)<input id="calibration-thickness" type="number" min="0.01" max="5" step="0.01" value="0.5"></label><label>Vueltas motor por vuelta de tubo<input id="calibration-ratio" type="number" min="0.1" max="20" step="0.01" value="1"></label><label>Servo<select id="calibration-servo"><option value="1">Servo 1</option><option value="2">Servo 2</option></select></label></div><div class="blind-calibration-readout"><span>Recorrido geométrico estimado</span><strong id="calibration-estimate">Ingresa las medidas</strong><span id="calibration-limit" class="calibration-progress">Límites operativos: 80% del cálculo, centrados en la posición actual.</span></div><p class="calibration-safety-note"><strong>Antes de aplicar:</strong> coloca manualmente la cortina cerca de la mitad del recorrido y verifica visualmente las medidas. El cálculo no detecta topes, fuerza ni atascos; los límites son estimados y conservadores. Corrige el sentido desde el toggle del dispositivo si hace falta.</p><p id="calibration-status" class="form-status" aria-live="polite">Introduce las medidas para calcular el recorrido.</p><button class="primary-button full-width" id="calibration-apply" type="button">Aplicar calibración desde el cloud</button></div>`);
+    layout.insertAdjacentHTML('beforeend', `<div class="panel calibration-wizard" id="calibration-wizard"><div class="panel-heading"><div><h2>Calibración geométrica</h2><p>El cloud calcula el recorrido y envía los límites estimados al servo.</p></div><span class="secure-badge">Cloud-first</span></div><div class="calibration-settings"><label>Alto de ventana (cm)<input id="calibration-height" type="number" min="20" max="1000" step="0.1" value="150"></label><label>Diámetro exterior del tubo (cm)<input id="calibration-diameter" type="number" min="1" max="30" step="0.1" value="5"></label><label>Grosor del paño (mm)<input id="calibration-thickness" type="number" min="0.01" max="5" step="0.01" value="0.5"></label><label>Vueltas motor por vuelta de tubo<input id="calibration-ratio" type="number" min="0.1" max="20" step="0.01" value="1"></label><label>Servo<select id="calibration-servo"><option value="1">Servo 1</option><option value="2">Servo 2</option></select></label><label>Lado de montaje del servo<select id="calibration-motor-side"><option value="left">Izquierdo</option><option value="right">Derecho</option></select></label></div><div class="blind-calibration-readout"><span>Recorrido geométrico estimado</span><strong id="calibration-estimate">Ingresa las medidas</strong><span id="calibration-limit" class="calibration-progress">Límites operativos: 80% del cálculo, centrados en la posición actual.</span></div><p class="calibration-safety-note"><strong>Antes de aplicar:</strong> coloca manualmente la cortina cerca de la mitad del recorrido y verifica visualmente las medidas. Selecciona el lado físico de montaje para este servo. El cálculo no detecta topes, fuerza ni atascos; los límites son estimados y conservadores. El toggle de sentido invierte ambos servos.</p><p id="calibration-status" class="form-status" aria-live="polite">Introduce las medidas para calcular el recorrido.</p><button class="primary-button full-width" id="calibration-apply" type="button">Aplicar calibración desde el cloud</button></div>`);
     $('#calibration-apply').insertAdjacentHTML('beforebegin', '<button class="secondary-button full-width" id="calibration-recover-reference" type="button" hidden>Establecer referencia del encoder aquí (cortina centrada)</button>');
     const get = (id) => $(`#${id}`);
     const status = get('calibration-status');
@@ -64,7 +64,12 @@
       } catch (error) { status.textContent = error.message; }
       finally { updateRecoveryAction(); }
     });
-    get('calibration-servo').addEventListener('change', updateRecoveryAction);
+    const motorSide = get('calibration-motor-side');
+    const syncMotorSide = () => {
+      const { servo } = selectedState();
+      if (servo?.blind_motor_side === 'left' || servo?.blind_motor_side === 'right') motorSide.value = servo.blind_motor_side;
+    };
+    get('calibration-servo').addEventListener('change', () => { syncMotorSide(); updateRecoveryAction(); });
     $('#command-device')?.addEventListener('change', updateRecoveryAction);
     window.setInterval(updateRecoveryAction, 2000);
     const inputs = ['calibration-height', 'calibration-diameter', 'calibration-thickness', 'calibration-ratio'];
@@ -96,7 +101,7 @@
         const estimate = calculate();
         apply.disabled = true;
         status.textContent = 'Enviando cálculo y límites estimados al ESP32…';
-        const result = await apiRequest('commands', { method: 'POST', body: JSON.stringify({ deviceId, command: 'blind.cloudCalibrationConfigure', payload: { servoId, heightCm: estimate.height, tubeDiameterCm: estimate.diameter, fabricThicknessMm: estimate.thickness, motorTurnsPerTubeTurn: estimate.ratio, estimatedTurns: estimate.turns } }) });
+        const result = await apiRequest('commands', { method: 'POST', body: JSON.stringify({ deviceId, command: 'blind.cloudCalibrationConfigure', payload: { servoId, heightCm: estimate.height, tubeDiameterCm: estimate.diameter, fabricThicknessMm: estimate.thickness, motorTurnsPerTubeTurn: estimate.ratio, estimatedTurns: estimate.turns, motorSide: motorSide.value } }) });
         await waitForCalibrationCommand(result.commandId);
         await loadDevices();
         status.textContent = 'Configuración aplicada. No se inició movimiento; dirección ajustable desde el toggle del dispositivo.';
@@ -105,6 +110,7 @@
       finally { updateRecoveryAction(); }
     });
     try { calculate(); } catch (error) { status.textContent = error.message; }
+    syncMotorSide();
     updateRecoveryAction();
     renderIcons();
   }

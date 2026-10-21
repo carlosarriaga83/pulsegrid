@@ -1,9 +1,11 @@
 TEST_DIRECTION_TURNS = 1.0
 
 
-def configure_cloud_estimate(cortina, servo_id, height_cm, tube_diameter_cm, fabric_thickness_mm, motor_turns_per_tube_turn, estimated_turns):
+def configure_cloud_estimate(cortina, servo_id, height_cm, tube_diameter_cm, fabric_thickness_mm, motor_turns_per_tube_turn, estimated_turns, motor_side):
     if servo_id not in cortina.servo_ids:
         raise ValueError('ID de servo no detectado')
+    if motor_side not in ('left', 'right'):
+        raise ValueError('el lado del motor debe ser left o right')
     if cortina.multiturn_active[servo_id]:
         raise ValueError('espera a que termine el movimiento')
     values = (height_cm, tube_diameter_cm, fabric_thickness_mm, motor_turns_per_tube_turn, estimated_turns)
@@ -29,6 +31,7 @@ def configure_cloud_estimate(cortina, servo_id, height_cm, tube_diameter_cm, fab
     half_limit = estimated * 0.4
     config = cortina.blind_config[servo_id]
     config.update({
+        'motor_side': motor_side,
         'rolled_turns': midpoint - half_limit,
         'unrolled_turns': midpoint + half_limit,
         'calibrated': True,

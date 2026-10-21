@@ -601,9 +601,10 @@ function validateLedConfiguration(device, command, payload) {
 
 function validateCloudBlindCalibration(device, command, payload) {
   if (command !== 'blind.cloudCalibrationConfigure' || device.provider === 'tuya') throw new Error('La calibracion geometrica solo aplica a servos Pulsegrid');
-  const keys = ['servoId', 'heightCm', 'tubeDiameterCm', 'fabricThicknessMm', 'motorTurnsPerTubeTurn', 'estimatedTurns'];
+  const keys = ['servoId', 'heightCm', 'tubeDiameterCm', 'fabricThicknessMm', 'motorTurnsPerTubeTurn', 'estimatedTurns', 'motorSide'];
   if (!payload || Object.keys(payload).length !== keys.length || keys.some((key) => !Object.hasOwn(payload, key))) throw new Error('Payload de calibracion incompleto o invalido');
   if (![1, 2].includes(payload.servoId)) throw new Error('servoId debe ser 1 o 2');
+  if (!['left', 'right'].includes(payload.motorSide)) throw new Error('motorSide debe ser left o right');
   const estimated = BlindCalibrationModel.estimateTurns(payload.heightCm, payload.tubeDiameterCm, payload.fabricThicknessMm, payload.motorTurnsPerTubeTurn);
   if (!Number.isFinite(payload.estimatedTurns) || Math.abs(payload.estimatedTurns - estimated) > 0.01) throw new Error('Las vueltas estimadas no coinciden con las medidas');
 }

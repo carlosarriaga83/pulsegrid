@@ -5,11 +5,12 @@ const path = require('node:path');
 const vm = require('node:vm');
 const model = require('../automation-model');
 const openMeteo = require('../open-meteo');
+const blindCalibrationModel = require('../blind-calibration-model');
 const root = path.join(__dirname, '..');
 const server = fs.readFileSync(path.join(root, 'server.js'), 'utf8');
 // Evaluate only declarations, never server startup, dotenv, timers or a real database.
 function backend(extra = {}) {
-  const context = vm.createContext({ AutomationModel: model, OpenMeteo: openMeteo, Intl, Date, console, ...extra });
+  const context = vm.createContext({ AutomationModel: model, BlindCalibrationModel: blindCalibrationModel, OpenMeteo: openMeteo, Intl, Date, console, ...extra });
   const injectedDispatch = extra.dispatchDeviceCommand;
   vm.runInContext(server.slice(server.indexOf('function automationAction('), server.indexOf('async function readFirmwareManifest(')), context);
   vm.runInContext(server.slice(server.indexOf('function validateTuyaCommand('), server.indexOf('async function dispatchDeviceCommand(')), context);
@@ -233,13 +234,13 @@ test('HTML loads automation helpers before app and mirrors are synchronized', ()
     assert.ok(html.indexOf('app.js?v=66') >= 0);
     assert.ok(html.indexOf('blind-calibration-model.js?v=2') >= 0);
     assert.ok(html.indexOf('blind-calibration-ui.js?v=5') >= 0);
-    assert.ok(html.indexOf('cloud-blind-calibration-ui.js?v=3') >= 0);
+    assert.ok(html.indexOf('cloud-blind-calibration-ui.js?v=4') >= 0);
     assert.ok(html.includes('telemetry-overrides.css?v=54'));
     assert.ok(html.indexOf('automation-model.js?v=47') < html.indexOf('automation-ui.js?v=56'));
     assert.ok(html.indexOf('automation-ui.js?v=56') < html.indexOf('blind-calibration-model.js?v=2'));
     assert.ok(html.indexOf('blind-calibration-model.js?v=2') < html.indexOf('blind-calibration-ui.js?v=5'));
-    assert.ok(html.indexOf('blind-calibration-ui.js?v=5') < html.indexOf('cloud-blind-calibration-ui.js?v=3'));
-    assert.ok(html.indexOf('cloud-blind-calibration-ui.js?v=3') < html.indexOf('app.js?v=66'));
+    assert.ok(html.indexOf('blind-calibration-ui.js?v=5') < html.indexOf('cloud-blind-calibration-ui.js?v=4'));
+    assert.ok(html.indexOf('cloud-blind-calibration-ui.js?v=4') < html.indexOf('app.js?v=66'));
     assert.match(html, /automations.css\?v=48/);
     const app = fs.readFileSync(path.join(root, folder, 'app.js'), 'utf8');
     assert.match(app, /pad\(date\.getHours\(\)\)}:\$\{pad\(date\.getMinutes\(\)\)}:\$\{pad\(date\.getSeconds\(\)\)/);
@@ -395,4 +396,14 @@ test('direction validation uses latest telemetry for Pulsegrid actuators', async
   assert.equal(result.id, 9);
   assert.equal(result.status, 'queued');
   assert.equal(calls.length, 2);
+});
+
+test('backend requires an explicit valid Servo motor mounting side for geometric calibration', () => {
+  const b = backend();
+  const calibration = { servoId: 1, heightCm: 150, tubeDiameterCm: 5, fabricThicknessMm: 0.5, motorTurnsPerTubeTurn: 1, estimatedTurns: blindCalibrationModel.estimateTurns(150, 5, 0.5), motorSide: 'left' };
+  assert.doesNotThrow(() => b.validateCloudBlindCalibration({ provider: 'pulsegrid' }, 'blind.cloudCalibrationConfigure', calibration));
+  assert.doesNotThrow(() => b.validateCloudBlindCalibration({ provider: 'pulsegrid' }, 'blind.cloudCalibrationConfigure', { ...calibration, motorSide: 'right' }));
+  assert.throws(() => b.validateCloudBlindCalibration({ provider: 'pulsegrid' }, 'blind.cloudCalibrationConfigure', { ...calibration, motorSide: 'invalid' }));
+  const { motorSide, ...legacyPayload } = calibration;
+  assert.throws(() => b.validateCloudBlindCalibration({ provider: 'pulsegrid' }, 'blind.cloudCalibrationConfigure', legacyPayload));
 });

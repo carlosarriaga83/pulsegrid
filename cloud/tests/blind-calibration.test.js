@@ -45,6 +45,8 @@ test('cloud-first wizard sends one cloud-computed configuration without directio
     assert.match(html, /BlindCalibrationModel\.estimateTurns/);
     assert.match(html, /blind\.cloudCalibrationConfigure/);
     assert.match(html, /estimatedTurns/);
+    assert.match(html, /calibration-motor-side/);
+    assert.match(html, /motorSide: motorSide\.value/);
     assert.match(html, /position_recovery_required/);
     assert.match(html, /toggle del dispositivo/);
     assert.doesNotMatch(html, /safeCalibrationTest|positiveIsDown|Probar una vuelta|Confirmar sentido/);
@@ -77,7 +79,7 @@ test('cloud exposes explicit no-movement encoder recovery only for online Servo 
   assert.match(cortina, /self\.absolute_turns\[servo_id\] = 0\.0/);
   assert.match(cortina, /self\.blind_config\[servo_id\]\['calibration_in_progress'\] = False/);
   assert.match(cortina, /establece una referencia fiable del encoder antes de mover/);
-  assert.match(fs.readFileSync(path.join(root, '..', 'dispositivos/servo/main.py'), 'utf8'), /servo-r24/);
+  assert.match(fs.readFileSync(path.join(root, '..', 'dispositivos/servo/main.py'), 'utf8'), /servo-r25/);
 });
 
 test('Servo cloud calibration applies limits without starting or polling for movement', () => {
@@ -103,6 +105,8 @@ test('servo firmware accepts cloud estimates only with reliable encoder state an
   const firmware = fs.readFileSync(path.join(root, 'dispositivos/servo/servo_calibration.py'), 'utf8');
   const cortina = fs.readFileSync(path.join(root, 'dispositivos/servo/cortina.py'), 'utf8');
   assert.match(firmware, /'half_travel_limit': estimated \* 0\.4/);
+  assert.match(firmware, /def configure_cloud_estimate\([\s\S]*?motor_side\)/);
+  assert.match(firmware, /'motor_side': motor_side/);
   assert.match(firmware, /def configure_cloud_estimate\(/);
   assert.match(firmware, /position_recovery_required\[servo_id\]/);
   assert.match(firmware, /abs\(calculated - estimated\) > 0\.01/);
@@ -197,8 +201,8 @@ test('direction reversal preserves the calibrated envelope and uses consistent p
   const root = path.join(__dirname, '..', '..');
   const cortina = fs.readFileSync(path.join(root, 'dispositivos/servo/cortina.py'), 'utf8');
   const main = fs.readFileSync(path.join(root, 'dispositivos/servo/main.py'), 'utf8');
-  assert.match(cortina, /def _calibrated_target\(self, servo_id, percent\):[\s\S]*?if self\.direction_reversed:\s+percent = 100 - percent/);
-  assert.match(cortina, /def blind_status\(self, servo_id\):[\s\S]*?if self\.direction_reversed:\s+percent = 100\.0 - percent/);
+  assert.match(cortina, /def _calibrated_target\(self, servo_id, percent\):[\s\S]*?reverse_percent = config\.get\('motor_side', 'left'\) == 'right'[\s\S]*?if self\.direction_reversed:\s+reverse_percent = not reverse_percent[\s\S]*?if reverse_percent:\s+percent = 100 - percent/);
+  assert.match(cortina, /def blind_status\(self, servo_id\):[\s\S]*?reverse_percent = config\.get\('motor_side', 'left'\) == 'right'[\s\S]*?if self\.direction_reversed:\s+reverse_percent = not reverse_percent[\s\S]*?if reverse_percent:\s+percent = 100\.0 - percent/);
   assert.match(cortina, /def set_direction_reversed\(self, reversed_value\):\s+self\.direction_reversed = bool\(reversed_value\)\s+self\._save_persistent_state\(\)/);
   assert.match(cortina, /direction_reversed=False\)/);
   assert.match(main, /direction_reversed=bool\(DIRECTION_REVERSED\)/);
