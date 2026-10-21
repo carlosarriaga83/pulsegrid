@@ -609,9 +609,10 @@ function curtainMeta(telemetry, diagnostic = null) {
   const percentages = servos.map(([, servo]) => Number(servo.blind_percent)).filter(Number.isFinite);
   const opening = percentages.length ? `${Math.round(percentages.reduce((total, percent) => total + percent, 0) / percentages.length)}% abierta` : 'Posicion sin calibrar';
   const moving = servos.some(([, servo]) => servo.multiturn_active);
-  const recoveryNeeded = servos.some(([, servo]) => servo.position_recovery_required);
-  const servoState = recoveryNeeded ? 'Recalibracion requerida' : moving ? 'En movimiento' : servos.length ? `Servos ${servos.map(([id, servo]) => `${id}: ${Math.round(Number(servo.blind_percent) || 0)}%`).join(' · ')}` : 'Sin servos detectados';
-  return { icon: 'blinds', meta: [{ icon: 'blinds', text: opening }, { icon: diagnostic ? 'triangle-alert' : recoveryNeeded ? 'triangle-alert' : moving ? 'move-horizontal' : 'circle-pause', text: diagnostic || servoState }, { icon: 'cpu', text: telemetry.firmwareVersion ? `Firmware ${telemetry.firmwareVersion}` : 'Firmware sin confirmar' }] };
+  const recoveryNeeded = servos.some(([, servo]) => servo.position_recovery_required === true);
+  const calibrationNeeded = servos.some(([, servo]) => servo.blind_calibrated !== true);
+  const servoState = recoveryNeeded ? 'Referencia del encoder requerida' : calibrationNeeded ? 'Calibracion geometrica requerida' : moving ? 'En movimiento' : servos.length ? `Servos ${servos.map(([id, servo]) => `${id}: ${Math.round(Number(servo.blind_percent) || 0)}%`).join(' · ')}` : 'Sin servos detectados';
+  return { icon: 'blinds', meta: [{ icon: 'blinds', text: opening }, { icon: diagnostic ? 'triangle-alert' : recoveryNeeded || calibrationNeeded ? 'triangle-alert' : moving ? 'move-horizontal' : 'circle-pause', text: diagnostic || servoState }, { icon: 'cpu', text: telemetry.firmwareVersion ? `Firmware ${telemetry.firmwareVersion}` : 'Firmware sin confirmar' }] };
 }
 
 function devicePresentation(device) {

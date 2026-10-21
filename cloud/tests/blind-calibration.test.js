@@ -53,17 +53,24 @@ test('cloud-first wizard sends one cloud-computed configuration without directio
   }
 });
 
-test('cloud exposes explicit no-movement encoder recovery only for online Servo r23+', () => {
+test('cloud exposes confirmed clean calibration reset only for online Servo r32+', () => {
   const root = path.join(__dirname, '..');
   for (const folder of ['', 'public', 'public_html', 'legacy-root']) {
     const ui = fs.readFileSync(path.join(root, folder, 'cloud-blind-calibration-ui.js'), 'utf8');
     assert.match(ui, /blind\.encoderReferenceRecover/);
     assert.match(ui, /device\?\.status !== 'online'/);
     assert.match(ui, /servo-r\(\\d\+\)/);
-    assert.match(ui, /Number\(match\[1\]\) >= 23/);
+    assert.match(ui, /Number\(match\[1\]\) >= 32/);
     assert.match(ui, /atMidpoint: true/);
     assert.match(ui, /waitForReferenceTelemetry/);
-    assert.match(ui, /Actualiza a Servo r23 o posterior/);
+    assert.match(ui, /Actualiza el dispositivo a Servo r32 o posterior/);
+    assert.match(ui, /Reiniciar calibración y referencia aquí/);
+    assert.match(ui, /window\.confirm\(/);
+    assert.match(ui, /blind_calibrated === false/);
+    assert.match(ui, /blind_target_percent\) === 50/);
+    assert.match(ui, /recover\.hidden = !isServo/);
+    assert.match(ui, /servo\?\.multiturn_active === true/);
+    assert.match(ui, /Coloca manualmente la cortina cerca de la mitad/);
     assert.match(ui, /No se envió ningún comando/);
     assert.match(ui, /apply\.disabled = !device \|\| device\.status !== 'online'/);
   }
@@ -77,9 +84,9 @@ test('cloud exposes explicit no-movement encoder recovery only for online Servo 
   assert.match(firmware, /cortina\.recover_position_reference\(servo_id\)/);
   assert.match(cortina, /def recover_position_reference\(/);
   assert.match(cortina, /self\.absolute_turns\[servo_id\] = 0\.0/);
-  assert.match(cortina, /self\.blind_config\[servo_id\]\['calibration_in_progress'\] = False/);
-  assert.match(cortina, /establece una referencia fiable del encoder antes de mover/);
-  assert.match(fs.readFileSync(path.join(root, '..', 'dispositivos/servo/main.py'), 'utf8'), /servo-r31/);
+  assert.match(cortina, /'calibration_in_progress': False/);
+  assert.match(cortina, /recupera el punto medio desde Pulsegrid y vuelve a aplicar la calibracion geometrica antes de mover/);
+  assert.match(fs.readFileSync(path.join(root, '..', 'dispositivos/servo/main.py'), 'utf8'), /servo-r32/);
 });
 
 test('Servo cloud calibration applies limits without starting or polling for movement', () => {
@@ -221,4 +228,18 @@ test('GA25 local portal only provisions Wi-Fi and preserves a blank password', (
   assert.doesNotMatch(portal, /action=\/motor|POST \/motor|def _test_motor\(/);
   assert.match(portal, /Este portal local solo administra la conexión Wi-Fi/);
   assert.match(portal, /values\.get\("password", ""\) or str\(getattr\(current, "WIFI_PASSWORD", ""\)\)/);
+});
+
+test('Servo UI distinguishes lost encoder reference from missing geometric calibration', () => {
+  const root = path.join(__dirname, '..');
+  for (const folder of ['', 'public', 'public_html']) {
+    const app = fs.readFileSync(path.join(root, folder, 'app.js'), 'utf8');
+    const recoveryCopy = fs.readFileSync(path.join(root, folder, 'cloud-blind-calibration-ui.js'), 'utf8');
+    assert.match(app, /Referencia del encoder requerida/);
+    assert.match(app, /Calibracion geometrica requerida/);
+    assert.match(app, /Recupera referencia y reaplica calibración/);
+    assert.match(recoveryCopy, /Reiniciar calibración y referencia aquí/);
+    assert.match(recoveryCopy, /borrar todos los límites anteriores/);
+    assert.match(recoveryCopy, /Se borrarán las medidas y los límites del servo seleccionado/);
+  }
 });

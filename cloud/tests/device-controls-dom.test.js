@@ -193,7 +193,7 @@ for (const folder of ['', 'public', 'public_html']) {
     notReady.telemetry.servos[2].position_recovery_required = true;
     const f = setup(folder, undefined, notReady); t.after(() => f.dom.window.close());
     assert.equal(f.window.document.querySelector('[data-curtain-position]').disabled, true);
-    assert.match(f.window.document.querySelector('[data-curtain-position-status]').textContent, /referencia fiable/);
+    assert.match(f.window.document.querySelector('[data-curtain-position-status]').textContent, /Recupera referencia y reaplica calibración/);
   });
 
   test(`${label}: GA25 position slider queues its timed position command`, async (t) => {

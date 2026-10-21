@@ -5,7 +5,7 @@
     const layout = $('.command-calibration-layout');
     if (!layout || $('#calibration-wizard')) return;
     layout.insertAdjacentHTML('beforeend', `<div class="panel calibration-wizard" id="calibration-wizard"><div class="panel-heading"><div><h2>Calibración geométrica</h2><p>El cloud calcula el recorrido y envía los límites estimados al servo.</p></div><span class="secure-badge">Cloud-first</span></div><div class="calibration-settings"><label>Alto de ventana (cm)<input id="calibration-height" type="number" min="20" max="1000" step="0.1" value="150"></label><label>Diámetro exterior del tubo (cm)<input id="calibration-diameter" type="number" min="1" max="30" step="0.1" value="5"></label><label>Grosor del paño (mm)<input id="calibration-thickness" type="number" min="0.01" max="5" step="0.01" value="0.5"></label><label>Vueltas motor por vuelta de tubo<input id="calibration-ratio" type="number" min="0.1" max="20" step="0.01" value="1"></label><label>Servo<select id="calibration-servo"><option value="1">Servo 1</option><option value="2">Servo 2</option></select></label></div><div class="blind-calibration-readout"><span>Recorrido geométrico estimado</span><strong id="calibration-estimate">Ingresa las medidas</strong><span id="calibration-limit" class="calibration-progress">Límites operativos: 80% del cálculo, centrados en la posición actual.</span></div><p class="calibration-safety-note"><strong>Antes de aplicar:</strong> coloca manualmente la cortina cerca de la mitad del recorrido y verifica visualmente las medidas. El cálculo no detecta topes, fuerza ni atascos; los límites son estimados y conservadores. Corrige el sentido desde el toggle del dispositivo si hace falta.</p><p id="calibration-status" class="form-status" aria-live="polite">Introduce las medidas para calcular el recorrido.</p><button class="primary-button full-width" id="calibration-apply" type="button">Aplicar calibración desde el cloud</button></div>`);
-    $('#calibration-apply').insertAdjacentHTML('beforebegin', '<button class="secondary-button full-width" id="calibration-recover-reference" type="button" hidden>Establecer referencia del encoder aquí (cortina centrada)</button>');
+    $('#calibration-apply').insertAdjacentHTML('beforebegin', '<button class="secondary-button full-width" id="calibration-recover-reference" type="button" hidden>Reiniciar calibración y referencia aquí (cortina centrada)</button>');
     const get = (id) => $(`#${id}`), status = get('calibration-status');
     const recover = get('calibration-recover-reference');
     const selectedState = () => {
@@ -13,13 +13,13 @@
       const telemetry = context.parseTelemetry(device?.telemetry) || {}, servoId = Number(get('calibration-servo').value);
       return { device, telemetry, servoId, servo: telemetry.servos?.[String(servoId)] || telemetry.servos?.[servoId] };
     };
-    const supportsReferenceRecovery = (version) => { const match = String(version || '').match(/servo-r(\d+)$/i); return Boolean(match && Number(match[1]) >= 23); };
+    const supportsCleanCalibrationReset = (version) => { const match = String(version || '').match(/servo-r(\d+)$/i); return Boolean(match && Number(match[1]) >= 32); };
     const waitForReferenceTelemetry = async (deviceId, servoId) => {
       for (let attempt = 0; attempt < 12; attempt += 1) {
         await loadDevices();
         const device = context.devices().find((item) => item.id === deviceId), telemetry = context.parseTelemetry(device?.telemetry) || {};
         const servo = telemetry.servos?.[String(servoId)] || telemetry.servos?.[servoId];
-        if (servo?.position_recovery_required === false) return;
+        if (servo?.position_recovery_required === false && servo?.blind_calibrated === false && Number(servo?.absolute_turns) === 0 && Number(servo?.blind_target_percent) === 50) return;
         await new Promise((resolve) => window.setTimeout(resolve, 500));
       }
       throw new Error('El dispositivo confirmó el comando, pero aún no publicó la referencia recuperada. Actualiza el estado e inténtalo de nuevo.');
@@ -27,26 +27,31 @@
     const apply = get('calibration-apply');
     const updateRecoveryAction = () => {
       const { device, telemetry, servo } = selectedState(), isServo = String(telemetry.firmwareTarget || '').toLowerCase() === 'servo';
-      const needsRecovery = isServo && servo?.position_recovery_required === true, supportsRecovery = supportsReferenceRecovery(telemetry.firmwareVersion);
-      recover.hidden = !needsRecovery;
-      recover.disabled = !needsRecovery || device?.status !== 'online' || !supportsRecovery;
+      const supportsReset = supportsCleanCalibrationReset(telemetry.firmwareVersion), isMoving = servo?.multiturn_active === true;
+      recover.hidden = !isServo;
+      recover.disabled = !isServo || !servo || device?.status !== 'online' || !supportsReset || isMoving;
       apply.disabled = !device || device.status !== 'online' || !isServo || servo?.position_recovery_required !== false;
       if (!device) status.textContent = 'Selecciona el dispositivo Servo para consultar si puede recibir la calibración.';
       else if (device.status !== 'online') status.textContent = 'El cloud no recibe conexión reciente del dispositivo. No se envió ningún comando; conecta el ESP32 al cloud.';
       else if (!isServo) status.textContent = 'El dispositivo seleccionado no reporta firmware Servo.';
-      else if (needsRecovery && !supportsRecovery) status.textContent = `El encoder necesita una referencia, pero ${telemetry.firmwareVersion || 'el firmware actual'} no admite recuperarla desde el cloud. Actualiza a Servo r23 o posterior.`;
-      else if (needsRecovery) status.textContent = 'El encoder requiere una referencia fiable. Coloca manualmente la cortina cerca de la mitad; el botón establecerá el origen sin mover el motor.';
+      else if (!supportsReset) status.textContent = `El reset limpio requiere Servo r32 o posterior; el dispositivo reporta ${telemetry.firmwareVersion || 'una versión desconocida'}.`;
+      else if (isMoving) status.textContent = 'Espera a que termine el movimiento antes de borrar la calibración.';
+      else if (servo?.position_recovery_required === true) status.textContent = 'La referencia actual no es fiable. Coloca manualmente la cortina cerca de la mitad y usa el botón para borrar todos los límites anteriores y crear una referencia nueva.';
+      else if (servo?.blind_calibrated === true) status.textContent = 'Para iniciar de cero, coloca manualmente la cortina cerca de la mitad y pulsa “Reiniciar calibración y referencia”. Se borrarán las medidas y los límites del servo seleccionado; el motor no se moverá.';
+      else if (servo?.position_recovery_required === false) status.textContent = 'Referencia lista. Aplica la calibración geométrica; el botón de reset permite borrar y empezar de nuevo cuando quieras.';
       else if (servo?.position_recovery_required !== false) status.textContent = 'Falta telemetría actual del encoder; aún no se envió la calibración.';
     };
     recover.addEventListener('click', async () => {
       const { device, telemetry, servoId } = selectedState();
       try {
         if (!device || device.status !== 'online') throw new Error('El dispositivo está fuera de línea; no se envió nada. Conéctalo al cloud primero.');
-        if (!supportsReferenceRecovery(telemetry.firmwareVersion)) throw new Error('Actualiza el dispositivo a Servo r23 o posterior antes de recuperar el encoder.');
-        recover.disabled = true; status.textContent = 'Estableciendo el punto actual como referencia; el motor no se moverá…';
+        if (!supportsCleanCalibrationReset(telemetry.firmwareVersion)) throw new Error('Actualiza el dispositivo a Servo r32 o posterior antes de reiniciar por completo la calibración.');
+        if (selectedState().servo?.multiturn_active === true) throw new Error('Espera a que termine el movimiento antes de borrar la calibración.');
+        if (!window.confirm('Esto borrará las medidas, límites y objetivos guardados para este servo. Coloca manualmente la cortina cerca de la mitad. El motor no se moverá. ¿Continuar?')) return;
+        recover.disabled = true; status.textContent = 'Borrando límites y guardando el encoder actual como nueva referencia; el motor no se moverá…';
         const result = await apiRequest('commands', { method: 'POST', body: JSON.stringify({ deviceId: device.id, command: 'blind.encoderReferenceRecover', payload: { servoId, atMidpoint: true } }) });
         await waitForCalibrationCommand(result.commandId); await waitForReferenceTelemetry(device.id, servoId); updateRecoveryAction();
-        status.textContent = 'Referencia guardada en la posición actual. Ahora puedes aplicar la calibración geométrica.';
+        status.textContent = 'Calibración anterior borrada. Encoder referenciado en la posición actual; ahora aplica las nuevas medidas geométricas.';
       } catch (error) { status.textContent = error.message; }
       finally { updateRecoveryAction(); }
     });

@@ -609,9 +609,10 @@ function curtainMeta(telemetry, diagnostic = null) {
   const percentages = servos.map(([, servo]) => Number(servo.blind_percent)).filter(Number.isFinite);
   const opening = percentages.length ? `${Math.round(percentages.reduce((total, percent) => total + percent, 0) / percentages.length)}% abierta` : 'Posicion sin calibrar';
   const moving = servos.some(([, servo]) => servo.multiturn_active);
-  const recoveryNeeded = servos.some(([, servo]) => servo.position_recovery_required);
-  const servoState = recoveryNeeded ? 'Recalibracion requerida' : moving ? 'En movimiento' : servos.length ? `Servos ${servos.map(([id, servo]) => `${id}: ${Math.round(Number(servo.blind_percent) || 0)}%`).join(' · ')}` : 'Sin servos detectados';
-  return { icon: 'blinds', meta: [{ icon: 'blinds', text: opening }, { icon: diagnostic ? 'triangle-alert' : recoveryNeeded ? 'triangle-alert' : moving ? 'move-horizontal' : 'circle-pause', text: diagnostic || servoState }, { icon: 'cpu', text: telemetry.firmwareVersion ? `Firmware ${telemetry.firmwareVersion}` : 'Firmware sin confirmar' }] };
+  const recoveryNeeded = servos.some(([, servo]) => servo.position_recovery_required === true);
+  const calibrationNeeded = servos.some(([, servo]) => servo.blind_calibrated !== true);
+  const servoState = recoveryNeeded ? 'Referencia del encoder requerida' : calibrationNeeded ? 'Calibracion geometrica requerida' : moving ? 'En movimiento' : servos.length ? `Servos ${servos.map(([id, servo]) => `${id}: ${Math.round(Number(servo.blind_percent) || 0)}%`).join(' · ')}` : 'Sin servos detectados';
+  return { icon: 'blinds', meta: [{ icon: 'blinds', text: opening }, { icon: diagnostic ? 'triangle-alert' : recoveryNeeded || calibrationNeeded ? 'triangle-alert' : moving ? 'move-horizontal' : 'circle-pause', text: diagnostic || servoState }, { icon: 'cpu', text: telemetry.firmwareVersion ? `Firmware ${telemetry.firmwareVersion}` : 'Firmware sin confirmar' }] };
 }
 
 function devicePresentation(device) {
@@ -781,7 +782,7 @@ function deviceCurtainPositionMarkup(device) {
   const servos = Object.values(telemetry.servos || {});
   const servoReady = !isServo || (servos.length > 0 && servos.every((servo) => servo.blind_calibrated === true && servo.position_recovery_required === false && servo.blind_calibration_in_progress !== true));
   const enabled = device.status === 'online' && servoReady;
-  const reason = device.status !== 'online' ? 'Fuera de línea' : !servoReady ? 'Requiere calibración y referencia fiable' : '';
+  const reason = device.status !== 'online' ? 'Fuera de línea' : isServo && servos.some((servo) => servo.position_recovery_required === true) ? 'Recupera referencia y reaplica calibración' : isServo && servos.some((servo) => servo.blind_calibrated !== true) ? 'Aplica calibración geométrica' : isServo && servos.some((servo) => servo.blind_calibration_in_progress === true) ? 'Calibración en curso' : isServo && !servos.length ? 'Esperando telemetría Servo' : '';
   return `<div class="device-curtain-position"><label for="curtain-position-${escapeTelemetryHtml(device.id)}">Posición deseada</label><div class="device-curtain-position-control"><input id="curtain-position-${escapeTelemetryHtml(device.id)}" type="range" min="0" max="100" step="1" value="${Math.round(value)}" data-curtain-position data-device-id="${escapeTelemetryHtml(device.id)}" aria-label="Porcentaje de apertura deseado de ${escapeTelemetryHtml(device.name)}"${enabled ? '' : ' disabled'}><output>${Math.round(value)}%</output><small data-curtain-position-status role="status" aria-live="polite">${reason || 'Objetivo'}</small></div></div>`;
 }
 
@@ -892,7 +893,9 @@ async function sendCurtainPosition(event) {
   if (String(telemetry.firmwareTarget || '').toLowerCase() === 'servo') {
     const servos = Object.values(telemetry.servos || {});
     if (!servos.length || !servos.every((servo) => servo.blind_calibrated === true && servo.position_recovery_required === false && servo.blind_calibration_in_progress !== true)) {
-      status.textContent = 'Requiere calibración y referencia fiable';
+      status.textContent = servos.some((servo) => servo.position_recovery_required === true)
+        ? 'Se perdió la referencia fiable del encoder. Recupera el punto medio desde Calibración geométrica y vuelve a aplicar la calibración antes de mover.'
+        : 'Aplica la calibración geométrica y espera a que termine antes de mover.';
       return;
     }
   }

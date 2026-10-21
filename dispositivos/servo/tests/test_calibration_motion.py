@@ -206,6 +206,7 @@ class CalibrationCompletionTests(unittest.TestCase):
         controller.position_recovery_required = {1: True}
         controller._last_positions = {1: 3000}
         controller._last_saved_turns = {1: 12.75}
+        controller.calibration_references = {1: {'rolled', 'deployed'}}
         controller._save_persistent_state = lambda: None
 
         controller.recover_position_reference(1)
@@ -217,7 +218,15 @@ class CalibrationCompletionTests(unittest.TestCase):
         self.assertFalse(controller.blind_config[1]['calibrated'])
         self.assertFalse(controller.blind_config[1]['calibration_in_progress'])
         self.assertFalse(controller.blind_config[1]['calibration_motion_fault'])
+        self.assertEqual(controller.blind_config[1]['motor_side'], 'left')
+        self.assertEqual(controller.blind_config[1]['rolled_turns'], 0.0)
+        self.assertEqual(controller.blind_config[1]['unrolled_turns'], 10.0)
+        self.assertEqual(controller.blind_config[1]['estimated_turns'], 0.0)
+        self.assertEqual(controller.blind_config[1]['window_height_cm'], 0.0)
+        self.assertEqual(controller.calibration_references[1], set())
         self.assertEqual(controller.blind_targets[1]['percent'], 50.0)
+        self.assertEqual(controller.blind_targets[1]['speed'], 800)
+        self.assertEqual(controller.blind_targets[1]['acceleration'], 50)
         self.assertEqual(controller.bus.calls, [])
 
     def test_cloud_encoder_reference_recovery_rejects_active_motion(self):

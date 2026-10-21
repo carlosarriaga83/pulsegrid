@@ -163,14 +163,30 @@ class Cortina:
         if self.multiturn_active[servo_id]:
             raise ValueError('no se puede recuperar la referencia durante un movimiento')
         position = self.bus.position(servo_id)
+        motor_side = self.blind_config[servo_id].get('motor_side', 'left')
         self._last_positions[servo_id] = position
         self.absolute_turns[servo_id] = 0.0
         self._last_saved_turns[servo_id] = 0.0
         self.position_recovery_required[servo_id] = False
-        self.blind_config[servo_id]['calibrated'] = False
-        self.blind_config[servo_id]['calibration_motion_fault'] = False
-        self.blind_config[servo_id]['calibration_motion_fault_reason'] = ''
-        self.blind_config[servo_id]['calibration_in_progress'] = False
+        self.blind_config[servo_id] = {
+            'rolled_turns': 0.0,
+            'unrolled_turns': 10.0,
+            'motor_side': motor_side if motor_side in ('left', 'right') else 'left',
+            'calibrated': False,
+            'calibration_in_progress': False,
+            'window_height_cm': 0.0,
+            'tube_diameter_cm': 0.0,
+            'fabric_thickness_mm': 0.0,
+            'motor_turns_per_tube_turn': 1.0,
+            'estimated_turns': 0.0,
+            'half_travel_limit': 0.0,
+            'calibration_midpoint_turns': 0.0,
+            'calibration_down_direction': 0,
+            'calibration_direction_pending': False,
+            'calibration_motion_fault': False,
+            'calibration_motion_fault_reason': '',
+        }
+        self.calibration_references[servo_id] = set()
         self.blind_targets[servo_id] = {'percent': 50.0, 'speed': 800, 'acceleration': 50}
         self._save_persistent_state()
 
@@ -402,7 +418,7 @@ class Cortina:
         if config.get('calibration_in_progress'):
             raise ValueError('movimiento normal bloqueado durante la calibracion segura')
         if self.position_recovery_required[servo_id]:
-            raise ValueError('establece una referencia fiable del encoder antes de mover la persiana')
+            raise ValueError('el encoder perdio su referencia fiable; recupera el punto medio desde Pulsegrid y vuelve a aplicar la calibracion geometrica antes de mover')
         if not config['calibrated']:
             raise ValueError('aplica la calibracion geometrica antes de mover la persiana')
         self.update_multiturn()
