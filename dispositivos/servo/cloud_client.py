@@ -300,10 +300,16 @@ class CloudClient:
             if payload.get('allServos') is True:
                 if set(payload) - {'allServos', 'percent', 'position', 'speed', 'acceleration'}:
                     raise ValueError('payload de movimiento de cortina invalido')
+                moved = False
                 for servo_id in cortina.servo_ids:
-                    cortina.move_blind(servo_id, percent, speed, acceleration)
+                    result = cortina.move_blind(servo_id, percent, speed, acceleration)
+                    moved = result is not False or moved
+                if not moved:
+                    raise ValueError('la cortina ya esta en la posicion solicitada')
             else:
-                cortina.move_blind(int(payload.get('servoId', 1)), percent, speed, acceleration)
+                moved = cortina.move_blind(int(payload.get('servoId', 1)), percent, speed, acceleration)
+                if moved is False:
+                    raise ValueError('la cortina ya esta en la posicion solicitada')
         elif name in BLIND_COMMANDS:
             execute_blind_command(cortina, name, payload)
         else:

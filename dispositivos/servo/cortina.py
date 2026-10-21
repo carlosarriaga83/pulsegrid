@@ -11,6 +11,7 @@ class Cortina:
     CALIBRATION_STEP_SPEED = 240
     PRECISION_COMPLETION_TOLERANCE_COUNTS = 16
     MOVEMENT_STALL_TIMEOUT_MS = 15000
+    POSITION_TOLERANCE_PERCENT = 0.05
     def __init__(self, uart, i2c=None, servo_ids=(1, 2), direction_reversed=False):
         self.bus = STServoBus(uart)
         self.direction_reversed = bool(direction_reversed)
@@ -249,12 +250,16 @@ class Cortina:
                     hold_position = self._last_positions.get(servo_id, task['start_position'])
                 else:
                     hold_position = self.bus.position(servo_id)
-                self.bus.move(servo_id, hold_position, speed=min(task['speed'], self.APPROACH_SPEED), acceleration=task['acceleration'])
+                self.bus.move(servo_id, hold_position, speed=max(1, min(task['speed'], self.APPROACH_SPEED)), acceleration=task['acceleration'])
                 self._last_positions[servo_id] = int(hold_position)
             else:
                 self.bus.move_wheel(servo_id, 0, acceleration=50)
                 self.bus.torque(servo_id, False)
                 self.bus.set_mode(servo_id, 0)
+                self.bus.torque(servo_id, True)
+                hold_position = self.bus.position(servo_id)
+                self._track_position(servo_id, hold_position)
+                self.bus.move(servo_id, hold_position, speed=min(task['speed'], self.APPROACH_SPEED), acceleration=task['acceleration'])
         except (STServoError, OSError, ValueError):
             pass
         if completed and task.get('position_mode'):
@@ -349,6 +354,8 @@ class Cortina:
             'last_progress_at': time.ticks_ms(),
             'encoder_read_error_at': None,
             'timeout_ms': max(5000, int(abs(turns) * self.COUNTS_PER_TURN / max(speed, 1) * 2500 + 3000)),
+            'speed': speed,
+            'acceleration': acceleration,
         }
         self.multiturn_active[servo_id] = True
         self.position_recovery_required[servo_id] = True
@@ -378,20 +385,30 @@ class Cortina:
         if not config['calibrated']:
             raise ValueError('aplica la calibracion geometrica antes de mover la persiana')
         self.update_multiturn()
+        current_percent = self.blind_status(servo_id)['percent']
+        if abs(current_percent - percent) <= self.POSITION_TOLERANCE_PERCENT:
+            return False
         target_turns = self._calibrated_target(servo_id, percent)
         turns = target_turns - self.absolute_turns[servo_id]
         if abs(turns) > 0.001:
             self._start_multiturn(servo_id, turns, speed, acceleration)
         self.blind_targets[servo_id] = {'percent': percent, 'speed': int(speed), 'acceleration': int(acceleration)}
         self._save_persistent_state()
+        return abs(turns) > 0.001
 
     def abrir(self, speed=800, acceleration=50):
+        moved = False
         for servo_id in self.servo_ids:
-            self.move_blind(servo_id, 100, speed, acceleration)
+            moved = self.move_blind(servo_id, 100, speed, acceleration) or moved
+        if not moved:
+            raise ValueError('la cortina ya esta en la posicion solicitada')
 
     def cerrar(self, speed=800, acceleration=50):
+        moved = False
         for servo_id in self.servo_ids:
-            self.move_blind(servo_id, 0, speed, acceleration)
+            moved = self.move_blind(servo_id, 0, speed, acceleration) or moved
+        if not moved:
+            raise ValueError('la cortina ya esta en la posicion solicitada')
 
     def parar(self):
         for servo_id in self.servo_ids:

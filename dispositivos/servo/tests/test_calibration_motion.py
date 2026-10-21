@@ -42,10 +42,15 @@ class SimulatedWheelBus(FakeBus):
     MAX_SPEED = 3073
     MAX_ACCELERATION = 150
 
-    def __init__(self, position, step_counts=16):
+    def __init__(self, position, step_counts=16, coast_counts=0):
         super().__init__(position)
         self.step_counts = step_counts
+        self.coast_counts = coast_counts
         self.wheel_speed = 0
+
+    def move(self, servo_id, position, speed, acceleration):
+        self.wheel_speed = 0
+        super().move(servo_id, position, speed, acceleration)
 
     def position(self, _servo_id):
         if self.wheel_speed:
@@ -54,6 +59,9 @@ class SimulatedWheelBus(FakeBus):
         return self.current_position
 
     def move_wheel(self, _servo_id, speed, acceleration=50):
+        if not speed and self.wheel_speed and self.coast_counts:
+            direction = 1 if self.wheel_speed > 0 else -1
+            self.current_position = (self.current_position + direction * self.coast_counts) % 4096
         self.wheel_speed = speed
         self.calls.append(('wheel', speed, acceleration))
 
@@ -319,6 +327,50 @@ class CalibrationCompletionTests(unittest.TestCase):
             self.assertTrue(movement['completed'])
             self.assertAlmostEqual(controller.blind_status(1)['percent'], target_percent, delta=0.5)
             self.assertEqual(controller.blind_targets[1]['percent'], target_percent)
+
+    def test_repeated_close_holds_closed_position_and_rejects_duplicate_after_coast(self):
+        module = load_cortina_module('cortina_repeated_close_test')
+        controller = object.__new__(module.Cortina)
+        start_turns = -3.0
+        raw_position = round(start_turns * 4096) % 4096
+        controller.servo_ids = (1,)
+        controller.direction_reversed = False
+        controller.blind_config = {1: {
+            'rolled_turns': -3.5,
+            'unrolled_turns': -2.5,
+            'motor_side': 'left',
+            'calibrated': True,
+            'calibration_in_progress': False,
+            'calibration_motion_fault': False,
+            'calibration_motion_fault_reason': '',
+        }}
+        controller.position_recovery_required = {1: False}
+        controller.absolute_turns = {1: start_turns}
+        controller.blind_targets = {1: {'percent': 50.0, 'speed': 800, 'acceleration': 50}}
+        controller.multiturn_tasks = {1: None}
+        controller.multiturn_active = {1: False}
+        controller.bus = SimulatedWheelBus(raw_position, step_counts=16, coast_counts=32)
+        controller._last_positions = {1: raw_position}
+        controller._last_saved_turns = {1: start_turns}
+        controller._save_persistent_state = lambda: None
+
+        controller.move_blind(1, 0)
+        movement = controller.multiturn_tasks[1]
+        for _ in range(200):
+            if not controller.multiturn_active[1]:
+                break
+            controller.update_multiturn()
+
+        self.assertTrue(movement['completed'])
+        self.assertEqual(controller.bus.wheel_speed, 0)
+        self.assertIn(('move', controller.bus.current_position, 120, 50), controller.bus.calls)
+        self.assertLess(controller.absolute_turns[1], controller.blind_config[1]['rolled_turns'])
+        self.assertEqual(controller.blind_status(1)['percent'], 0.0)
+        wheel_commands_before_duplicate = [call for call in controller.bus.calls if call[0] == 'wheel']
+
+        self.assertFalse(controller.move_blind(1, 0))
+
+        self.assertEqual([call for call in controller.bus.calls if call[0] == 'wheel'], wheel_commands_before_duplicate)
 
 
 if __name__ == '__main__':

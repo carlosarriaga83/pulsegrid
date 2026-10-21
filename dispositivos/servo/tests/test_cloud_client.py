@@ -180,6 +180,32 @@ class CloudClientConnectionTests(unittest.TestCase):
         self.assertIn(b'"status": "failed"', ack_request)
         self.assertIn(b'"error": "se excedio el tiempo maximo de movimiento"', ack_request)
 
+    def test_repeated_close_is_rejected_when_every_servo_is_already_closed(self):
+        class FakeCurtain:
+            servo_ids = (1,)
+            blind_config = {1: {'calibration_in_progress': False}}
+            multiturn_tasks = {1: None}
+            multiturn_active = {1: False}
+
+            @staticmethod
+            def cerrar(_speed, _acceleration):
+                raise ValueError('la cortina ya esta en la posicion solicitada')
+
+        def http_response(payload):
+            body = json.dumps(payload).encode()
+            return b'HTTP/1.1 200 OK\r\nContent-Length: ' + str(len(body)).encode() + b'\r\nConnection: close\r\n\r\n' + body
+
+        FakeSocket.responses = [
+            http_response({'command': {'id': 'close-2', 'name': 'curtain.close', 'payload': {}}}),
+            http_response({'ok': True}),
+        ]
+        self.client.commands(FakeCurtain(), None)
+        self.client.flush_ack(FakeCurtain())
+
+        ack_request = b''.join(FakeSocket.instances[-1].requests)
+        self.assertIn(b'"status": "failed"', ack_request)
+        self.assertIn(b'la cortina ya esta en la posicion solicitada', ack_request)
+
     @staticmethod
     def response(connection='keep-alive', chunked=False):
         if chunked:
