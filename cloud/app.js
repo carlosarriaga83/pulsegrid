@@ -668,6 +668,40 @@ async function loadDevices() {
   await loadCommandHistory();
 }
 
+function commandPayloadSummary(command) {
+  let payload = command?.payload;
+  if (typeof payload === 'string') {
+    try { payload = JSON.parse(payload); }
+    catch { return ''; }
+  }
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return '';
+  const labels = {
+    percent: 'Objetivo', position: 'Posicion', servoId: 'Servo', allServos: 'Todos los servos',
+    speed: 'Velocidad', acceleration: 'Aceleracion', enabled: 'Habilitado', reversed: 'Sentido inverso',
+    heightCm: 'Alto', tubeDiameterCm: 'Diametro del tubo', fabricThicknessMm: 'Grosor del pano',
+    motorTurnsPerTubeTurn: 'Relacion motor/tubo', estimatedTurns: 'Vueltas estimadas', motorSide: 'Lado del motor',
+    atMidpoint: 'Referencia en punto medio', version: 'Version', target: 'Destino', code: 'Codigo', value: 'Valor'
+  };
+  const sensitive = /password|secret|token|api.?key|device.?code|credential|authorization/i;
+  const displayValue = (key, value) => {
+    if (sensitive.test(key)) return '[oculto]';
+    if (key === 'allServos') return value ? 'Si' : 'No';
+    if (key === 'enabled' || key === 'reversed' || key === 'atMidpoint') return value ? 'Si' : 'No';
+    if (Array.isArray(value)) return key === 'files' ? `${value.length} archivos` : value.slice(0, 4).map(String).join(', ');
+    if (value && typeof value === 'object') return JSON.stringify(value);
+    if (typeof value === 'string') return value;
+    return String(value);
+  };
+  const entries = Object.entries(payload).slice(0, 8).map(([key, value]) => {
+    const label = labels[key] || key;
+    let text = displayValue(key, value);
+    if ((key === 'percent' || key === 'position') && Number.isFinite(Number(value))) text += '%';
+    return `${label}: ${text}`;
+  });
+  if (Object.keys(payload).length > 8) entries.push('…');
+  return entries.join(' · ').slice(0, 320);
+}
+
 async function loadCommandHistory() {
   const history = $('.command-history');
   if (!history) return;
@@ -675,7 +709,11 @@ async function loadCommandHistory() {
     const result = await apiRequest('commands');
     $$('.history-row, .empty-state', history).forEach((row) => row.remove());
     history.insertAdjacentHTML('beforeend', result.commands.length
-      ? result.commands.map((command) => `<div class="history-row"><span class="history-status ${command.status === 'succeeded' ? 'success' : command.status === 'failed' ? 'failed' : command.status === 'canceled' ? 'canceled' : 'pending'}"><i data-lucide="${command.status === 'succeeded' ? 'check' : command.status === 'failed' ? 'x' : command.status === 'canceled' ? 'ban' : 'clock-3'}"></i></span><div><strong>${command.command}</strong><small>${command.deviceName} · ${command.deviceId}${command.errorMessage ? ` · Error: ${escapeTelemetryHtml(command.errorMessage)}` : ''}</small></div><code>${command.status}</code>${['queued', 'delivered'].includes(command.status) ? `<button type="button" class="history-cancel-button" data-cancel-command="${command.id}" title="Cancelar comando"><i data-lucide="x"></i> Cancelar</button>` : ''}<time>${formatDateTime(command.createdAt)}</time></div>`).join('')
+      ? result.commands.map((command) => {
+        const details = commandPayloadSummary(command);
+        const commandError = command.errorMessage ? ` · Error: ${command.errorMessage}` : '';
+        return `<div class="history-row"><span class="history-status ${command.status === 'succeeded' ? 'success' : command.status === 'failed' ? 'failed' : command.status === 'canceled' ? 'canceled' : 'pending'}"><i data-lucide="${command.status === 'succeeded' ? 'check' : command.status === 'failed' ? 'x' : command.status === 'canceled' ? 'ban' : 'clock-3'}"></i></span><div><strong>${escapeTelemetryHtml(command.command)}</strong><small>${escapeTelemetryHtml(command.deviceName)} · ${escapeTelemetryHtml(command.deviceId)}${commandError ? escapeTelemetryHtml(commandError) : ''}</small>${details ? `<small class="history-details">${escapeTelemetryHtml(details)}</small>` : ''}</div><code>${escapeTelemetryHtml(command.status)}</code>${['queued', 'delivered'].includes(command.status) ? `<button type="button" class="history-cancel-button" data-cancel-command="${encodeURIComponent(command.id)}" title="Cancelar comando"><i data-lucide="x"></i> Cancelar</button>` : ''}<time>${formatDateTime(command.createdAt)}</time></div>`;
+      }).join('')
       : '<p class="empty-state">Aun no hay comandos enviados.</p>');
     $$('[data-cancel-command]', history).forEach((button) => button.addEventListener('click', async () => {
       button.disabled = true;

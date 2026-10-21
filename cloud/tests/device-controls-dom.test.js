@@ -253,3 +253,45 @@ for (const folder of ['', 'public', 'public_html']) {
     assert.equal(window.lastTelemetryDevice, 'tuya-1');
   });
 }
+
+test('command history shows curtain parameters and safely redacts/escapes payload details', async (t) => {
+  const dom = new JSDOM('<div class="command-history"></div>', { runScripts: 'outside-only', url: 'http://localhost/' });
+  t.after(() => dom.window.close());
+  const { window } = dom;
+  const context = dom.getInternalVMContext();
+  const command = {
+    id: 42,
+    command: 'curtain.move',
+    payload: JSON.stringify({ allServos: true, percent: 70, speed: 800, acceleration: 50, deviceCode: 'do-not-render' }),
+    deviceName: '<Servo>',
+    deviceId: 'CURTAIN-1',
+    status: 'succeeded',
+    createdAt: '2026-10-21T12:00:00Z'
+  };
+  Object.assign(window, {
+    $: (selector, parent = window.document) => parent.querySelector(selector),
+    $$: (selector, parent = window.document) => Array.from(parent.querySelectorAll(selector)),
+    apiRequest: async () => ({ commands: [command] }),
+    escapeTelemetryHtml: (value) => String(value).replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character])),
+    formatDateTime: () => 'hoy',
+    renderIcons() {}
+  });
+  const source = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+  const start = source.indexOf('function commandPayloadSummary(');
+  const end = source.indexOf('function renderIcons()', start);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  vm.runInContext(source.slice(start, end), context);
+
+  await vm.runInContext('loadCommandHistory()', context);
+
+  const history = window.document.querySelector('.command-history');
+  assert.match(history.textContent, /Objetivo: 70%/);
+  assert.match(history.textContent, /Todos los servos: Si/);
+  assert.match(history.textContent, /Velocidad: 800/);
+  assert.match(history.textContent, /Aceleracion: 50/);
+  assert.match(history.textContent, /\[oculto\]/);
+  assert.doesNotMatch(history.innerHTML, /do-not-render/);
+  assert.match(history.innerHTML, /&lt;Servo&gt;/);
+  assert.equal(history.querySelector('[data-cancel-command="42"]') !== null, false);
+});

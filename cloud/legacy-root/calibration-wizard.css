@@ -66,3 +66,5 @@
 .command-calibration-layout .calibration-wizard { padding: 22px; }
 .command-calibration-layout .calibration-wizard .full-width { margin-top: 14px; }
 @media (max-width: 900px) { .command-calibration-layout { grid-template-columns: minmax(0, 1fr); } }
+
+.history-row .history-details { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; line-height: 1.45; overflow-wrap: anywhere; }

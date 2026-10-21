@@ -1050,7 +1050,7 @@ app.get('/api/automation-troubleshooting', requireSession, apiReady, async (requ
 });
 
 app.get('/api/commands', requireSession, apiReady, async (request, response) => {
-  const [rows] = await database().execute('SELECT commands.id, commands.command_name AS command, commands.status, commands.error_message AS errorMessage, commands.created_at AS createdAt, devices.device_id AS deviceId, devices.name AS deviceName FROM commands JOIN devices ON devices.id = commands.device_id WHERE devices.user_id = (SELECT id FROM users WHERE email = ?) ORDER BY commands.created_at DESC LIMIT 20', [request.session.user.email]);
+  const [rows] = await database().execute('SELECT commands.id, commands.command_name AS command, commands.payload, commands.status, commands.error_message AS errorMessage, commands.created_at AS createdAt, devices.device_id AS deviceId, devices.name AS deviceName FROM commands JOIN devices ON devices.id = commands.device_id WHERE devices.user_id = (SELECT id FROM users WHERE email = ?) ORDER BY commands.created_at DESC LIMIT 20', [request.session.user.email]);
   response.json({ commands: rows });
 });
 

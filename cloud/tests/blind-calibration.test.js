@@ -251,3 +251,11 @@ test('Servo UI distinguishes lost encoder reference from missing geometric calib
     assert.match(recoveryCopy, /Se borrarán las medidas y los límites del servo seleccionado/);
   }
 });
+
+test('command history endpoint returns stored payloads for informative history details', () => {
+  const server = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+  const routeStart = server.indexOf("app.get('/api/commands'");
+  const routeEnd = server.indexOf("app.post('/api/commands'", routeStart);
+  assert.ok(routeStart >= 0 && routeEnd > routeStart);
+  assert.match(server.slice(routeStart, routeEnd), /commands\.payload/);
+});
