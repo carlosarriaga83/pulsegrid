@@ -376,6 +376,10 @@ class CloudClient:
                         'encoder_stall': 'el encoder no registro avance',
                         'encoder_read': 'no se pudo leer el encoder',
                         'movement_timeout': 'se excedio el tiempo maximo de movimiento',
+                        'position_settle': 'no se pudo fijar la posicion final del servo',
+                        'position_settle_stall': 'el encoder no alcanzo la posicion final',
+                        'position_settle_timeout': 'se excedio el tiempo al fijar la posicion final',
+                        'position_overshoot': 'el encoder sobrepaso el objetivo; se bloquean nuevos movimientos hasta recuperar la referencia',
                         'movement_stopped': 'el movimiento se detuvo antes de alcanzar el objetivo',
                     }
                     error = ValueError(details.get(reason, 'el movimiento no alcanzo el objetivo'))

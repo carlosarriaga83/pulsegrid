@@ -79,7 +79,7 @@ test('cloud exposes explicit no-movement encoder recovery only for online Servo 
   assert.match(cortina, /self\.absolute_turns\[servo_id\] = 0\.0/);
   assert.match(cortina, /self\.blind_config\[servo_id\]\['calibration_in_progress'\] = False/);
   assert.match(cortina, /establece una referencia fiable del encoder antes de mover/);
-  assert.match(fs.readFileSync(path.join(root, '..', 'dispositivos/servo/main.py'), 'utf8'), /servo-r29/);
+  assert.match(fs.readFileSync(path.join(root, '..', 'dispositivos/servo/main.py'), 'utf8'), /servo-r31/);
 });
 
 test('Servo cloud calibration applies limits without starting or polling for movement', () => {
@@ -139,6 +139,11 @@ test('servo firmware accepts cloud estimates only with reliable encoder state an
   assert.match(cortina, /def multiturn_status\(self, servo_id\):[\s\S]*?position = self\._last_positions\.get\(servo_id, 0\)/);
   assert.doesNotMatch(cortina.slice(cortina.indexOf('    def multiturn_status('), cortina.indexOf('    def set_direction_reversed(')), /self\.position\(/);
   assert.match(cortina, /CALIBRATION_STEP_SPEED = 240/);
+  assert.match(cortina, /speed = min\(speed, self\.APPROACH_SPEED\)/);
+  assert.match(cortina, /APPROACH_COUNTS = COUNTS_PER_TURN \/\/ 16/);
+  assert.match(cortina, /task\['target_counts'\] - task\['moved_counts'\] <= self\.APPROACH_COUNTS/);
+  assert.match(cortina, /fault_reason = 'position_overshoot'/);
+  assert.match(cortina, /MOVEMENT_POSITION_TOLERANCE_COUNTS = 16/);
   const stservo = fs.readFileSync(path.join(root, 'dispositivos/servo/stservo.py'), 'utf8');
   assert.match(stservo, /def move_multiturn\(self, servo_id, turns, current_position=0, speed=800, acceleration=50\):/);
   assert.match(stservo, /encoded_target = abs\(target\) \| \(\(1 << 15\) if target < 0 else 0\)/);

@@ -8,8 +8,11 @@ class Cortina:
     COUNTS_PER_TURN = 4096
     MAX_LONG_TURNS = 999.99
     APPROACH_SPEED = 120
+    FINAL_APPROACH_SPEED = 60
     CALIBRATION_STEP_SPEED = 240
     PRECISION_COMPLETION_TOLERANCE_COUNTS = 16
+    APPROACH_COUNTS = COUNTS_PER_TURN // 16
+    MOVEMENT_POSITION_TOLERANCE_COUNTS = 16
     MOVEMENT_STALL_TIMEOUT_MS = 15000
     POSITION_TOLERANCE_PERCENT = 0.05
     def __init__(self, uart, i2c=None, servo_ids=(1, 2), direction_reversed=False):
@@ -227,6 +230,9 @@ class Cortina:
             task['moved_counts'] += delta * task['direction']
             if task['moved_counts'] >= task['target_counts']:
                 self._finish_multiturn(servo_id, completed=True)
+            elif task['target_counts'] - task['moved_counts'] <= self.APPROACH_COUNTS and not task['slowing']:
+                self.bus.move_wheel(servo_id, task['direction'] * min(task['speed'], self.FINAL_APPROACH_SPEED), acceleration=task['acceleration'])
+                task['slowing'] = True
             elif time.ticks_diff(time.ticks_ms(), task['last_progress_at']) >= self.MOVEMENT_STALL_TIMEOUT_MS:
                 self._finish_multiturn(servo_id, timed_out=True, fault_reason='encoder_stall')
             elif time.ticks_diff(time.ticks_ms(), task['started_at']) >= task['timeout_ms']:
@@ -262,6 +268,12 @@ class Cortina:
                 self.bus.move(servo_id, hold_position, speed=min(task['speed'], self.APPROACH_SPEED), acceleration=task['acceleration'])
         except (STServoError, OSError, ValueError):
             pass
+        if completed and not task.get('position_mode'):
+            target_error = abs(self.absolute_turns[servo_id] - task['target_turns']) * self.COUNTS_PER_TURN
+            if target_error > self.MOVEMENT_POSITION_TOLERANCE_COUNTS:
+                completed = False
+                timed_out = True
+                fault_reason = 'position_overshoot'
         if completed and task.get('position_mode'):
             self.absolute_turns[servo_id] = task['start_turns'] + task['net_counts'] / self.COUNTS_PER_TURN
         if not fault_reason:
@@ -340,26 +352,35 @@ class Cortina:
         acceleration = int(acceleration)
         if not 0 <= speed <= self.bus.MAX_SPEED or not 0 <= acceleration <= self.bus.MAX_ACCELERATION:
             raise ValueError('velocidad o aceleracion fuera de rango')
+        speed = min(speed, self.APPROACH_SPEED)
         current = self.bus.position(servo_id)
         self._last_positions[servo_id] = current
         self.bus.torque(servo_id, False)
         self.bus.set_mode(servo_id, 1)
         self.bus.torque(servo_id, True)
         direction = 1 if turns > 0 else -1
+        target_counts = int(round(abs(turns) * self.COUNTS_PER_TURN))
+        start_turns = self.absolute_turns[servo_id]
+        initial_speed = min(speed, self.APPROACH_SPEED) if target_counts <= self.APPROACH_COUNTS else speed
         self.multiturn_tasks[servo_id] = {
             'direction': direction,
-            'target_counts': int(round(abs(turns) * self.COUNTS_PER_TURN)),
+            'target_counts': target_counts,
             'moved_counts': 0,
             'started_at': time.ticks_ms(),
             'last_progress_at': time.ticks_ms(),
             'encoder_read_error_at': None,
-            'timeout_ms': max(5000, int(abs(turns) * self.COUNTS_PER_TURN / max(speed, 1) * 2500 + 3000)),
+            'timeout_ms': max(5000, int(target_counts / max(speed, 1) * 2500 + 3000)),
+            'start_turns': start_turns,
+            'target_turns': start_turns + turns,
+            'start_position': current,
             'speed': speed,
             'acceleration': acceleration,
+            'position_mode': False,
+            'slowing': initial_speed != speed,
         }
         self.multiturn_active[servo_id] = True
         self.position_recovery_required[servo_id] = True
-        self.bus.move_wheel(servo_id, direction * speed, acceleration=acceleration)
+        self.bus.move_wheel(servo_id, direction * initial_speed, acceleration=acceleration)
         self._save_persistent_state()
 
     def _calibrated_target(self, servo_id, percent):
