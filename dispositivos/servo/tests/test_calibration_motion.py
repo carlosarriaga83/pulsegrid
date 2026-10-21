@@ -104,6 +104,26 @@ class CalibrationCompletionTests(unittest.TestCase):
         self.assertEqual(controller.blind_status(1)['percent'], 50.0)
         self.assertEqual(controller.blind_status(2)['percent'], 50.0)
 
+    def test_repeating_the_same_percent_corrects_encoder_position_drift(self):
+        module = load_cortina_module('cortina_absolute_setpoint_test')
+        controller = object.__new__(module.Cortina)
+        controller.servo_ids = (1,)
+        controller.direction_reversed = False
+        controller.blind_config = {1: {'rolled_turns': 0.0, 'unrolled_turns': 1.0, 'motor_side': 'left', 'calibrated': True, 'calibration_in_progress': False}}
+        controller.position_recovery_required = {1: False}
+        controller.absolute_turns = {1: 0.50}
+        controller.blind_targets = {1: {'percent': 63.0}}
+        controller.multiturn_active = {1: False}
+        controller.update_multiturn = lambda: None
+        controller._save_persistent_state = lambda: None
+        commands = []
+        controller._start_multiturn = lambda servo_id, turns, speed, acceleration: commands.append((servo_id, turns))
+
+        controller.move_blind(1, 63)
+
+        self.assertEqual(len(commands), 1)
+        self.assertAlmostEqual(commands[0][1], 0.13)
+
     def test_cloud_encoder_reference_recovery_is_stationary_and_invalidates_old_limits(self):
         module = load_cortina_module('cortina_reference_recovery_test')
         controller = object.__new__(module.Cortina)

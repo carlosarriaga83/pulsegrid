@@ -30,8 +30,8 @@ const curtainDevice = {
 const servoCurtainDevice = {
   ...curtainDevice,
   telemetry: { kind: 'curtain', firmwareTarget: 'servo', directionReversed: false, servos: {
-    1: { blind_percent: 25, blind_calibrated: true, position_recovery_required: false, blind_calibration_in_progress: false },
-    2: { blind_percent: 29, blind_calibrated: true, position_recovery_required: false, blind_calibration_in_progress: false }
+    1: { blind_percent: 25, blind_target_percent: 40, blind_calibrated: true, position_recovery_required: false, blind_calibration_in_progress: false },
+    2: { blind_percent: 29, blind_target_percent: 40, blind_calibrated: true, position_recovery_required: false, blind_calibration_in_progress: false }
   } }
 };
 
@@ -165,12 +165,12 @@ for (const folder of ['', 'public', 'public_html']) {
     assert.equal(window.document.querySelector('[data-device-direction]').checked, true);
   });
 
-  test(`${label}: curtain position slider renders reported percentage and queues whole-curtain move`, async (t) => {
+  test(`${label}: curtain position slider retains desired percentage and queues whole-curtain move`, async (t) => {
     const f = setup(folder, async () => ({ status: 'queued' }), servoCurtainDevice); t.after(() => f.dom.window.close());
     const { window, context } = f;
     const slider = window.document.querySelector('[data-curtain-position]');
     assert.ok(slider);
-    assert.equal(slider.value, '27');
+    assert.equal(slider.value, '40');
     slider.value = '64';
     slider.dispatchEvent(new window.Event('input', { bubbles: true }));
     assert.equal(slider.parentElement.querySelector('output').value, '64%');
@@ -178,6 +178,14 @@ for (const folder of ['', 'public', 'public_html']) {
     await new Promise((resolve) => window.setTimeout(resolve, 0));
     assert.deepEqual(f.requests[0], { endpoint: 'commands', deviceId: 'curtain-1', command: 'curtain.move', payload: { percent: 64, speed: 800, acceleration: 50, allServos: true } });
     assert.equal(window.document.querySelector('[data-curtain-position-status]').textContent, 'En cola');
+    window.devices[0].telemetry.servos[1].blind_target_percent = 64;
+    window.devices[0].telemetry.servos[2].blind_target_percent = 64;
+    vm.runInContext('renderDeviceCards()', context);
+    assert.equal(window.document.querySelector('[data-curtain-position]').value, '64');
+    window.devices[0].telemetry.servos[1].blind_percent = 31;
+    window.devices[0].telemetry.servos[2].blind_percent = 35;
+    vm.runInContext('renderDeviceCards()', context);
+    assert.equal(window.document.querySelector('[data-curtain-position]').value, '64');
   });
 
   test(`${label}: curtain position slider is disabled until Servo calibration is ready`, (t) => {

@@ -79,7 +79,7 @@ test('cloud exposes explicit no-movement encoder recovery only for online Servo 
   assert.match(cortina, /self\.absolute_turns\[servo_id\] = 0\.0/);
   assert.match(cortina, /self\.blind_config\[servo_id\]\['calibration_in_progress'\] = False/);
   assert.match(cortina, /establece una referencia fiable del encoder antes de mover/);
-  assert.match(fs.readFileSync(path.join(root, '..', 'dispositivos/servo/main.py'), 'utf8'), /servo-r25/);
+  assert.match(fs.readFileSync(path.join(root, '..', 'dispositivos/servo/main.py'), 'utf8'), /servo-r26/);
 });
 
 test('Servo cloud calibration applies limits without starting or polling for movement', () => {

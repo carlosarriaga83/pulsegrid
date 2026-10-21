@@ -757,7 +757,9 @@ function deviceDirectionMarkup() {
 function curtainPositionValue(device) {
   const telemetry = parseTelemetry(device.telemetry);
   if (String(telemetry.firmwareTarget || '').toLowerCase() === 'servo') {
-    const values = Object.values(telemetry.servos || {}).map((servo) => Number(servo.blind_percent)).filter(Number.isFinite);
+    const servos = Object.values(telemetry.servos || {});
+    const targets = servos.map((servo) => Number(servo.blind_target_percent)).filter(Number.isFinite);
+    const values = targets.length ? targets : servos.map((servo) => Number(servo.blind_percent)).filter(Number.isFinite);
     return values.length ? values.reduce((total, value) => total + value, 0) / values.length : null;
   }
   const value = Number(telemetry.position);
@@ -780,7 +782,7 @@ function deviceCurtainPositionMarkup(device) {
   const servoReady = !isServo || (servos.length > 0 && servos.every((servo) => servo.blind_calibrated === true && servo.position_recovery_required === false && servo.blind_calibration_in_progress !== true));
   const enabled = device.status === 'online' && servoReady;
   const reason = device.status !== 'online' ? 'Fuera de línea' : !servoReady ? 'Requiere calibración y referencia fiable' : '';
-  return `<div class="device-curtain-position"><label for="curtain-position-${escapeTelemetryHtml(device.id)}">Apertura</label><div class="device-curtain-position-control"><input id="curtain-position-${escapeTelemetryHtml(device.id)}" type="range" min="0" max="100" step="1" value="${Math.round(value)}" data-curtain-position data-device-id="${escapeTelemetryHtml(device.id)}" aria-label="Porcentaje de apertura de ${escapeTelemetryHtml(device.name)}"${enabled ? '' : ' disabled'}><output>${Math.round(value)}%</output><small data-curtain-position-status role="status" aria-live="polite">${reason || 'Actual'}</small></div></div>`;
+  return `<div class="device-curtain-position"><label for="curtain-position-${escapeTelemetryHtml(device.id)}">Posición deseada</label><div class="device-curtain-position-control"><input id="curtain-position-${escapeTelemetryHtml(device.id)}" type="range" min="0" max="100" step="1" value="${Math.round(value)}" data-curtain-position data-device-id="${escapeTelemetryHtml(device.id)}" aria-label="Porcentaje de apertura deseado de ${escapeTelemetryHtml(device.name)}"${enabled ? '' : ' disabled'}><output>${Math.round(value)}%</output><small data-curtain-position-status role="status" aria-live="polite">${reason || 'Objetivo'}</small></div></div>`;
 }
 
 function deviceDirectionParameterMarkup(device) {

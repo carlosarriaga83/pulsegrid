@@ -381,11 +381,8 @@ class Cortina:
             raise ValueError('aplica la calibracion geometrica antes de mover la persiana')
         self.update_multiturn()
         if config['calibrated']:
-            previous_target = self.blind_targets[servo_id]['percent']
-            if (abs(previous_target - percent) <= 0.001
-                    and (self.multiturn_active[servo_id] or not self.position_recovery_required[servo_id])):
-                return
-            turns = self._calibrated_target(servo_id, percent) - self.absolute_turns[servo_id]
+            target_turns = self._calibrated_target(servo_id, percent)
+            turns = target_turns - self.absolute_turns[servo_id]
             if abs(turns) > 0.001:
                 self._start_multiturn(servo_id, turns, speed, acceleration)
         else:
