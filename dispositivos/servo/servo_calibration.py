@@ -30,6 +30,7 @@ def configure_cloud_estimate(cortina, servo_id, height_cm, tube_diameter_cm, fab
     midpoint = round(cortina.absolute_turns[servo_id], 4)
     half_limit = estimated * 0.4
     config = cortina.blind_config[servo_id]
+    config.clear()
     config.update({
         'motor_side': motor_side,
         'rolled_turns': midpoint - half_limit,
@@ -48,6 +49,9 @@ def configure_cloud_estimate(cortina, servo_id, height_cm, tube_diameter_cm, fab
         'calibration_motion_fault': False,
         'calibration_motion_fault_reason': '',
     })
+    cortina.calibration_references[servo_id] = set()
+    target = cortina.blind_targets[servo_id]
+    target['percent'] = 50.0
     cortina._save_persistent_state()
 
 

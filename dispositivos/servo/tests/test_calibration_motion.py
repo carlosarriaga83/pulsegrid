@@ -63,6 +63,45 @@ def load_cortina_module(name):
 
 
 class CalibrationCompletionTests(unittest.TestCase):
+    def test_cloud_recalibration_replaces_old_calibration_and_clears_old_setpoint(self):
+        calibration_path = SOURCE.with_name('servo_calibration.py')
+        spec = importlib.util.spec_from_file_location('servo_calibration_reset_test', calibration_path)
+        calibration = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(calibration)
+
+        config = {
+            'rolled_turns': -9.0,
+            'unrolled_turns': 11.0,
+            'motor_side': 'right',
+            'calibrated': True,
+            'calibration_in_progress': True,
+            'stale_calibration_marker': 'old',
+        }
+        curtain = types.SimpleNamespace(
+            servo_ids=(1,),
+            MAX_LONG_TURNS=999.99,
+            multiturn_active={1: False},
+            position_recovery_required={1: False},
+            absolute_turns={1: 2.25},
+            blind_config={1: config},
+            blind_targets={1: {'percent': 45.0, 'speed': 900, 'acceleration': 30}},
+            calibration_references={1: {'rolled', 'deployed'}},
+            update_multiturn=lambda: None,
+            _save_persistent_state=lambda: None,
+        )
+        estimated = ((-5 + (5 * 5 + 4 * (0.5 / 10) * 20 / 3.141592653589793) ** 0.5) / (2 * (0.5 / 10)))
+
+        calibration.configure_cloud_estimate(curtain, 1, 20, 5, 0.5, 1, estimated, 'left')
+
+        self.assertNotIn('stale_calibration_marker', config)
+        self.assertFalse(config['calibration_in_progress'])
+        self.assertTrue(config['calibrated'])
+        self.assertEqual(config['motor_side'], 'left')
+        self.assertAlmostEqual(config['calibration_midpoint_turns'], 2.25)
+        self.assertEqual(curtain.blind_targets[1], {'percent': 50.0, 'speed': 900, 'acceleration': 30})
+        self.assertEqual(curtain.calibration_references[1], set())
+        self.assertEqual(curtain.absolute_turns[1], 2.25)
+
     def test_calibrated_targets_and_reported_percentages_respect_each_motor_side(self):
         module = load_cortina_module('cortina_motor_side_direction_test')
         controller = object.__new__(module.Cortina)
