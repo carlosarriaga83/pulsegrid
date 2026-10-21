@@ -69,14 +69,10 @@ class CloudClient:
         self._pending_ack = None
         self._deferred_acks = []
         self._connection = None
-        self._connection_host = None
-        self._connection_started_at = None
 
     def close(self):
         client = self._connection
         self._connection = None
-        self._connection_host = None
-        self._connection_started_at = None
         if client:
             try:
                 client.close()
@@ -237,8 +233,6 @@ class CloudClient:
         try:
             client, host = self._socket(timeout)
             self._connection = client
-            self._connection_host = host
-            self._connection_started_at = time.ticks_ms()
 
             body = ujson.dumps(payload) if payload is not None else ''
             body_bytes = body.encode()
@@ -328,6 +322,8 @@ class CloudClient:
         name = command.get('name')
         error = None
         firmware_update = name == 'firmware.update'
+        previous_tasks = getattr(cortina, 'multiturn_tasks', {})
+        previous_tasks = dict(previous_tasks)
         try:
             if firmware_update:
                 payload = command.get('payload') or {}
@@ -338,7 +334,12 @@ class CloudClient:
                 self._execute_command(cortina, led_setter, command)
         except Exception as caught:
             error = caught
-        ack = (command, error, firmware_update)
+        motion_tasks = []
+        if error is None:
+            for servo_id, task in getattr(cortina, 'multiturn_tasks', {}).items():
+                if task is not None and task is not previous_tasks.get(servo_id):
+                    motion_tasks.append((servo_id, task))
+        ack = (command, error, firmware_update, motion_tasks)
         if self._pending_ack:
             self._deferred_acks.append(ack)
         else:
@@ -348,7 +349,7 @@ class CloudClient:
         else:
             print('Comando ejecutado localmente:', name)
 
-    def flush_ack(self):
+    def flush_ack(self, cortina=None):
         if not self._pending_ack:
             if self._deferred_acks:
                 self._pending_ack = self._deferred_acks.pop(0)
@@ -356,7 +357,22 @@ class CloudClient:
                 return
         if not self._pending_ack:
             return
-        command, error, firmware_update = self._pending_ack
+        command, error, firmware_update, motion_tasks = self._pending_ack
+        if error is None and motion_tasks:
+            if cortina is None:
+                return
+            for servo_id, task in motion_tasks:
+                if cortina.multiturn_tasks.get(servo_id) is task:
+                    return
+                if task.get('completed') is not True:
+                    reason = task.get('fault_reason') or 'movement_stopped'
+                    details = {
+                        'encoder_stall': 'el encoder no registro avance',
+                        'encoder_read': 'no se pudo leer el encoder',
+                        'movement_timeout': 'se excedio el tiempo maximo de movimiento',
+                        'movement_stopped': 'el movimiento se detuvo antes de alcanzar el objetivo',
+                    }
+                    error = ValueError(details.get(reason, 'el movimiento no alcanzo el objetivo'))
         body = {'deviceId': self.device_id, 'status': 'failed' if error else 'succeeded'}
         if error:
             body['error'] = str(error)[:500]

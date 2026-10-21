@@ -38,6 +38,26 @@ class FakeBus:
         self.calls.append(('move', position, speed, acceleration))
 
 
+class SimulatedWheelBus(FakeBus):
+    MAX_SPEED = 3073
+    MAX_ACCELERATION = 150
+
+    def __init__(self, position, step_counts=16):
+        super().__init__(position)
+        self.step_counts = step_counts
+        self.wheel_speed = 0
+
+    def position(self, _servo_id):
+        if self.wheel_speed:
+            direction = 1 if self.wheel_speed > 0 else -1
+            self.current_position = (self.current_position + direction * self.step_counts) % 4096
+        return self.current_position
+
+    def move_wheel(self, _servo_id, speed, acceleration=50):
+        self.wheel_speed = speed
+        self.calls.append(('wheel', speed, acceleration))
+
+
 def load_cortina_module(name):
     previous_time = sys.modules.get('time')
     previous_stservo = sys.modules.get('stservo')
@@ -252,6 +272,7 @@ class CalibrationCompletionTests(unittest.TestCase):
         controller._last_saved_turns = {1: -3.9253}
         controller._save_persistent_state = lambda: None
 
+        completed_task = controller.multiturn_tasks[1]
         controller.update_multiturn()
 
         self.assertFalse(controller.multiturn_active[1])
@@ -259,6 +280,45 @@ class CalibrationCompletionTests(unittest.TestCase):
         self.assertFalse(controller.blind_config[1]['calibration_motion_fault'])
         self.assertEqual(controller.blind_config[1]['calibration_motion_fault_reason'], '')
         self.assertAlmostEqual(controller.absolute_turns[1], -4.9248, places=4)
+        self.assertTrue(completed_task['completed'])
+
+    def test_absolute_percent_targets_converge_across_encoder_wrap_and_reversals(self):
+        module = load_cortina_module('cortina_realistic_wheel_flow_test')
+        controller = object.__new__(module.Cortina)
+        start_turns = -3.0
+        controller.servo_ids = (1,)
+        controller.direction_reversed = False
+        controller.blind_config = {1: {
+            'rolled_turns': -3.5,
+            'unrolled_turns': -2.5,
+            'motor_side': 'left',
+            'calibrated': True,
+            'calibration_in_progress': False,
+            'calibration_motion_fault': False,
+            'calibration_motion_fault_reason': '',
+        }}
+        controller.position_recovery_required = {1: False}
+        controller.absolute_turns = {1: start_turns}
+        controller.blind_targets = {1: {'percent': 50.0, 'speed': 800, 'acceleration': 50}}
+        controller.multiturn_tasks = {1: None}
+        controller.multiturn_active = {1: False}
+        raw_position = round(start_turns * 4096) % 4096
+        controller.bus = SimulatedWheelBus(raw_position)
+        controller._last_positions = {1: raw_position}
+        controller._last_saved_turns = {1: start_turns}
+        controller._save_persistent_state = lambda: None
+
+        for target_percent in (73, 21, 53):
+            controller.move_blind(1, target_percent)
+            movement = controller.multiturn_tasks[1]
+            for _ in range(200):
+                if not controller.multiturn_active[1]:
+                    break
+                controller.update_multiturn()
+            self.assertFalse(controller.multiturn_active[1])
+            self.assertTrue(movement['completed'])
+            self.assertAlmostEqual(controller.blind_status(1)['percent'], target_percent, delta=0.5)
+            self.assertEqual(controller.blind_targets[1]['percent'], target_percent)
 
 
 if __name__ == '__main__':

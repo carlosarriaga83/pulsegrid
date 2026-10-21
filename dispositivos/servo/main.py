@@ -19,7 +19,7 @@ except ImportError:
     COMMANDS_ENABLED = True
     DIRECTION_REVERSED = False
 
-FIRMWARE_VERSION = '2026.10.21.servo-r27'
+FIRMWARE_VERSION = '2026.10.21.servo-r28'
 FIRMWARE_FILES = ('main.py', 'cloud_client.py', 'board_led.py', 'captive_portal.py', 'cortina.py', 'servo_calibration.py', 'stservo.py', 'boot.py', 'ota_boot.py', 'pulsegrid_ota.py', 'wifi_recovery.py')
 COMMAND_POLL_MS = 1000
 CALIBRATION_COMMAND_POLL_MS = 200
@@ -63,7 +63,7 @@ def build_controller():
     uart = UART(1, baudrate=1000000, bits=8, parity=None, stop=1, rx=18, tx=19)
     i2c = I2C(0, scl=Pin(22), sda=Pin(21), freq=100000)
     controller = cortina_module.Cortina(
-        uart, i2c, min_position=300, max_position=3700, servo_ids=(1, 2),
+        uart, i2c, servo_ids=(1, 2),
         direction_reversed=bool(DIRECTION_REVERSED),
     )
     cortina_module = None
@@ -167,19 +167,19 @@ def main():
                 poll_interval = CALIBRATION_COMMAND_POLL_MS if calibrating else COMMAND_POLL_MS
                 if time.ticks_diff(now, last_cloud_poll) >= poll_interval:
                     last_cloud_poll = now
-                    client.flush_ack()
+                    client.flush_ack(controller)
                     if not client._pending_ack:
                         client.commands(controller, board_led.set_enabled)
             elif not moving:
                 if time.ticks_diff(now, last_cloud_poll) >= COMMAND_POLL_MS:
                     last_cloud_poll = now
-                    client.flush_ack()
+                    client.flush_ack(controller)
                     if not client._pending_ack:
                         client.commands(controller, board_led.set_enabled)
             elif calibrating:
                 if client._pending_ack and time.ticks_diff(now, last_cloud_poll) >= MOVEMENT_STOP_POLL_MS:
                     last_cloud_poll = now
-                    client.flush_ack()
+                    client.flush_ack(controller)
                 if time.ticks_diff(now, last_cloud_poll) >= CALIBRATION_COMMAND_POLL_MS:
                     last_cloud_poll = now
                     client.commands(controller, board_led.set_enabled, priority_only=True)

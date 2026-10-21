@@ -79,7 +79,7 @@ test('cloud exposes explicit no-movement encoder recovery only for online Servo 
   assert.match(cortina, /self\.absolute_turns\[servo_id\] = 0\.0/);
   assert.match(cortina, /self\.blind_config\[servo_id\]\['calibration_in_progress'\] = False/);
   assert.match(cortina, /establece una referencia fiable del encoder antes de mover/);
-  assert.match(fs.readFileSync(path.join(root, '..', 'dispositivos/servo/main.py'), 'utf8'), /servo-r27/);
+  assert.match(fs.readFileSync(path.join(root, '..', 'dispositivos/servo/main.py'), 'utf8'), /servo-r28/);
 });
 
 test('Servo cloud calibration applies limits without starting or polling for movement', () => {
@@ -127,7 +127,7 @@ test('servo firmware accepts cloud estimates only with reliable encoder state an
   assert.match(cortina, /if task\['moved_counts'\] >= task\['target_counts'\]:/);
   assert.match(cortina, /PRECISION_COMPLETION_TOLERANCE_COUNTS = 16/);
   assert.match(cortina, /task\['moved_counts'\] >= task\['target_counts'\] - self\.PRECISION_COMPLETION_TOLERANCE_COUNTS/);
-  assert.match(cortina, /PRECISION_STALL_TIMEOUT_MS = 15000/);
+  assert.match(cortina, /MOVEMENT_STALL_TIMEOUT_MS = 15000/);
   assert.match(cortina, /if delta != 0:[\s\S]*?task\['last_progress_at'\] = time\.ticks_ms\(\)/);
   assert.match(cortina, /fault_reason='encoder_stall'/);
   assert.match(cortina, /fault_reason='encoder_read'/);
@@ -154,8 +154,8 @@ test('servo firmware accepts cloud estimates only with reliable encoder state an
   assert.match(main, /elif moving:[\s\S]*?board_led\.set_status\('moving'\)/);
   assert.match(led, /'moving': \(0, 0, 24\)/);
   assert.match(main, /time\.sleep_ms\(10\)/);
-  assert.match(cloudClient, /def flush_ack\(self\):[\s\S]*?_pending_ack = self\._deferred_acks\.pop\(0\) if self\._deferred_acks else None/);
-  assert.match(cloudClient, /ack = \(command, error, firmware_update\)[\s\S]*?self\._pending_ack = ack/);
+  assert.match(cloudClient, /def flush_ack\(self, cortina=None\):[\s\S]*?_pending_ack = self\._deferred_acks\.pop\(0\) if self\._deferred_acks else None/);
+  assert.match(cloudClient, /ack = \(command, error, firmware_update, motion_tasks\)[\s\S]*?self\._pending_ack = ack/);
   assert.doesNotMatch(cloudClient, /_thread|start_background|_network_loop/);
 });
 

@@ -10,16 +10,9 @@ class Cortina:
     APPROACH_SPEED = 120
     CALIBRATION_STEP_SPEED = 240
     PRECISION_COMPLETION_TOLERANCE_COUNTS = 16
-    PRECISION_STALL_TIMEOUT_MS = 15000
-    FRONT_GEAR_CLOCKWISE_TURNS = -1
-    FRONT_GEAR_COUNTERCLOCKWISE_TURNS = 1
-
-    def __init__(self, uart, i2c=None, min_position=300, max_position=3700, servo_ids=(1, 2), direction_reversed=False):
-        if not 0 <= min_position < max_position <= 4095:
-            raise ValueError('limites de posicion invalidos')
+    MOVEMENT_STALL_TIMEOUT_MS = 15000
+    def __init__(self, uart, i2c=None, servo_ids=(1, 2), direction_reversed=False):
         self.bus = STServoBus(uart)
-        self.min_position = min_position
-        self.max_position = max_position
         self.direction_reversed = bool(direction_reversed)
         self.known_servo_ids = tuple(servo_ids)
         self.absolute_turns = {servo_id: 0.0 for servo_id in self.known_servo_ids}
@@ -208,7 +201,7 @@ class Cortina:
                     self.absolute_turns[servo_id] = task['start_turns'] + task['net_counts'] / self.COUNTS_PER_TURN
                     if task['moved_counts'] >= task['target_counts'] - self.PRECISION_COMPLETION_TOLERANCE_COUNTS:
                         self._finish_multiturn(servo_id, completed=True)
-                    elif time.ticks_diff(time.ticks_ms(), task['last_progress_at']) >= self.PRECISION_STALL_TIMEOUT_MS:
+                    elif time.ticks_diff(time.ticks_ms(), task['last_progress_at']) >= self.MOVEMENT_STALL_TIMEOUT_MS:
                         self._finish_multiturn(servo_id, timed_out=True, fault_reason='encoder_stall')
                     elif time.ticks_diff(time.ticks_ms(), task['started_at']) >= task['timeout_ms']:
                         self._finish_multiturn(servo_id, timed_out=True, fault_reason='movement_timeout')
@@ -216,24 +209,27 @@ class Cortina:
                 position = self.bus.position(servo_id)
             except (STServoError, OSError):
                 task = self.multiturn_tasks[servo_id]
-                if task is not None and task.get('position_mode'):
+                if task is not None:
                     now = time.ticks_ms()
                     if task['encoder_read_error_at'] is None:
                         task['encoder_read_error_at'] = now
                     elif time.ticks_diff(now, task['encoder_read_error_at']) >= 3000:
                         self._finish_multiturn(servo_id, timed_out=True, fault_reason='encoder_read')
-                elif task is not None and time.ticks_diff(time.ticks_ms(), task['started_at']) >= task['timeout_ms']:
-                    self._finish_multiturn(servo_id, timed_out=True, fault_reason='movement_timeout')
                 continue
             delta = self._track_position(servo_id, position)
             task = self.multiturn_tasks[servo_id]
             if task is None:
                 continue
+            task['encoder_read_error_at'] = None
+            if delta != 0:
+                task['last_progress_at'] = time.ticks_ms()
             task['moved_counts'] += delta * task['direction']
             if task['moved_counts'] >= task['target_counts']:
                 self._finish_multiturn(servo_id, completed=True)
+            elif time.ticks_diff(time.ticks_ms(), task['last_progress_at']) >= self.MOVEMENT_STALL_TIMEOUT_MS:
+                self._finish_multiturn(servo_id, timed_out=True, fault_reason='encoder_stall')
             elif time.ticks_diff(time.ticks_ms(), task['started_at']) >= task['timeout_ms']:
-                self._finish_multiturn(servo_id, timed_out=True)
+                self._finish_multiturn(servo_id, timed_out=True, fault_reason='movement_timeout')
             elif abs(self.absolute_turns[servo_id] - self._last_saved_turns[servo_id]) >= 0.5:
                 self._last_saved_turns[servo_id] = self.absolute_turns[servo_id]
                 checkpoint = True
@@ -263,10 +259,15 @@ class Cortina:
             pass
         if completed and task.get('position_mode'):
             self.absolute_turns[servo_id] = task['start_turns'] + task['net_counts'] / self.COUNTS_PER_TURN
+        if not fault_reason:
+            fault_reason = 'movement_timeout' if timed_out else 'movement_stopped' if not completed else ''
+        task['completed'] = bool(completed)
+        task['timed_out'] = bool(timed_out)
+        task['fault_reason'] = fault_reason
         self.multiturn_tasks[servo_id] = None
         self.multiturn_active[servo_id] = False
         self.position_recovery_required[servo_id] = not (completed and self.blind_config[servo_id]['calibrated'])
-        if timed_out:
+        if timed_out and self.blind_config[servo_id].get('calibration_in_progress'):
             self.blind_config[servo_id]['calibration_motion_fault'] = True
             self.blind_config[servo_id]['calibration_motion_fault_reason'] = fault_reason or 'movement_timeout'
         self._last_saved_turns[servo_id] = self.absolute_turns[servo_id]
@@ -294,7 +295,6 @@ class Cortina:
             self._last_positions[servo_id] = start_position
             direction = 1 if turns > 0 else -1
             target_counts = int(round(abs(turns) * self.COUNTS_PER_TURN))
-            target_position = start_position + direction * target_counts
             self.bus.move_multiturn(servo_id, turns, start_position, speed, acceleration)
         except (STServoError, OSError, ValueError):
             try:
@@ -316,7 +316,6 @@ class Cortina:
             'timeout_ms': max(15000, int(target_counts / max(speed, 1) * 5000 + 10000)),
             'start_turns': self.absolute_turns[servo_id],
             'start_position': start_position,
-            'target_position': target_position,
             'speed': speed,
             'acceleration': acceleration,
             'position_mode': True,
@@ -347,15 +346,14 @@ class Cortina:
             'target_counts': int(round(abs(turns) * self.COUNTS_PER_TURN)),
             'moved_counts': 0,
             'started_at': time.ticks_ms(),
+            'last_progress_at': time.ticks_ms(),
+            'encoder_read_error_at': None,
             'timeout_ms': max(5000, int(abs(turns) * self.COUNTS_PER_TURN / max(speed, 1) * 2500 + 3000)),
         }
         self.multiturn_active[servo_id] = True
         self.position_recovery_required[servo_id] = True
         self.bus.move_wheel(servo_id, direction * speed, acceleration=acceleration)
         self._save_persistent_state()
-
-    def mover_vueltas(self, servo_id, turns, speed=800, acceleration=50):
-        self._start_multiturn(servo_id, turns, speed, acceleration)
 
     def _calibrated_target(self, servo_id, percent):
         config = self.blind_config[servo_id]
@@ -380,21 +378,10 @@ class Cortina:
         if not config['calibrated']:
             raise ValueError('aplica la calibracion geometrica antes de mover la persiana')
         self.update_multiturn()
-        if config['calibrated']:
-            target_turns = self._calibrated_target(servo_id, percent)
-            turns = target_turns - self.absolute_turns[servo_id]
-            if abs(turns) > 0.001:
-                self._start_multiturn(servo_id, turns, speed, acceleration)
-        else:
-            target = self.min_position + (self.max_position - self.min_position) * percent / 100
-            if self.direction_reversed:
-                target = self.min_position + self.max_position - target
-            if abs(self.bus.position(servo_id) - target) <= 8:
-                self.blind_targets[servo_id] = {'percent': percent, 'speed': int(speed), 'acceleration': int(acceleration)}
-                self._save_persistent_state()
-                return
-            self.bus.torque(servo_id, True)
-            self.bus.move(servo_id, int(round(target)), speed=int(speed), acceleration=int(acceleration))
+        target_turns = self._calibrated_target(servo_id, percent)
+        turns = target_turns - self.absolute_turns[servo_id]
+        if abs(turns) > 0.001:
+            self._start_multiturn(servo_id, turns, speed, acceleration)
         self.blind_targets[servo_id] = {'percent': percent, 'speed': int(speed), 'acceleration': int(acceleration)}
         self._save_persistent_state()
 

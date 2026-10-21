@@ -141,6 +141,45 @@ class CloudClientConnectionTests(unittest.TestCase):
         self.client._execute_command(curtain, None, {'name': 'curtain.move', 'payload': {'servoId': 2, 'percent': 35}})
         self.assertEqual(curtain.moves, [(2, 35.0, 800, 50)])
 
+    def test_motion_ack_reports_encoder_timeout_as_failed_instead_of_succeeded(self):
+        class FakeCurtain:
+            servo_ids = (1,)
+            blind_config = {1: {'calibration_in_progress': False}}
+
+            def __init__(self):
+                self.multiturn_tasks = {1: None}
+                self.multiturn_active = {1: False}
+
+            def move_blind(self, _servo_id, _percent, _speed, _acceleration):
+                self.multiturn_tasks[1] = {'target_counts': 700}
+                self.multiturn_active[1] = True
+
+        def http_response(payload):
+            body = json.dumps(payload).encode()
+            return b'HTTP/1.1 200 OK\r\nContent-Length: ' + str(len(body)).encode() + b'\r\nConnection: close\r\n\r\n' + body
+
+        curtain = FakeCurtain()
+        FakeSocket.responses = [http_response({'command': {
+            'id': 'move-1', 'name': 'curtain.move', 'payload': {'percent': 53},
+        }})]
+        self.client.commands(curtain, None)
+        self.assertIsNotNone(self.client._pending_ack)
+        self.assertEqual(len(self.client._pending_ack[3]), 1)
+
+        self.client.flush_ack(curtain)
+        self.assertEqual(len(FakeSocket.instances), 1, 'ACK must wait for the movement result')
+
+        task = curtain.multiturn_tasks[1]
+        task.update({'completed': False, 'timed_out': True, 'fault_reason': 'movement_timeout'})
+        curtain.multiturn_tasks[1] = None
+        curtain.multiturn_active[1] = False
+        FakeSocket.responses = [http_response({'ok': True})]
+        self.client.flush_ack(curtain)
+
+        ack_request = b''.join(FakeSocket.instances[-1].requests)
+        self.assertIn(b'"status": "failed"', ack_request)
+        self.assertIn(b'"error": "se excedio el tiempo maximo de movimiento"', ack_request)
+
     @staticmethod
     def response(connection='keep-alive', chunked=False):
         if chunked:
