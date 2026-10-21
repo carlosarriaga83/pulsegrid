@@ -1550,11 +1550,11 @@ function renderCalibrationWizard() {
   const supportsServo = targetModel === 'servo' || (!targetModel && !/ga25/i.test(identity));
   const supportsGa25 = targetModel === 'ga25' || (!targetModel && /ga25/i.test(identity));
   if (!supportsServo && !supportsGa25) { $('#calibration-wizard')?.remove(); return; }
-  if ($('#calibration-wizard')) return;
   if (supportsServo && typeof window.mountCloudBlindCalibrationWizard === 'function') {
     window.mountCloudBlindCalibrationWizard({ $, apiRequest, loadDevices, waitForCalibrationCommand, showToast, renderIcons, devices: () => devices, parseTelemetry });
     return;
   }
+  if ($('#calibration-wizard')) return;
   if (typeof window.mountBlindCalibrationWizard !== 'function') return;
   const getCalibrationDeviceModel = () => {
     const device = devices.find((item) => item.id === $('#command-device')?.value);

@@ -57,6 +57,8 @@ test('cloud exposes confirmed clean calibration reset only for online Servo r32+
   const root = path.join(__dirname, '..');
   for (const folder of ['', 'public', 'public_html', 'legacy-root']) {
     const ui = fs.readFileSync(path.join(root, folder, 'cloud-blind-calibration-ui.js'), 'utf8');
+    const app = fs.readFileSync(path.join(root, folder, 'app.js'), 'utf8');
+    const html = fs.readFileSync(path.join(root, folder, 'index.html'), 'utf8');
     assert.match(ui, /blind\.encoderReferenceRecover/);
     assert.match(ui, /device\?\.status !== 'online'/);
     assert.match(ui, /servo-r\(\\d\+\)/);
@@ -69,10 +71,16 @@ test('cloud exposes confirmed clean calibration reset only for online Servo r32+
     assert.match(ui, /blind_calibrated === false/);
     assert.match(ui, /blind_target_percent\) === 50/);
     assert.match(ui, /recover\.hidden = !isServo/);
+    assert.match(ui, /function mountCleanResetControl\(context, wizard\)/);
+    assert.match(ui, /if \(existingWizard\)[\s\S]*?mountCleanResetControl\(context, existingWizard\)/);
     assert.match(ui, /servo\?\.multiturn_active === true/);
     assert.match(ui, /Coloca manualmente la cortina cerca de la mitad/);
     assert.match(ui, /No se envió ningún comando/);
     assert.match(ui, /apply\.disabled = !device \|\| device\.status !== 'online'/);
+    const renderWizard = app.slice(app.indexOf('function renderCalibrationWizard()'), app.indexOf('\nfunction ', app.indexOf('function renderCalibrationWizard()') + 10));
+    assert.ok(renderWizard.indexOf('mountCloudBlindCalibrationWizard') < renderWizard.indexOf("if ($('#calibration-wizard')) return;"), `${folder || 'cloud root'} calls reset injector before returning for an existing wizard`);
+    assert.match(html, /cloud-blind-calibration-ui\.js\?v=5/);
+    assert.match(html, /app\.js\?v=68/);
   }
   const server = fs.readFileSync(path.join(root, 'server.js'), 'utf8');
   assert.match(server, /function validateServoEncoderReference\(/);

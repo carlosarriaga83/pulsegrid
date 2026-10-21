@@ -83,9 +83,10 @@ function languageExamplesMarkup() {
 function renderWikiPage(key) {
   const page = wikiPages[key];
   const content = $('#wiki-content');
-  if (!page || !content) return;
+  if (!page || !content) return; 
   content.innerHTML = key === 'intro' ? introGuideMarkup() : `<div class="docs-section"><span class="step-number">${String(Object.keys(wikiPages).indexOf(key) + 1).padStart(2, '0')}</span><div><h2>${page[0]}</h2><p>${page[1]}</p><div class="endpoint"><span class="method ${page[2] === 'MQTT' ? 'mqtt' : 'post'}">${page[2]}</span><code>${page[3]}</code><button class="copy-button" data-copy="${page[3]}"><i data-lucide="copy"></i> Copiar</button></div><div class="code-block wiki-code"><pre><code>const endpoint = '${page[3]}';
 fetch(endpoint, { method: '${page[2] === 'MQTT' ? 'SUBSCRIBE' : 'POST'}' });</code></pre></div></div></div>`;
+  if ($('#calibration-wizard')) return;
   $$('.wiki-link').forEach((item) => item.classList.toggle('active', item.dataset.wiki === key));
   bindCopyButtons();
   bindWikiApiControls();
@@ -1678,11 +1679,11 @@ function renderCalibrationWizard() {
   const supportsServo = targetModel === 'servo' || (!targetModel && !/ga25/i.test(identity));
   const supportsGa25 = targetModel === 'ga25' || (!targetModel && /ga25/i.test(identity));
   if (!supportsServo && !supportsGa25) { $('#calibration-wizard')?.remove(); return; }
-  if ($('#calibration-wizard')) return;
   if (supportsServo && typeof window.mountCloudBlindCalibrationWizard === 'function') {
     window.mountCloudBlindCalibrationWizard({ $, apiRequest, loadDevices, waitForCalibrationCommand, showToast, renderIcons, devices: () => devices, parseTelemetry });
     return;
   }
+  if ($('#calibration-wizard')) return;
   if (typeof window.mountBlindCalibrationWizard !== 'function') return;
   const getCalibrationDeviceModel = () => {
     const device = devices.find((item) => item.id === $('#command-device')?.value);

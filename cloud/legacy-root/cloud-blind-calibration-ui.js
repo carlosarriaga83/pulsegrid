@@ -1,9 +1,80 @@
 (function (root) {
   'use strict';
+  function mountCleanResetControl(context, wizard) {
+    const { $, apiRequest, loadDevices, waitForCalibrationCommand } = context;
+    const buttonId = 'calibration-recover-reference';
+    let recover = $(`#${buttonId}`);
+    if (!recover) {
+      const anchor = wizard.querySelector('#calibration-apply, #calibration-start, .calibration-settings');
+      if (!anchor) return;
+      anchor.insertAdjacentHTML(anchor.matches('.calibration-settings') ? 'afterend' : 'beforebegin',
+        `<button class="secondary-button full-width" id="${buttonId}" type="button">Reiniciar calibración y referencia aquí (cortina centrada)</button>`);
+      recover = $(`#${buttonId}`);
+    }
+    if (recover.dataset.resetControlBound === 'true') return;
+    recover.dataset.resetControlBound = 'true';
+    const status = $('#calibration-status', wizard);
+    const selectedState = () => {
+      const deviceId = $('#command-device')?.value;
+      const device = context.devices().find((item) => item.id === deviceId);
+      const telemetry = context.parseTelemetry(device?.telemetry) || {};
+      const servoId = Number($('#calibration-servo', wizard)?.value || 1);
+      return { device, telemetry, servoId, servo: telemetry.servos?.[String(servoId)] || telemetry.servos?.[servoId] };
+    };
+    const supportsReset = (version) => {
+      const match = String(version || '').match(/servo-r(\d+)$/i);
+      return Boolean(match && Number(match[1]) >= 32);
+    };
+    const waitForCleanState = async (deviceId, servoId) => {
+      for (let attempt = 0; attempt < 12; attempt += 1) {
+        await loadDevices();
+        const device = context.devices().find((item) => item.id === deviceId);
+        const telemetry = context.parseTelemetry(device?.telemetry) || {};
+        const servo = telemetry.servos?.[String(servoId)] || telemetry.servos?.[servoId];
+        if (servo?.position_recovery_required === false && servo?.blind_calibrated === false
+          && Number(servo?.absolute_turns) === 0 && Number(servo?.blind_target_percent) === 50) return;
+        await new Promise((resolve) => window.setTimeout(resolve, 500));
+      }
+      throw new Error('El dispositivo confirmó el comando, pero no publicó el estado limpio esperado.');
+    };
+    const updateButton = () => {
+      const { device, telemetry, servo } = selectedState();
+      const isServo = String(telemetry.firmwareTarget || '').toLowerCase() === 'servo';
+      recover.hidden = !isServo;
+      recover.disabled = !isServo || !servo || device?.status !== 'online'
+        || !supportsReset(telemetry.firmwareVersion) || servo?.multiturn_active === true;
+      if (status && isServo && !supportsReset(telemetry.firmwareVersion)) {
+        status.textContent = `El reset limpio requiere Servo r32 o posterior; está instalado ${telemetry.firmwareVersion || 'un firmware desconocido'}.`;
+      }
+    };
+    recover.addEventListener('click', async () => {
+      const { device, telemetry, servoId, servo } = selectedState();
+      try {
+        if (!device || device.status !== 'online') throw new Error('El dispositivo está fuera de línea.');
+        if (!supportsReset(telemetry.firmwareVersion)) throw new Error('Actualiza a Servo r32 o posterior para usar el reset limpio.');
+        if (servo?.multiturn_active === true) throw new Error('Espera a que termine el movimiento.');
+        if (!window.confirm('Esto borrará medidas, límites y objetivos de este servo. Coloca la cortina cerca de la mitad. El motor no se moverá. ¿Continuar?')) return;
+        recover.disabled = true;
+        if (status) status.textContent = 'Borrando calibración anterior y guardando una referencia nueva…';
+        const result = await apiRequest('commands', { method: 'POST', body: JSON.stringify({ deviceId: device.id, command: 'blind.encoderReferenceRecover', payload: { servoId, atMidpoint: true } }) });
+        await waitForCalibrationCommand(result.commandId);
+        await waitForCleanState(device.id, servoId);
+        if (status) status.textContent = 'Reset completo. Aplica ahora las nuevas medidas geométricas.';
+      } catch (error) { if (status) status.textContent = error.message; }
+      finally { updateButton(); }
+    });
+    $('#calibration-servo', wizard)?.addEventListener('change', updateButton);
+    $('#command-device')?.addEventListener('change', updateButton);
+    window.setInterval(updateButton, 2000);
+    updateButton();
+  }
+
   function mountCloudBlindCalibrationWizard(context) {
     const { $, apiRequest, loadDevices, waitForCalibrationCommand, showToast, renderIcons } = context;
     const layout = $('.command-calibration-layout');
-    if (!layout || $('#calibration-wizard')) return;
+    if (!layout) return;
+    const existingWizard = $('#calibration-wizard');
+    if (existingWizard) { mountCleanResetControl(context, existingWizard); return; }
     layout.insertAdjacentHTML('beforeend', `<div class="panel calibration-wizard" id="calibration-wizard"><div class="panel-heading"><div><h2>Calibración geométrica</h2><p>El cloud calcula el recorrido y envía los límites estimados al servo.</p></div><span class="secure-badge">Cloud-first</span></div><div class="calibration-settings"><label>Alto de ventana (cm)<input id="calibration-height" type="number" min="20" max="1000" step="0.1" value="150"></label><label>Diámetro exterior del tubo (cm)<input id="calibration-diameter" type="number" min="1" max="30" step="0.1" value="5"></label><label>Grosor del paño (mm)<input id="calibration-thickness" type="number" min="0.01" max="5" step="0.01" value="0.5"></label><label>Vueltas motor por vuelta de tubo<input id="calibration-ratio" type="number" min="0.1" max="20" step="0.01" value="1"></label><label>Servo<select id="calibration-servo"><option value="1">Servo 1</option><option value="2">Servo 2</option></select></label></div><div class="blind-calibration-readout"><span>Recorrido geométrico estimado</span><strong id="calibration-estimate">Ingresa las medidas</strong><span id="calibration-limit" class="calibration-progress">Límites operativos: 80% del cálculo, centrados en la posición actual.</span></div><p class="calibration-safety-note"><strong>Antes de aplicar:</strong> coloca manualmente la cortina cerca de la mitad del recorrido y verifica visualmente las medidas. El cálculo no detecta topes, fuerza ni atascos; los límites son estimados y conservadores. Corrige el sentido desde el toggle del dispositivo si hace falta.</p><p id="calibration-status" class="form-status" aria-live="polite">Introduce las medidas para calcular el recorrido.</p><button class="primary-button full-width" id="calibration-apply" type="button">Aplicar calibración desde el cloud</button></div>`);
     $('#calibration-apply').insertAdjacentHTML('beforebegin', '<button class="secondary-button full-width" id="calibration-recover-reference" type="button" hidden>Reiniciar calibración y referencia aquí (cortina centrada)</button>');
     const get = (id) => $(`#${id}`), status = get('calibration-status');
