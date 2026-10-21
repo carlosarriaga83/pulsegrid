@@ -406,7 +406,7 @@ class CalibrationCompletionTests(unittest.TestCase):
         controller.blind_targets = {1: {'percent': 50.0, 'speed': 800, 'acceleration': 50}}
         controller.multiturn_tasks = {1: None}
         controller.multiturn_active = {1: False}
-        controller.bus = SimulatedWheelBus(raw_position, step_counts=16, coast_counts=64)
+        controller.bus = SimulatedWheelBus(raw_position, step_counts=16, coast_counts=260)
         controller._last_positions = {1: raw_position}
         controller._last_saved_turns = {1: start_turns}
         controller._save_persistent_state = lambda: None
@@ -425,6 +425,54 @@ class CalibrationCompletionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'referencia fiable'):
             controller.move_blind(1, 0)
         self.assertEqual([call for call in controller.bus.calls if call[0] == 'wheel'], wheel_commands_before_retry)
+
+    def test_twenty_degree_coast_is_accepted_and_next_absolute_setpoint_uses_actual_encoder(self):
+        module = load_cortina_module('cortina_twenty_degree_tolerance_test')
+        controller = object.__new__(module.Cortina)
+        start_turns = -3.0
+        raw_position = round(start_turns * 4096) % 4096
+        controller.servo_ids = (1,)
+        controller.direction_reversed = False
+        controller.blind_config = {1: {
+            'rolled_turns': -3.5,
+            'unrolled_turns': -2.5,
+            'motor_side': 'left',
+            'calibrated': True,
+            'calibration_in_progress': False,
+            'calibration_motion_fault': False,
+            'calibration_motion_fault_reason': '',
+        }}
+        controller.position_recovery_required = {1: False}
+        controller.absolute_turns = {1: start_turns}
+        controller.blind_targets = {1: {'percent': 50.0, 'speed': 800, 'acceleration': 50}}
+        controller.multiturn_tasks = {1: None}
+        controller.multiturn_active = {1: False}
+        tolerance = module.Cortina.MOVEMENT_POSITION_TOLERANCE_COUNTS
+        controller.bus = SimulatedWheelBus(raw_position, step_counts=16, coast_counts=tolerance - 8)
+        controller._last_positions = {1: raw_position}
+        controller._last_saved_turns = {1: start_turns}
+        controller._save_persistent_state = lambda: None
+
+        controller.move_blind(1, 60)
+        first_task = controller.multiturn_tasks[1]
+        first_target = first_task['target_turns']
+        for _ in range(5000):
+            if not controller.multiturn_active[1]:
+                break
+            controller.update_multiturn()
+
+        self.assertTrue(first_task['completed'])
+        self.assertFalse(controller.position_recovery_required[1])
+        self.assertGreater(abs(controller.absolute_turns[1] - first_target) * 4096, 0)
+        self.assertLessEqual(abs(controller.absolute_turns[1] - first_target) * 4096, tolerance)
+
+        before_second = controller.absolute_turns[1]
+        controller.bus.coast_counts = 0
+        controller.move_blind(1, 61)
+        second_task = controller.multiturn_tasks[1]
+        self.assertAlmostEqual(second_task['target_turns'], controller._calibrated_target(1, 61))
+        self.assertEqual(1 if second_task['direction'] > 0 else -1,
+                         1 if second_task['target_turns'] - before_second > 0 else -1)
 
 
 if __name__ == '__main__':

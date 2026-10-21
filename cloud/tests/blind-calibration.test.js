@@ -94,7 +94,7 @@ test('cloud exposes confirmed clean calibration reset only for online Servo r32+
   assert.match(cortina, /self\.absolute_turns\[servo_id\] = 0\.0/);
   assert.match(cortina, /'calibration_in_progress': False/);
   assert.match(cortina, /recupera el punto medio desde Pulsegrid y vuelve a aplicar la calibracion geometrica antes de mover/);
-  assert.match(fs.readFileSync(path.join(root, '..', 'dispositivos/servo/main.py'), 'utf8'), /servo-r32/);
+  assert.match(fs.readFileSync(path.join(root, '..', 'dispositivos/servo/main.py'), 'utf8'), /servo-r33/);
 });
 
 test('Servo cloud calibration applies limits without starting or polling for movement', () => {
@@ -158,7 +158,7 @@ test('servo firmware accepts cloud estimates only with reliable encoder state an
   assert.match(cortina, /APPROACH_COUNTS = COUNTS_PER_TURN \/\/ 16/);
   assert.match(cortina, /task\['target_counts'\] - task\['moved_counts'\] <= self\.APPROACH_COUNTS/);
   assert.match(cortina, /fault_reason = 'position_overshoot'/);
-  assert.match(cortina, /MOVEMENT_POSITION_TOLERANCE_COUNTS = 16/);
+  assert.match(cortina, /MOVEMENT_POSITION_TOLERANCE_COUNTS = int\(COUNTS_PER_TURN \* 20 \/ 360 \+ 0\.5\)/);
   const stservo = fs.readFileSync(path.join(root, 'dispositivos/servo/stservo.py'), 'utf8');
   assert.match(stservo, /def move_multiturn\(self, servo_id, turns, current_position=0, speed=800, acceleration=50\):/);
   assert.match(stservo, /encoded_target = abs\(target\) \| \(\(1 << 15\) if target < 0 else 0\)/);

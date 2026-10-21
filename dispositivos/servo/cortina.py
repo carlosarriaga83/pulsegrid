@@ -12,7 +12,9 @@ class Cortina:
     CALIBRATION_STEP_SPEED = 240
     PRECISION_COMPLETION_TOLERANCE_COUNTS = 16
     APPROACH_COUNTS = COUNTS_PER_TURN // 16
-    MOVEMENT_POSITION_TOLERANCE_COUNTS = 16
+    # Accept up to 20 degrees of rotor coast after wheel-mode stop; this is
+    # about 5.6% of a turn and should not invalidate the encoder reference.
+    MOVEMENT_POSITION_TOLERANCE_COUNTS = int(COUNTS_PER_TURN * 20 / 360 + 0.5)
     MOVEMENT_STALL_TIMEOUT_MS = 15000
     POSITION_TOLERANCE_PERCENT = 0.05
     def __init__(self, uart, i2c=None, servo_ids=(1, 2), direction_reversed=False):

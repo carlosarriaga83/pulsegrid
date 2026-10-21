@@ -137,7 +137,7 @@ test('ESP firmware supports three-boot Wi-Fi recovery and faster command polling
   }
   assert.match(servoMain, /recovery_mode = wifi_recovery\.register_boot\(count_reset\)/);
   assert.match(servoMain, /reset_cause in \(getattr\(machine, 'PWRON_RESET', 1\), getattr\(machine, 'HARD_RESET', 2\)\)/);
-  assert.match(servoMain, /FIRMWARE_VERSION = '2026\.10\.21\.servo-r32'/);
+  assert.match(servoMain, /FIRMWARE_VERSION = '2026\.10\.21\.servo-r33'/);
   assert.match(servoMain, /if not connected and wifi_connect_pending:[\s\S]*?while \(not connected[\s\S]*?WIFI_CONNECT_TIMEOUT_MS\):\s+time\.sleep_ms\(100\)\s+connected = wlan\.isconnected\(\)/);
   assert.match(servoMain, /if recovery_mode:\s+try:\s+wlan\.disconnect\(\)\s+wlan\.active\(False\)/);
   assert.match(servoMain, /local_portal_enabled = recovery_mode or not connected or not DEVICE_CODE\s+if local_portal_enabled:\s+captive_portal\.start_background\(controller, recovery_mode\)/);

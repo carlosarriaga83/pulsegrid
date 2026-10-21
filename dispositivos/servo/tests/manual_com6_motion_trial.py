@@ -6,7 +6,7 @@ from cortina import Cortina
 from cloud_client import CloudClient
 
 EXPECTED_DEVICE_ID = 'PULSE_2805A5C2A310'
-EXPECTED_FIRMWARE = '2026.10.21.servo-r32'
+EXPECTED_FIRMWARE = '2026.10.21.servo-r33'
 SERVO_ID = 1
 SPEED = 800
 ACCELERATION = 50
