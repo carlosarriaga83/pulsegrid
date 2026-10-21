@@ -754,6 +754,35 @@ function deviceDirectionMarkup() {
   return '';
 }
 
+function curtainPositionValue(device) {
+  const telemetry = parseTelemetry(device.telemetry);
+  if (String(telemetry.firmwareTarget || '').toLowerCase() === 'servo') {
+    const values = Object.values(telemetry.servos || {}).map((servo) => Number(servo.blind_percent)).filter(Number.isFinite);
+    return values.length ? values.reduce((total, value) => total + value, 0) / values.length : null;
+  }
+  const value = Number(telemetry.position);
+  return Number.isFinite(value) ? value : null;
+}
+
+function deviceCurtainPositionMarkup(device) {
+  if (!AutomationModel.curtain(device) || device.provider === 'tuya') return '';
+  const telemetry = parseTelemetry(device.telemetry);
+  const reported = curtainPositionValue(device);
+  if (reported === null) return '';
+  const state = deviceUiState();
+  const key = `${device.id}\u0000curtainPosition`;
+  const optimistic = state.optimistic.get(key);
+  const value = optimistic && optimistic.expiresAt > Date.now() ? optimistic.value : reported;
+  if (optimistic && Math.abs(Number(optimistic.value) - reported) < 1) state.optimistic.delete(key);
+  else if (optimistic && optimistic.expiresAt <= Date.now()) state.optimistic.delete(key);
+  const isServo = String(telemetry.firmwareTarget || '').toLowerCase() === 'servo';
+  const servos = Object.values(telemetry.servos || {});
+  const servoReady = !isServo || (servos.length > 0 && servos.every((servo) => servo.blind_calibrated === true && servo.position_recovery_required === false && servo.blind_calibration_in_progress !== true));
+  const enabled = device.status === 'online' && servoReady;
+  const reason = device.status !== 'online' ? 'Fuera de línea' : !servoReady ? 'Requiere calibración y referencia fiable' : '';
+  return `<div class="device-curtain-position"><label for="curtain-position-${escapeTelemetryHtml(device.id)}">Apertura</label><div class="device-curtain-position-control"><input id="curtain-position-${escapeTelemetryHtml(device.id)}" type="range" min="0" max="100" step="1" value="${Math.round(value)}" data-curtain-position data-device-id="${escapeTelemetryHtml(device.id)}" aria-label="Porcentaje de apertura de ${escapeTelemetryHtml(device.name)}"${enabled ? '' : ' disabled'}><output>${Math.round(value)}%</output><small data-curtain-position-status role="status" aria-live="polite">${reason || 'Actual'}</small></div></div>`;
+}
+
 function deviceDirectionParameterMarkup(device) {
   if (device.provider === 'tuya' || !AutomationModel.curtain(device)) return '';
   const telemetry = parseTelemetry(device.telemetry);
@@ -824,14 +853,14 @@ function renderDeviceCards(filter = deviceCardFilter, status = deviceCardStatus)
   deviceCardFilter = filter;
   deviceCardStatus = status;
   const uiState = deviceUiState();
-  if (grid.contains(document.activeElement) && document.activeElement.matches('[data-device-control], [data-device-direction]')) return;
+  if (grid.contains(document.activeElement) && document.activeElement.matches('[data-device-control], [data-device-direction], [data-curtain-position]')) return;
   if ([...uiState.pending].some((deviceId) => grid.querySelector(`[data-device-card="${CSS.escape(deviceId)}"]`))) return;
   const filtered = devices.filter((device) => {
     const matchesSearch = `${device.name} ${device.id}`.toLowerCase().includes(filter.toLowerCase());
     const matchesStatus = status === 'all' || device.status === status;
     return matchesSearch && matchesStatus;
   });
-  grid.innerHTML = filtered.length ? filtered.map((device) => { const open = uiState.openIds.has(device.id); return `<article class="device-card" data-device-card="${escapeTelemetryHtml(device.id)}"><div class="device-card-header"><button type="button" class="device-card-toggle" data-device-toggle="${escapeTelemetryHtml(device.id)}" aria-expanded="${String(open)}"><span class="device-card-top"><span class="device-icon status-${['online', 'provisioning'].includes(device.status) ? device.status : 'offline'}"><i data-lucide="${device.icon}"></i></span><span class="device-card-status">${deviceStatus(device)}</span></span><strong>${escapeTelemetryHtml(device.name)}</strong><span class="device-card-id">UID: ${escapeTelemetryHtml(device.id)}</span><span class="device-card-type">${escapeTelemetryHtml(device.type)}</span><span class="device-status ${device.status}"><i data-lucide="clock-3"></i> Ultimo reporte: ${escapeTelemetryHtml(device.report)}</span><span class="device-meta">${device.meta.map((item) => `<span><i data-lucide="${item.icon}"></i> ${item.text}</span>`).join('')}</span></button><div class="device-card-actions"><button type="button" class="row-menu" data-device-menu="${escapeTelemetryHtml(device.id)}" title="Gestionar ${escapeTelemetryHtml(device.name)}" aria-label="Gestionar ${escapeTelemetryHtml(device.name)}"><i data-lucide="more-vertical"></i></button><button type="button" class="device-card-telemetry" data-device-telemetry-today="${escapeTelemetryHtml(device.id)}" title="Ver telemetria de hoy" aria-label="Ver telemetria de hoy de ${escapeTelemetryHtml(device.name)}"><i data-lucide="chart-no-axes-combined"></i></button><button type="button" class="device-card-expand" data-device-toggle="${escapeTelemetryHtml(device.id)}" aria-expanded="${String(open)}" title="${open ? 'Ocultar' : 'Mostrar'} parametros y funciones" aria-label="${open ? 'Ocultar' : 'Mostrar'} parametros y funciones"><i data-lucide="chevron-down"></i></button></div></div><div class="device-card-content"${open ? '' : ' hidden'}>${deviceDirectionMarkup(device)}${deviceQuickCommandMarkup(device)}${deviceParameterMarkup(device)}</div></article>`; }).join('') : '<div class="panel" style="padding:30px;color:var(--muted)">No encontramos dispositivos con ese criterio.</div>';
+  grid.innerHTML = filtered.length ? filtered.map((device) => { const open = uiState.openIds.has(device.id); return `<article class="device-card" data-device-card="${escapeTelemetryHtml(device.id)}"><div class="device-card-header"><button type="button" class="device-card-toggle" data-device-toggle="${escapeTelemetryHtml(device.id)}" aria-expanded="${String(open)}"><span class="device-card-top"><span class="device-icon status-${['online', 'provisioning'].includes(device.status) ? device.status : 'offline'}"><i data-lucide="${device.icon}"></i></span><span class="device-card-status">${deviceStatus(device)}</span></span><strong>${escapeTelemetryHtml(device.name)}</strong><span class="device-card-id">UID: ${escapeTelemetryHtml(device.id)}</span><span class="device-card-type">${escapeTelemetryHtml(device.type)}</span><span class="device-status ${device.status}"><i data-lucide="clock-3"></i> Ultimo reporte: ${escapeTelemetryHtml(device.report)}</span><span class="device-meta">${device.meta.map((item) => `<span><i data-lucide="${item.icon}"></i> ${item.text}</span>`).join('')}</span></button><div class="device-card-actions"><button type="button" class="row-menu" data-device-menu="${escapeTelemetryHtml(device.id)}" title="Gestionar ${escapeTelemetryHtml(device.name)}" aria-label="Gestionar ${escapeTelemetryHtml(device.name)}"><i data-lucide="more-vertical"></i></button><button type="button" class="device-card-telemetry" data-device-telemetry-today="${escapeTelemetryHtml(device.id)}" title="Ver telemetria de hoy" aria-label="Ver telemetria de hoy de ${escapeTelemetryHtml(device.name)}"><i data-lucide="chart-no-axes-combined"></i></button><button type="button" class="device-card-expand" data-device-toggle="${escapeTelemetryHtml(device.id)}" aria-expanded="${String(open)}" title="${open ? 'Ocultar' : 'Mostrar'} parametros y funciones" aria-label="${open ? 'Ocultar' : 'Mostrar'} parametros y funciones"><i data-lucide="chevron-down"></i></button></div></div>${deviceCurtainPositionMarkup(device)}<div class="device-card-content"${open ? '' : ' hidden'}>${deviceDirectionMarkup(device)}${deviceQuickCommandMarkup(device)}${deviceParameterMarkup(device)}</div></article>`; }).join('') : '<div class="panel" style="padding:30px;color:var(--muted)">No encontramos dispositivos con ese criterio.</div>';
   renderIcons();
 }
 
@@ -840,6 +869,54 @@ function updateDeviceParameterValue(event) {
   if (!input) return;
   const output = input.parentElement.querySelector('output');
   if (output) output.value = input.value;
+}
+
+function updateCurtainPositionValue(event) {
+  const input = event.target.closest('[data-curtain-position]');
+  if (!input) return;
+  const output = input.parentElement.querySelector('output');
+  if (output) output.value = `${input.value}%`;
+}
+
+async function sendCurtainPosition(event) {
+  event.preventDefault?.();
+  event.stopPropagation?.();
+  const input = event.target.closest('[data-curtain-position]');
+  if (!input) return;
+  const device = devices.find((item) => item.id === input.dataset.deviceId);
+  const status = input.parentElement.querySelector('[data-curtain-position-status]');
+  if (!device || !status || device.status !== 'online') return;
+  const telemetry = parseTelemetry(device.telemetry);
+  if (String(telemetry.firmwareTarget || '').toLowerCase() === 'servo') {
+    const servos = Object.values(telemetry.servos || {});
+    if (!servos.length || !servos.every((servo) => servo.blind_calibrated === true && servo.position_recovery_required === false && servo.blind_calibration_in_progress !== true)) {
+      status.textContent = 'Requiere calibración y referencia fiable';
+      return;
+    }
+  }
+  const value = Math.max(0, Math.min(100, Math.round(Number(input.value))));
+  const state = deviceUiState();
+  const key = `${device.id}\u0000curtainPosition`;
+  state.pending.add(device.id);
+  state.optimistic.set(key, { value, expiresAt: Date.now() + 15000 });
+  input.disabled = true;
+  status.textContent = 'Enviando…';
+  try {
+    const payload = { percent: value, speed: 800, acceleration: 50 };
+    if (String(telemetry.firmwareTarget || '').toLowerCase() === 'servo') payload.allServos = true;
+    const result = await apiRequest('commands', { method: 'POST', body: JSON.stringify({ deviceId: device.id, command: 'curtain.move', payload }) });
+    status.textContent = result.status === 'succeeded' ? 'Enviado' : 'En cola';
+    if (typeof loadDevices === 'function') window.setTimeout(() => void loadDevices(), 2500);
+  } catch (error) {
+    state.optimistic.delete(key);
+    input.value = String(Math.round(curtainPositionValue(device) ?? value));
+    const output = input.parentElement.querySelector('output');
+    if (output) output.value = `${input.value}%`;
+    status.textContent = `Error: ${error.message}`;
+  } finally {
+    state.pending.delete(device.id);
+    if (input.isConnected) input.disabled = false;
+  }
 }
 
 async function sendDeviceParameter(event) {
@@ -943,7 +1020,8 @@ function bindDeviceCardControls() {
   if (!grid || grid.dataset.controlsBound) return;
   grid.dataset.controlsBound = 'true';
   grid.addEventListener('input', updateDeviceParameterValue);
-  grid.addEventListener('change', (event) => { if (event.target.matches('[data-device-direction]')) sendDeviceDirection(event); else if (event.target.matches('[data-device-led]')) sendDeviceLed(event); else if (event.target.matches('[data-device-control]')) sendDeviceParameter(event); });
+  grid.addEventListener('input', updateCurtainPositionValue);
+  grid.addEventListener('change', (event) => { if (event.target.matches('[data-curtain-position]')) sendCurtainPosition(event); else if (event.target.matches('[data-device-direction]')) sendDeviceDirection(event); else if (event.target.matches('[data-device-led]')) sendDeviceLed(event); else if (event.target.matches('[data-device-control]')) sendDeviceParameter(event); });
   grid.addEventListener('click', (event) => {
     const telemetryToday = event.target.closest('[data-device-telemetry-today]');
     if (telemetryToday) {

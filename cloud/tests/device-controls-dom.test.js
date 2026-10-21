@@ -24,7 +24,15 @@ const device = {
 
 const curtainDevice = {
   id: 'curtain-1', name: 'Curtain', type: 'curtain', provider: 'pulsegrid', status: 'online', report: 'now', signal: 'good', icon: 'blinds', meta: [],
-  telemetry: { kind: 'curtain', firmwareTarget: 'ga25', directionReversed: false, ledEnabled: false }
+  telemetry: { kind: 'curtain', firmwareTarget: 'ga25', position: 27, directionReversed: false, ledEnabled: false }
+};
+
+const servoCurtainDevice = {
+  ...curtainDevice,
+  telemetry: { kind: 'curtain', firmwareTarget: 'servo', directionReversed: false, servos: {
+    1: { blind_percent: 25, blind_calibrated: true, position_recovery_required: false, blind_calibration_in_progress: false },
+    2: { blind_percent: 29, blind_calibrated: true, position_recovery_required: false, blind_calibration_in_progress: false }
+  } }
 };
 
 function setup(folder, requestImpl = async () => ({ status: 'succeeded' }), configuredDevice = device) {
@@ -155,6 +163,51 @@ for (const folder of ['', 'public', 'public_html']) {
     window.devices[0].telemetry.directionReversed = true;
     vm.runInContext('renderDeviceCards()', context);
     assert.equal(window.document.querySelector('[data-device-direction]').checked, true);
+  });
+
+  test(`${label}: curtain position slider renders reported percentage and queues whole-curtain move`, async (t) => {
+    const f = setup(folder, async () => ({ status: 'queued' }), servoCurtainDevice); t.after(() => f.dom.window.close());
+    const { window, context } = f;
+    const slider = window.document.querySelector('[data-curtain-position]');
+    assert.ok(slider);
+    assert.equal(slider.value, '27');
+    slider.value = '64';
+    slider.dispatchEvent(new window.Event('input', { bubbles: true }));
+    assert.equal(slider.parentElement.querySelector('output').value, '64%');
+    slider.dispatchEvent(new window.Event('change', { bubbles: true }));
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    assert.deepEqual(f.requests[0], { endpoint: 'commands', deviceId: 'curtain-1', command: 'curtain.move', payload: { percent: 64, speed: 800, acceleration: 50, allServos: true } });
+    assert.equal(window.document.querySelector('[data-curtain-position-status]').textContent, 'En cola');
+  });
+
+  test(`${label}: curtain position slider is disabled until Servo calibration is ready`, (t) => {
+    const notReady = structuredClone(servoCurtainDevice);
+    notReady.telemetry.servos[2].position_recovery_required = true;
+    const f = setup(folder, undefined, notReady); t.after(() => f.dom.window.close());
+    assert.equal(f.window.document.querySelector('[data-curtain-position]').disabled, true);
+    assert.match(f.window.document.querySelector('[data-curtain-position-status]').textContent, /referencia fiable/);
+  });
+
+  test(`${label}: GA25 position slider queues its timed position command`, async (t) => {
+    const f = setup(folder, async () => ({ status: 'queued' }), curtainDevice); t.after(() => f.dom.window.close());
+    const { window } = f;
+    const slider = window.document.querySelector('[data-curtain-position]');
+    assert.equal(slider.value, '27');
+    slider.value = '70';
+    slider.dispatchEvent(new window.Event('change', { bubbles: true }));
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    assert.deepEqual(f.requests[0], { endpoint: 'commands', deviceId: 'curtain-1', command: 'curtain.move', payload: { percent: 70, speed: 800, acceleration: 50 } });
+  });
+
+  test(`${label}: position command failure restores the reported percentage and shows the error`, async (t) => {
+    const f = setup(folder, async () => { throw new Error('Dispositivo fuera de linea'); }, curtainDevice); t.after(() => f.dom.window.close());
+    const { window } = f;
+    const slider = window.document.querySelector('[data-curtain-position]');
+    slider.value = '70';
+    slider.dispatchEvent(new window.Event('change', { bubbles: true }));
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    assert.equal(window.document.querySelector('[data-curtain-position]').value, '27');
+    assert.match(window.document.querySelector('[data-curtain-position-status]').textContent, /Error: Dispositivo fuera de linea/);
   });
 
   test(`${label}: motor direction returns to the previous value when command fails`, async (t) => {

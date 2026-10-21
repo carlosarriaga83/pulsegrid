@@ -122,6 +122,25 @@ class CloudClientConnectionTests(unittest.TestCase):
                 sys.modules[name] = previous
         sys.modules.pop('cloud_client_test_subject', None)
 
+    def test_curtain_move_can_target_all_detected_servos_or_one_legacy_servo(self):
+        class FakeCurtain:
+            servo_ids = (1, 2)
+            blind_config = {1: {'calibration_in_progress': False}, 2: {'calibration_in_progress': False}}
+
+            def __init__(self):
+                self.moves = []
+
+            def move_blind(self, servo_id, percent, speed, acceleration):
+                self.moves.append((servo_id, percent, speed, acceleration))
+
+        curtain = FakeCurtain()
+        self.client._execute_command(curtain, None, {'name': 'curtain.move', 'payload': {'allServos': True, 'percent': 62, 'speed': 700, 'acceleration': 40}})
+        self.assertEqual(curtain.moves, [(1, 62.0, 700, 40), (2, 62.0, 700, 40)])
+
+        curtain.moves.clear()
+        self.client._execute_command(curtain, None, {'name': 'curtain.move', 'payload': {'servoId': 2, 'percent': 35}})
+        self.assertEqual(curtain.moves, [(2, 35.0, 800, 50)])
+
     @staticmethod
     def response(connection='keep-alive', chunked=False):
         if chunked:

@@ -300,7 +300,16 @@ class CloudClient:
         elif name == 'curtain.stop':
             cortina.parar()
         elif name == 'curtain.move':
-            cortina.move_blind(int(payload.get('servoId', 1)), float(payload.get('percent', payload.get('position'))), int(payload.get('speed', 800)), int(payload.get('acceleration', 50)))
+            percent = float(payload.get('percent', payload.get('position')))
+            speed = int(payload.get('speed', 800))
+            acceleration = int(payload.get('acceleration', 50))
+            if payload.get('allServos') is True:
+                if set(payload) - {'allServos', 'percent', 'position', 'speed', 'acceleration'}:
+                    raise ValueError('payload de movimiento de cortina invalido')
+                for servo_id in cortina.servo_ids:
+                    cortina.move_blind(servo_id, percent, speed, acceleration)
+            else:
+                cortina.move_blind(int(payload.get('servoId', 1)), percent, speed, acceleration)
         elif name in BLIND_COMMANDS:
             execute_blind_command(cortina, name, payload)
         else:
