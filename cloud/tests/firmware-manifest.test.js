@@ -86,7 +86,7 @@ test('calibration wizard selects a timed GA25 flow without sending servo command
     assert.match(source, /const supportsServo = targetModel === 'servo' \|\| \(!targetModel && !\/ga25\/i\.test\(identity\)\)/, folder || 'cloud root');
     assert.match(source, /if \(!supportsServo && !supportsGa25\) \{ \$\('#calibration-wizard'\)\?\.remove\(\); return; \}/, folder || 'cloud root');
     assert.match(source, /getCalibrationDeviceModel/);
-    assert.match(source, /mountBlindCalibrationWizard\(\{ \$, \$\$, apiRequest, loadDevices, getCalibrationPosition, waitForCalibrationCommand, waitForCalibrationIdle, getCalibrationDeviceModel, showToast, renderIcons \}\)/, folder || 'cloud root');
+    assert.match(source, /mountBlindCalibrationWizard\(\{ \$, \$\$, apiRequest, loadDevices, getCalibrationPosition, waitForCalibrationCommand, waitForCalibrationIdle, getCalibrationDeviceModel, devices: \(\) => devices, parseTelemetry, showToast, renderIcons \}\)/, folder || 'cloud root');
     const calibrationUi = fs.readFileSync(path.join(root, 'cloud', folder, 'blind-calibration-ui.js'), 'utf8');
     const cloudCalibrationUi = fs.readFileSync(path.join(root, 'cloud', folder, 'cloud-blind-calibration-ui.js'), 'utf8');
     assert.match(calibrationUi, /blind\.ga25CalibrationStart/);
@@ -108,6 +108,12 @@ test('GA25 firmware times, bounds, stops, and persists a supervised full-travel 
   assert.match(ga25Main, /blind\.ga25CalibrationStart/);
   assert.match(ga25Main, /blind\.ga25CalibrationStop/);
   assert.match(ga25Main, /blind\.ga25CalibrationCancel/);
+  assert.match(ga25Main, /motor\.set_direction_reversed\(DIRECTION_REVERSED\)/);
+  assert.doesNotMatch(ga25Main, /motor = CurtainMotor\(ENABLE_PIN, DIRECTION_A_PIN, DIRECTION_B_PIN, values\["full_travel_ms"\]/);
+  const ga25Motor = fs.readFileSync(path.join(root, 'dispositivos/ga25/esp32_motor/motor_curtain.py'), 'utf8');
+  assert.match(ga25Motor, /a = self\.open_a_level[\s\S]*?b = 1 - self\.open_a_level/);
+  assert.match(ga25Motor, /a = 1 - self\.open_a_level[\s\S]*?b = self\.open_a_level/);
+  assert.match(ga25Motor, /def set_direction_reversed\(self, reversed_value\)/);
   assert.match(ga25Main, /elapsed < 1000 or elapsed > 120000/);
   assert.match(ga25Main, /motor\.full_travel_ms = elapsed/);
   assert.match(ga25Main, /"full_travel_ms": elapsed/);

@@ -23,15 +23,20 @@ class CurtainMotor:
         if self.direction_reversed:
             direction = -direction
         if direction > 0:
-            a = 1
-            b = 0
+            a = self.open_a_level
+            b = 1 - self.open_a_level
         elif direction < 0:
-            a = 0
-            b = 1
+            a = 1 - self.open_a_level
+            b = self.open_a_level
         else:
             a = b = 0
         self.direction_a.value(a)
         self.direction_b.value(b)
+
+    def set_direction_reversed(self, reversed_value):
+        self._update_position()
+        self.stop()
+        self.direction_reversed = bool(reversed_value)
 
     def _duty(self, speed):
         return max(0, min(1023, int(int(speed) * 1023 / 100)))

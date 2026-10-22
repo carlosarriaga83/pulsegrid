@@ -80,7 +80,7 @@ test('cloud exposes confirmed clean calibration reset only for online Servo r32+
     const renderWizard = app.slice(app.indexOf('function renderCalibrationWizard()'), app.indexOf('\nfunction ', app.indexOf('function renderCalibrationWizard()') + 10));
     assert.ok(renderWizard.indexOf('mountCloudBlindCalibrationWizard') < renderWizard.indexOf("if ($('#calibration-wizard')) return;"), `${folder || 'cloud root'} calls reset injector before returning for an existing wizard`);
     assert.match(html, /cloud-blind-calibration-ui\.js\?v=5/);
-    assert.match(html, /app\.js\?v=70/);
+    assert.match(html, /app\.js\?v=71/);
   }
   const server = fs.readFileSync(path.join(root, 'server.js'), 'utf8');
   assert.match(server, /function validateServoEncoderReference\(/);
@@ -203,6 +203,26 @@ test('all dashboard copies provide a distinct timed GA25 calibration flow', () =
     assert.match(wizard, /\.command-calibration-layout'\) \|\|/);
     assert.match(wizard, /function mountBlindCalibrationWizard\(context\)\s*\{\s*if \(context\.getCalibrationDeviceModel\?\.\(\) === 'ga25'\) mountGa25CalibrationWizard\(context\);\s*\}/);
   }
+});
+
+test('GA25 calibration selects and persists opening direction before measuring timed travel', () => {
+  const root = path.join(__dirname, '..');
+  for (const folder of ['', 'public', 'public_html', 'legacy-root']) {
+    const wizard = fs.readFileSync(path.join(root, folder, 'blind-calibration-ui.js'), 'utf8');
+    assert.match(wizard, /ga25-open-direction/);
+    assert.match(wizard, /direction\.configure/);
+    assert.match(wizard, /if \(reversed !== currentDirectionReversed\(\)\)[\s\S]*?await send\('direction\.configure'/);
+    assert.match(wizard, /no puede detectar qué sentido físico abre la cortina/);
+    const app = fs.readFileSync(path.join(root, folder, 'app.js'), 'utf8');
+    assert.match(app, /devices: \(\) => devices, parseTelemetry/);
+  }
+  const motor = fs.readFileSync(path.join(__dirname, '..', '..', 'dispositivos/ga25/esp32_motor/motor_curtain.py'), 'utf8');
+  assert.match(motor, /a = self\.open_a_level[\s\S]*?b = 1 - self\.open_a_level/);
+  assert.match(motor, /a = 1 - self\.open_a_level[\s\S]*?b = self\.open_a_level/);
+  assert.match(motor, /def set_direction_reversed\(self, reversed_value\):[\s\S]*?self\._update_position\(\)[\s\S]*?self\.stop\(\)[\s\S]*?self\.direction_reversed = bool\(reversed_value\)/);
+  const firmware = fs.readFileSync(path.join(__dirname, '..', '..', 'dispositivos/ga25/esp32_motor/main.py'), 'utf8');
+  assert.match(firmware, /motor\.set_direction_reversed\(DIRECTION_REVERSED\)/);
+  assert.doesNotMatch(firmware, /motor = CurtainMotor\(ENABLE_PIN, DIRECTION_A_PIN, DIRECTION_B_PIN, values\["full_travel_ms"\]/);
 });
 
 test('server validates cloud-computed calibration and rejects legacy interactive commands', () => {

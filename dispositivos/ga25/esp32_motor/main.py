@@ -368,12 +368,16 @@ def save_configuration(values):
 
 
 def apply_configuration(values):
-    global API_URL, DEVICE_CODE, DEVICE_ID, motor, DIRECTION_REVERSED
+    global API_URL, DEVICE_CODE, DEVICE_ID, motor, DIRECTION_REVERSED, FULL_TRAVEL_MS, OPEN_A_LEVEL
     API_URL = values["api_url"]
     DEVICE_CODE = values["device_code"]
     DEVICE_ID = values["device_id"]
+    FULL_TRAVEL_MS = max(1000, int(values["full_travel_ms"]))
+    OPEN_A_LEVEL = 1 if values["open_a_level"] else 0
     DIRECTION_REVERSED = values["direction_reversed"]
-    motor = CurtainMotor(ENABLE_PIN, DIRECTION_A_PIN, DIRECTION_B_PIN, values["full_travel_ms"], values["open_a_level"], DIRECTION_REVERSED)
+    motor.full_travel_ms = FULL_TRAVEL_MS
+    motor.open_a_level = OPEN_A_LEVEL
+    motor.set_direction_reversed(DIRECTION_REVERSED)
 
 
 def _legacy_update_firmware(version):

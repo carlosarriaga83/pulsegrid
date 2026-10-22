@@ -1757,7 +1757,7 @@ function renderCalibrationWizard() {
     const deviceIdentity = `${device?.name || ''} ${device?.type || ''} ${device?.id || ''}`;
     return model || (/ga25/i.test(deviceIdentity) ? 'ga25' : 'servo');
   };
-  window.mountBlindCalibrationWizard({ $, $$, apiRequest, loadDevices, getCalibrationPosition, waitForCalibrationCommand, waitForCalibrationIdle, getCalibrationDeviceModel, showToast, renderIcons });
+  window.mountBlindCalibrationWizard({ $, $$, apiRequest, loadDevices, getCalibrationPosition, waitForCalibrationCommand, waitForCalibrationIdle, getCalibrationDeviceModel, devices: () => devices, parseTelemetry, showToast, renderIcons });
 }
 
 function navigate(viewName) {
