@@ -1,6 +1,7 @@
 package com.pulsegrid.app.data
 
 import com.google.gson.JsonObject
+import com.google.gson.JsonElement
 
 data class UserDto(val name: String, val email: String, val role: String)
 data class LoginRequest(val email: String, val password: String)
@@ -12,7 +13,7 @@ data class CapabilityDto(
     val code: String,
     val name: String? = null,
     val type: String? = null,
-    val values: JsonObject? = null
+    val values: JsonElement? = null
 )
 
 data class DeviceDto(

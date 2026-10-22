@@ -158,7 +158,9 @@ test('servo firmware accepts cloud estimates only with reliable encoder state an
   assert.match(cortina, /CALIBRATION_STEP_SPEED = 240/);
   assert.match(cortina, /speed = min\(speed, self\.APPROACH_SPEED\)/);
   assert.match(cortina, /APPROACH_COUNTS = COUNTS_PER_TURN \/\/ 16/);
-  assert.match(cortina, /task\['target_counts'\] - task\['moved_counts'\] <= self\.APPROACH_COUNTS/);
+  assert.match(cortina, /ramp_up = min\(1\.0, task\['moved_counts'\] \/ max\(1, self\.RAMP_UP_COUNTS\)\)/);
+  assert.match(cortina, /brake_counts = min\(self\.MAX_BRAKE_COUNTS, max\(self\.MIN_BRAKE_COUNTS, int\(task\['speed'\] \* 1\.5\)\)\)/);
+  assert.match(cortina, /braking_speed = self\.FINAL_APPROACH_SPEED \+ \(task\['speed'\] - self\.FINAL_APPROACH_SPEED\) \* brake_ratio/);
   assert.match(cortina, /fault_reason = 'position_overshoot'/);
   assert.match(cortina, /MOVEMENT_POSITION_TOLERANCE_COUNTS = int\(COUNTS_PER_TURN \* 0\.20 \+ 0\.5\)/);
   const stservo = fs.readFileSync(path.join(root, 'dispositivos/servo/stservo.py'), 'utf8');

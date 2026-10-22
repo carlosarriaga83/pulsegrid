@@ -12,6 +12,10 @@ class Cortina:
     APPROACH_SPEED = 120
     MAX_CURTAIN_SPEED = 1800
     FINAL_APPROACH_SPEED = 60
+    RAMP_UP_COUNTS = COUNTS_PER_TURN // 4
+    MAX_BRAKE_COUNTS = COUNTS_PER_TURN // 2
+    MIN_BRAKE_COUNTS = COUNTS_PER_TURN // 16
+    SPEED_UPDATE_THRESHOLD = 30
     CALIBRATION_STEP_SPEED = 240
     PRECISION_COMPLETION_TOLERANCE_COUNTS = 16
     APPROACH_COUNTS = COUNTS_PER_TURN // 16
@@ -251,16 +255,26 @@ class Cortina:
             task['moved_counts'] += delta * task['direction']
             if task['moved_counts'] >= task['target_counts']:
                 self._finish_multiturn(servo_id, completed=True)
-            elif task['target_counts'] - task['moved_counts'] <= self.APPROACH_COUNTS and not task['slowing']:
-                self.bus.move_wheel(servo_id, task['direction'] * min(task['speed'], self.FINAL_APPROACH_SPEED), acceleration=task['acceleration'])
-                task['slowing'] = True
-            elif time.ticks_diff(time.ticks_ms(), task['last_progress_at']) >= self.MOVEMENT_STALL_TIMEOUT_MS:
-                self._finish_multiturn(servo_id, timed_out=True, fault_reason='encoder_stall')
-            elif time.ticks_diff(time.ticks_ms(), task['started_at']) >= task['timeout_ms']:
-                self._finish_multiturn(servo_id, timed_out=True, fault_reason='movement_timeout')
-            elif abs(self.absolute_turns[servo_id] - self._last_saved_turns[servo_id]) >= 0.5:
-                self._last_saved_turns[servo_id] = self.absolute_turns[servo_id]
-                checkpoint = True
+            else:
+                remaining_counts = max(0, task['target_counts'] - task['moved_counts'])
+                ramp_up = min(1.0, task['moved_counts'] / max(1, self.RAMP_UP_COUNTS))
+                starting_speed = min(task['speed'], self.APPROACH_SPEED)
+                accelerating_speed = starting_speed + (task['speed'] - starting_speed) * ramp_up
+                brake_counts = min(self.MAX_BRAKE_COUNTS, max(self.MIN_BRAKE_COUNTS, int(task['speed'] * 1.5)))
+                brake_ratio = min(1.0, remaining_counts / max(1, brake_counts))
+                braking_speed = self.FINAL_APPROACH_SPEED + (task['speed'] - self.FINAL_APPROACH_SPEED) * brake_ratio
+                desired_speed = max(self.FINAL_APPROACH_SPEED, int(min(accelerating_speed, braking_speed)))
+                if abs(desired_speed - task['commanded_speed']) >= self.SPEED_UPDATE_THRESHOLD:
+                    self.bus.move_wheel(servo_id, task['direction'] * desired_speed, acceleration=task['acceleration'])
+                    task['commanded_speed'] = desired_speed
+            if self.multiturn_tasks[servo_id] is not None:
+                if time.ticks_diff(time.ticks_ms(), task['last_progress_at']) >= self.MOVEMENT_STALL_TIMEOUT_MS:
+                    self._finish_multiturn(servo_id, timed_out=True, fault_reason='encoder_stall')
+                elif time.ticks_diff(time.ticks_ms(), task['started_at']) >= task['timeout_ms']:
+                    self._finish_multiturn(servo_id, timed_out=True, fault_reason='movement_timeout')
+                elif abs(self.absolute_turns[servo_id] - self._last_saved_turns[servo_id]) >= 0.5:
+                    self._last_saved_turns[servo_id] = self.absolute_turns[servo_id]
+                    checkpoint = True
         if checkpoint:
             self._save_persistent_state()
 
@@ -382,7 +396,7 @@ class Cortina:
         direction = 1 if turns > 0 else -1
         target_counts = int(round(abs(turns) * self.COUNTS_PER_TURN))
         start_turns = self.absolute_turns[servo_id]
-        initial_speed = min(speed, self.APPROACH_SPEED) if target_counts <= self.APPROACH_COUNTS else speed
+        initial_speed = min(speed, self.APPROACH_SPEED)
         self.multiturn_tasks[servo_id] = {
             'direction': direction,
             'target_counts': target_counts,
@@ -397,7 +411,7 @@ class Cortina:
             'speed': speed,
             'acceleration': acceleration,
             'position_mode': False,
-            'slowing': initial_speed != speed,
+            'commanded_speed': initial_speed,
         }
         self.multiturn_active[servo_id] = True
         self.position_recovery_required[servo_id] = True

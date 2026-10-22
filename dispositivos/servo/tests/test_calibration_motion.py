@@ -332,8 +332,8 @@ class CalibrationCompletionTests(unittest.TestCase):
             controller.move_blind(1, target_percent, speed=requested_speed)
             movement = controller.multiturn_tasks[1]
             self.assertEqual(movement['speed'], requested_speed if requested_speed < controller.MAX_CURTAIN_SPEED else controller.MAX_CURTAIN_SPEED)
-            expected_initial_speed = requested_speed if requested_speed < controller.MAX_CURTAIN_SPEED else controller.MAX_CURTAIN_SPEED
-            self.assertIn(('wheel', movement['direction'] * expected_initial_speed, 50), controller.bus.calls)
+            expected_initial_speed = min(movement['speed'], controller.APPROACH_SPEED)
+            self.assertEqual(controller.bus.calls[-1], ('wheel', movement['direction'] * expected_initial_speed, 50))
             for _ in range(5000):
                 if not controller.multiturn_active[1]:
                     break
@@ -380,8 +380,12 @@ class CalibrationCompletionTests(unittest.TestCase):
 
         self.assertTrue(movement['completed'])
         self.assertEqual(controller.bus.wheel_speed, 0)
-        self.assertIn(('wheel', -60, 50), controller.bus.calls)
-        self.assertIn(('wheel', -1800, 50), controller.bus.calls)
+        wheel_speeds = [abs(call[1]) for call in controller.bus.calls if call[0] == 'wheel']
+        self.assertEqual(wheel_speeds[0], controller.APPROACH_SPEED)
+        self.assertTrue(any(speed > controller.APPROACH_SPEED for speed in wheel_speeds))
+        final_active_speeds = [speed for speed in wheel_speeds if speed > 0]
+        self.assertLessEqual(final_active_speeds[-1], controller.APPROACH_SPEED)
+        self.assertTrue(any(first > second for first, second in zip(wheel_speeds, wheel_speeds[1:])), wheel_speeds)
         self.assertIn(('move', controller.bus.current_position, 120, 50), controller.bus.calls)
         self.assertAlmostEqual(controller.absolute_turns[1], controller.blind_config[1]['rolled_turns'], delta=16 / 4096)
         self.assertEqual(controller.blind_status(1)['percent'], 0.0)
@@ -390,6 +394,46 @@ class CalibrationCompletionTests(unittest.TestCase):
         self.assertFalse(controller.move_blind(1, 0))
 
         self.assertEqual([call for call in controller.bus.calls if call[0] == 'wheel'], wheel_commands_before_duplicate)
+
+    def test_long_move_ramps_to_requested_speed_then_brakes_before_target(self):
+        module = load_cortina_module('cortina_speed_ramp_test')
+        raw_position = 0
+        controller = object.__new__(module.Cortina)
+        controller.servo_ids = (1,)
+        controller.direction_reversed = False
+        controller.blind_config = {1: {
+            'rolled_turns': -5.0,
+            'unrolled_turns': 5.0,
+            'motor_side': 'left',
+            'calibrated': True,
+            'calibration_in_progress': False,
+            'calibration_motion_fault': False,
+            'calibration_motion_fault_reason': '',
+        }}
+        controller.position_recovery_required = {1: False}
+        controller.absolute_turns = {1: 0.0}
+        controller.blind_targets = {1: {'percent': 50.0, 'speed': 800, 'acceleration': 50}}
+        controller.multiturn_tasks = {1: None}
+        controller.multiturn_active = {1: False}
+        controller.bus = SimulatedWheelBus(raw_position, step_counts=16, coast_counts=4)
+        controller._last_positions = {1: raw_position}
+        controller._last_saved_turns = {1: 0.0}
+        controller._save_persistent_state = lambda: None
+
+        controller.move_blind(1, 100, speed=1800)
+        task = controller.multiturn_tasks[1]
+        for _ in range(5000):
+            if not controller.multiturn_active[1]:
+                break
+            controller.update_multiturn()
+
+        speeds = [abs(call[1]) for call in controller.bus.calls if call[0] == 'wheel']
+        active_speeds = [speed for speed in speeds if speed > 0]
+        self.assertTrue(task['completed'])
+        self.assertEqual(active_speeds[0], controller.APPROACH_SPEED)
+        self.assertEqual(max(active_speeds), 1800)
+        self.assertLessEqual(active_speeds[-1], controller.APPROACH_SPEED)
+        self.assertFalse(controller.position_recovery_required[1])
 
     def test_large_encoder_overshoot_fails_and_blocks_reverse_recovery_move(self):
         module = load_cortina_module('cortina_overshoot_guard_test')
