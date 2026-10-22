@@ -38,10 +38,9 @@
       try {
         busy = true; render();
         const reversed = directionSelect.value === 'true';
-        if (reversed !== currentDirectionReversed()) {
-          status.textContent = 'Guardando el sentido de apertura seleccionado…';
-          await send('direction.configure', { reversed });
-        }
+        // Always apply the selected polarity: telemetry can lag a successful queued command.
+        status.textContent = 'Aplicando el sentido de apertura seleccionado…';
+        await send('direction.configure', { reversed });
         status.textContent = 'Arrancando desde el extremo cerrado. Confirma que el movimiento vaya hacia abierta.';
         await send('blind.ga25CalibrationStart', { from: 'closed' });
         active = true;

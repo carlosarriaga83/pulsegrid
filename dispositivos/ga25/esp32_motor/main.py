@@ -368,7 +368,7 @@ def save_configuration(values):
 
 
 def apply_configuration(values):
-    global API_URL, DEVICE_CODE, DEVICE_ID, motor, DIRECTION_REVERSED, FULL_TRAVEL_MS, OPEN_A_LEVEL
+    global API_URL, DEVICE_CODE, DEVICE_ID, motor, DIRECTION_REVERSED, FULL_TRAVEL_MS, OPEN_A_LEVEL, last_telemetry
     API_URL = values["api_url"]
     DEVICE_CODE = values["device_code"]
     DEVICE_ID = values["device_id"]
@@ -378,6 +378,7 @@ def apply_configuration(values):
     motor.full_travel_ms = FULL_TRAVEL_MS
     motor.open_a_level = OPEN_A_LEVEL
     motor.set_direction_reversed(DIRECTION_REVERSED)
+    last_telemetry = time.ticks_add(time.ticks_ms(), -TELEMETRY_MS)
 
 
 def _legacy_update_firmware(version):
@@ -588,6 +589,9 @@ def poll_commands():
         return
     try:
         execute(command)
+        if pending_configuration:
+            apply_configuration(pending_configuration)
+            pending_configuration = None
         acknowledge(command.get("id"), "succeeded")
         if command.get("name") == "firmware.update":
             print("OTA completada; reiniciando")
@@ -595,9 +599,6 @@ def poll_commands():
             import machine
             machine.reset()
             return
-        if pending_configuration:
-            apply_configuration(pending_configuration)
-            pending_configuration = None
         if restart_requested:
             restart_requested = False
             import machine

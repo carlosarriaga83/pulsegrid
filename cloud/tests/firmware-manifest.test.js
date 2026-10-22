@@ -109,6 +109,7 @@ test('GA25 firmware times, bounds, stops, and persists a supervised full-travel 
   assert.match(ga25Main, /blind\.ga25CalibrationStop/);
   assert.match(ga25Main, /blind\.ga25CalibrationCancel/);
   assert.match(ga25Main, /motor\.set_direction_reversed\(DIRECTION_REVERSED\)/);
+  assert.match(ga25Main, /motor\.set_direction_reversed\(DIRECTION_REVERSED\)[\s\S]*?last_telemetry = time\.ticks_add\(time\.ticks_ms\(\), -TELEMETRY_MS\)/);
   assert.doesNotMatch(ga25Main, /motor = CurtainMotor\(ENABLE_PIN, DIRECTION_A_PIN, DIRECTION_B_PIN, values\["full_travel_ms"\]/);
   const ga25Motor = fs.readFileSync(path.join(root, 'dispositivos/ga25/esp32_motor/motor_curtain.py'), 'utf8');
   assert.match(ga25Motor, /a = self\.open_a_level[\s\S]*?b = 1 - self\.open_a_level/);

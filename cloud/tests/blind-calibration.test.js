@@ -211,7 +211,8 @@ test('GA25 calibration selects and persists opening direction before measuring t
     const wizard = fs.readFileSync(path.join(root, folder, 'blind-calibration-ui.js'), 'utf8');
     assert.match(wizard, /ga25-open-direction/);
     assert.match(wizard, /direction\.configure/);
-    assert.match(wizard, /if \(reversed !== currentDirectionReversed\(\)\)[\s\S]*?await send\('direction\.configure'/);
+    assert.match(wizard, /await send\('direction\.configure', \{ reversed \}\)/);
+    assert.match(wizard, /Always apply the selected polarity: telemetry can lag/);
     assert.match(wizard, /no puede detectar qué sentido físico abre la cortina/);
     const app = fs.readFileSync(path.join(root, folder, 'app.js'), 'utf8');
     assert.match(app, /devices: \(\) => devices, parseTelemetry/);
@@ -223,6 +224,8 @@ test('GA25 calibration selects and persists opening direction before measuring t
   const firmware = fs.readFileSync(path.join(__dirname, '..', '..', 'dispositivos/ga25/esp32_motor/main.py'), 'utf8');
   assert.match(firmware, /motor\.set_direction_reversed\(DIRECTION_REVERSED\)/);
   assert.doesNotMatch(firmware, /motor = CurtainMotor\(ENABLE_PIN, DIRECTION_A_PIN, DIRECTION_B_PIN, values\["full_travel_ms"\]/);
+  const poll = firmware.slice(firmware.indexOf('def poll_commands()'), firmware.indexOf('def send_telemetry()'));
+  assert.ok(poll.indexOf('apply_configuration(pending_configuration)') < poll.indexOf('acknowledge(command.get("id"), "succeeded")'), 'GA25 direction ACK must mean the motor has already applied the selected polarity');
 });
 
 test('server validates cloud-computed calibration and rejects legacy interactive commands', () => {
