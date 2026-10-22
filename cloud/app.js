@@ -295,6 +295,10 @@ function setupAutomationsView() {
   const form = $('#automation-form');
   if (!form || form.dataset.bound) return;
   form.dataset.bound = 'true';
+  $('#automation-speed').min = '1';
+  $('#automation-speed').max = '240';
+  $('#automation-speed').value = '240';
+  $('#automation-speed').defaultValue = '240';
   const automationList = $('.automation-list');
   const actionDeviceLabel = $('#automation-device')?.closest('label');
   const actionLabel = $('#automation-action')?.closest('label');
@@ -388,7 +392,7 @@ function setupAutomationsView() {
       (rule.conditions?.length ? rule.conditions : rule.condition ? [rule.condition] : [{}]).forEach((condition) => addCondition(condition));
       AutomationUI.editTarget(rule);
       $('#automation-position').value = rule.position == null ? 50 : rule.position;
-      $('#automation-speed').value = rule.speed == null ? 800 : rule.speed;
+      $('#automation-speed').value = Math.min(240, rule.speed == null ? 240 : rule.speed);
       $('#automation-acceleration').value = rule.acceleration == null ? 50 : rule.acceleration;
       updateActionFields();
       $('#automation-form-title').textContent = 'Editar regla';
@@ -775,7 +779,8 @@ function deviceUiState() {
   window.deviceAccordionOpenIds ||= new Set();
   window.deviceOptimisticValues ||= new Map();
   window.devicePendingIds ||= new Set();
-  return { openIds: window.deviceAccordionOpenIds, optimistic: window.deviceOptimisticValues, pending: window.devicePendingIds };
+  window.deviceCurtainSpeeds ||= new Map();
+  return { openIds: window.deviceAccordionOpenIds, optimistic: window.deviceOptimisticValues, pending: window.devicePendingIds, curtainSpeeds: window.deviceCurtainSpeeds };
 }
 
 function deviceParameterValue(device, code, value) {
@@ -818,11 +823,15 @@ function deviceCurtainPositionMarkup(device) {
   if (optimistic && Math.abs(Number(optimistic.value) - reported) < 1) state.optimistic.delete(key);
   else if (optimistic && optimistic.expiresAt <= Date.now()) state.optimistic.delete(key);
   const isServo = String(telemetry.firmwareTarget || '').toLowerCase() === 'servo';
+  const reportedSpeed = Object.values(telemetry.servos || {}).map((servo) => Number(servo.blind_target_speed)).find(Number.isFinite);
+  const selectedSpeed = state.curtainSpeeds.get(device.id);
+  const speed = Math.max(60, Math.min(240, Math.round(Number(selectedSpeed ?? reportedSpeed ?? 240))));
   const servos = Object.values(telemetry.servos || {});
   const servoReady = !isServo || (servos.length > 0 && servos.every((servo) => servo.blind_calibrated === true && servo.position_recovery_required === false && servo.blind_calibration_in_progress !== true));
   const enabled = device.status === 'online' && servoReady;
   const reason = device.status !== 'online' ? 'Fuera de línea' : isServo && servos.some((servo) => servo.position_recovery_required === true) ? 'Recupera referencia y reaplica calibración' : isServo && servos.some((servo) => servo.blind_calibrated !== true) ? 'Aplica calibración geométrica' : isServo && servos.some((servo) => servo.blind_calibration_in_progress === true) ? 'Calibración en curso' : isServo && !servos.length ? 'Esperando telemetría Servo' : '';
-  return `<div class="device-curtain-position"><label for="curtain-position-${escapeTelemetryHtml(device.id)}">Posición deseada</label><div class="device-curtain-position-control"><input id="curtain-position-${escapeTelemetryHtml(device.id)}" type="range" min="0" max="100" step="1" value="${Math.round(value)}" data-curtain-position data-device-id="${escapeTelemetryHtml(device.id)}" aria-label="Porcentaje de apertura deseado de ${escapeTelemetryHtml(device.name)}"${enabled ? '' : ' disabled'}><output>${Math.round(value)}%</output><small data-curtain-position-status role="status" aria-live="polite">${reason || 'Objetivo'}</small></div></div>`;
+  const speedControl = isServo ? `<div class="device-curtain-speed"><label for="curtain-speed-${escapeTelemetryHtml(device.id)}">Velocidad Servo <output data-curtain-speed-value>${speed}</output></label><input id="curtain-speed-${escapeTelemetryHtml(device.id)}" type="range" min="60" max="240" step="30" value="${speed}" data-curtain-speed data-device-id="${escapeTelemetryHtml(device.id)}" aria-label="Velocidad del Servo de ${escapeTelemetryHtml(device.name)}"></div>` : '';
+  return `<div class="device-curtain-position">${speedControl}<label for="curtain-position-${escapeTelemetryHtml(device.id)}">Posición deseada</label><div class="device-curtain-position-control"><input id="curtain-position-${escapeTelemetryHtml(device.id)}" type="range" min="0" max="100" step="1" value="${Math.round(value)}" data-curtain-position data-device-id="${escapeTelemetryHtml(device.id)}" aria-label="Porcentaje de apertura deseado de ${escapeTelemetryHtml(device.name)}"${enabled ? '' : ' disabled'}><output>${Math.round(value)}%</output><small data-curtain-position-status role="status" aria-live="polite">${reason || 'Objetivo'}</small></div></div>`;
 }
 
 function deviceDirectionParameterMarkup(device) {
@@ -895,7 +904,7 @@ function renderDeviceCards(filter = deviceCardFilter, status = deviceCardStatus)
   deviceCardFilter = filter;
   deviceCardStatus = status;
   const uiState = deviceUiState();
-  if (grid.contains(document.activeElement) && document.activeElement.matches('[data-device-control], [data-device-direction], [data-curtain-position]')) return;
+  if (grid.contains(document.activeElement) && document.activeElement.matches('[data-device-control], [data-device-direction], [data-curtain-position], [data-curtain-speed]')) return;
   if ([...uiState.pending].some((deviceId) => grid.querySelector(`[data-device-card="${CSS.escape(deviceId)}"]`))) return;
   const filtered = devices.filter((device) => {
     const matchesSearch = `${device.name} ${device.id}`.toLowerCase().includes(filter.toLowerCase());
@@ -911,6 +920,15 @@ function updateCurtainPositionValue(event) {
   if (!input) return;
   const output = input.parentElement.querySelector('output');
   if (output) output.value = `${input.value}%`;
+}
+
+function updateCurtainSpeedValue(event) {
+  const input = event.target.closest('[data-curtain-speed]');
+  if (!input) return;
+  const state = deviceUiState();
+  state.curtainSpeeds.set(input.dataset.deviceId, Number(input.value));
+  const output = input.parentElement.querySelector('[data-curtain-speed-value]');
+  if (output) output.value = input.value;
 }
 
 async function sendCurtainPosition(event) {
@@ -939,8 +957,10 @@ async function sendCurtainPosition(event) {
   input.disabled = true;
   status.textContent = 'Enviando…';
   try {
-    const payload = { percent: value, speed: 800, acceleration: 50 };
-    if (String(telemetry.firmwareTarget || '').toLowerCase() === 'servo') payload.allServos = true;
+    const selectedSpeed = Number([...document.querySelectorAll('[data-curtain-speed]')].find((item) => item.dataset.deviceId === device.id)?.value || 240);
+    const isServo = String(telemetry.firmwareTarget || '').toLowerCase() === 'servo';
+    const payload = { percent: value, speed: isServo ? selectedSpeed : 800, acceleration: 50 };
+    if (isServo) payload.allServos = true;
     const result = await apiRequest('commands', { method: 'POST', body: JSON.stringify({ deviceId: device.id, command: 'curtain.move', payload }) });
     status.textContent = result.status === 'succeeded' ? 'Enviado' : 'En cola';
     if (typeof loadDevices === 'function') window.setTimeout(() => void loadDevices(), 2500);
@@ -1065,7 +1085,8 @@ function bindDeviceCardControls() {
   grid.dataset.controlsBound = 'true';
   grid.addEventListener('input', updateDeviceParameterValue);
   grid.addEventListener('input', updateCurtainPositionValue);
-  grid.addEventListener('change', (event) => { if (event.target.matches('[data-curtain-position]')) sendCurtainPosition(event); else if (event.target.matches('[data-device-direction]')) sendDeviceDirection(event); else if (event.target.matches('[data-device-led]')) sendDeviceLed(event); else if (event.target.matches('[data-device-control]')) sendDeviceParameter(event); });
+  grid.addEventListener('input', updateCurtainSpeedValue);
+  grid.addEventListener('change', (event) => { if (event.target.matches('[data-curtain-position]')) sendCurtainPosition(event); else if (event.target.matches('[data-curtain-speed]')) updateCurtainSpeedValue(event); else if (event.target.matches('[data-device-direction]')) sendDeviceDirection(event); else if (event.target.matches('[data-device-led]')) sendDeviceLed(event); else if (event.target.matches('[data-device-control]')) sendDeviceParameter(event); });
   grid.addEventListener('click', (event) => {
     const telemetryToday = event.target.closest('[data-device-telemetry-today]');
     if (telemetryToday) {
@@ -1092,7 +1113,12 @@ function bindDeviceCardControls() {
       const status = quickCommand.parentElement.querySelector('[data-device-command-status]');
       quickCommand.disabled = true;
       status.textContent = 'Enviando...';
-      apiRequest('commands', { method: 'POST', body: JSON.stringify({ deviceId: quickCommand.dataset.deviceId, command: quickCommand.dataset.deviceQuickCommand, payload: {} }) })
+      const device = devices.find((item) => item.id === quickCommand.dataset.deviceId);
+      const telemetry = parseTelemetry(device?.telemetry);
+      const isServo = String(telemetry.firmwareTarget || '').toLowerCase() === 'servo';
+      const speed = Number(quickCommand.closest('[data-device-card]')?.querySelector('[data-curtain-speed]')?.value || 240);
+      const payload = isServo ? { speed, acceleration: 50 } : {};
+      apiRequest('commands', { method: 'POST', body: JSON.stringify({ deviceId: quickCommand.dataset.deviceId, command: quickCommand.dataset.deviceQuickCommand, payload }) })
         .then(() => { status.textContent = 'Comando enviado'; if (typeof loadDevices === 'function') void loadDevices(); })
         .catch((error) => { status.textContent = `Error: ${error.message}`; })
         .finally(() => { if (quickCommand.isConnected) quickCommand.disabled = false; });
@@ -1796,10 +1822,10 @@ function configureDeviceCommands() {
   const payload = $('#command-payload') || $('.command-compose textarea');
   if (!commandSelect || !payload) return;
   const commands = {
-    'curtain.open': { payload: {}, help: 'No requiere payload. Abre ambos servos de la cortina.' },
-    'curtain.close': { payload: {}, help: 'No requiere payload. Cierra ambos servos de la cortina.' },
+    'curtain.open': { payload: { speed: 240, acceleration: 50 }, help: 'Servo: velocidad efectiva 60-240; la aproximacion final baja a 60.' },
+    'curtain.close': { payload: { speed: 240, acceleration: 50 }, help: 'Servo: velocidad efectiva 60-240; la aproximacion final baja a 60.' },
     'curtain.stop': { payload: {}, help: 'No requiere payload. Detiene el movimiento actual de ambos servos.' },
-    'curtain.move': { payload: { servoId: 1, percent: 50, speed: 800, acceleration: 50 }, help: 'servoId: 1 o 2. percent: 0-100. speed: 0-3073. acceleration: 0-150.' },
+    'curtain.move': { payload: { servoId: 1, percent: 50, speed: 240, acceleration: 50 }, help: 'servoId: 1 o 2. percent: 0-100. speed efectivo Servo hasta 240 (aproximacion final 60); acceleration: 0-150.' },
     'servo.configure': { payload: { servoId: 1, min: 300, max: 3700, mode: 0, torqueLimit: 1000 }, help: 'servoId: 1 o 2. min/max: 0-4095. mode: 0 Servo, 1 Rueda, 3 Multivuelta. torqueLimit: 0-1000.' },
     'motion.configure': { payload: { speed: 800, acceleration: 50 }, help: 'speed: 0-3073. acceleration: 0-150.' },
     'servo.torque': { payload: { servoId: 1, enabled: true }, help: 'servoId: 1 o 2. enabled: true o false.' },
@@ -1825,7 +1851,9 @@ function configureDeviceCommands() {
   }
   const applyCommandTemplate = () => {
     const definition = tuyaCommands.find((item) => item.value === commandSelect.value) || commands[commandSelect.value];
-    payload.value = JSON.stringify(definition?.payload || {}, null, 2);
+    const commandPayload = { ...(definition?.payload || {}) };
+    if (isGa25Device && ['curtain.open', 'curtain.close', 'curtain.move'].includes(commandSelect.value)) commandPayload.speed = 70;
+    payload.value = JSON.stringify(commandPayload, null, 2);
     help.textContent = definition?.help || (isTuyaDevice ? 'Tuya no expone controles para este equipo; la telemetria seguira disponible.' : '');
   };
   commandSelect.addEventListener('change', applyCommandTemplate);

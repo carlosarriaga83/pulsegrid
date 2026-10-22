@@ -80,7 +80,7 @@ test('cloud exposes confirmed clean calibration reset only for online Servo r32+
     const renderWizard = app.slice(app.indexOf('function renderCalibrationWizard()'), app.indexOf('\nfunction ', app.indexOf('function renderCalibrationWizard()') + 10));
     assert.ok(renderWizard.indexOf('mountCloudBlindCalibrationWizard') < renderWizard.indexOf("if ($('#calibration-wizard')) return;"), `${folder || 'cloud root'} calls reset injector before returning for an existing wizard`);
     assert.match(html, /cloud-blind-calibration-ui\.js\?v=5/);
-    assert.match(html, /app\.js\?v=68/);
+    assert.match(html, /app\.js\?v=69/);
   }
   const server = fs.readFileSync(path.join(root, 'server.js'), 'utf8');
   assert.match(server, /function validateServoEncoderReference\(/);
@@ -94,7 +94,9 @@ test('cloud exposes confirmed clean calibration reset only for online Servo r32+
   assert.match(cortina, /self\.absolute_turns\[servo_id\] = 0\.0/);
   assert.match(cortina, /'calibration_in_progress': False/);
   assert.match(cortina, /recupera el punto medio desde Pulsegrid y vuelve a aplicar la calibracion geometrica antes de mover/);
-  assert.match(fs.readFileSync(path.join(root, '..', 'dispositivos/servo/main.py'), 'utf8'), /servo-r33/);
+  const servoMain = fs.readFileSync(path.join(root, '..', 'dispositivos/servo/main.py'), 'utf8');
+  const servoVersion = servoMain.match(/FIRMWARE_VERSION = '2026\.10\.21\.servo-r(\d+)'/);
+  assert.ok(servoVersion && Number(servoVersion[1]) >= 33, 'clean reference recovery requires Servo r33-or-newer firmware');
 });
 
 test('Servo cloud calibration applies limits without starting or polling for movement', () => {

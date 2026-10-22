@@ -120,7 +120,7 @@ function automationValueSource(source) {
 
 function automationMotionValue(value, fallback, label, maximum) {
   const motion = value == null || value === '' ? fallback : Number(value);
-  if (!Number.isInteger(motion) || motion < 0 || motion > maximum) throw new Error(`${label} debe estar entre 0 y ${maximum}`);
+  if (!Number.isInteger(motion) || motion < 1 || motion > maximum) throw new Error(`${label} debe estar entre 1 y ${maximum}`);
   return motion;
 }
 
@@ -205,7 +205,7 @@ function automationInput(body = {}) {
   const commandPayload = body.commandPayload;
   const valueSource = automationValueSource(body.valueSource);
   const position = Number(body.position);
-  const speed = automationMotionValue(body.speed, 800, 'Velocidad', 3073);
+  const speed = automationMotionValue(body.speed, 240, 'Velocidad', 3073);
   const acceleration = automationMotionValue(body.acceleration, 50, 'Aceleracion', 150);
   const timezone = automationTimezone(body.timezone);
   const weekdays = automationWeekdays(body.weekdays);
@@ -804,6 +804,7 @@ async function ensureSchema() {
     const db = database();
     await db.execute("CREATE TABLE IF NOT EXISTS users (id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY, name VARCHAR(120) NOT NULL, email VARCHAR(190) NOT NULL UNIQUE, password_hash VARCHAR(255) NOT NULL, role ENUM('admin','operator','viewer') NOT NULL DEFAULT 'viewer', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP) ENGINE=InnoDB");
     await db.execute("CREATE TABLE IF NOT EXISTS api_keys (id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY, user_id INT UNSIGNED NOT NULL UNIQUE, key_hash CHAR(64) NOT NULL UNIQUE, key_hint VARCHAR(16) NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, last_used_at TIMESTAMP NULL, CONSTRAINT api_keys_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE) ENGINE=InnoDB");
+    await db.execute("CREATE TABLE IF NOT EXISTS mobile_tokens (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, session_id CHAR(36) NOT NULL, user_id INT UNSIGNED NOT NULL, token_hash CHAR(64) NOT NULL UNIQUE, token_type ENUM('access','refresh') NOT NULL, expires_at DATETIME NOT NULL, revoked_at DATETIME NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, INDEX mobile_session_tokens (session_id, token_type), INDEX mobile_user_tokens (user_id, expires_at), CONSTRAINT mobile_tokens_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE) ENGINE=InnoDB");
     await db.execute("CREATE TABLE IF NOT EXISTS devices (id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY, user_id INT UNSIGNED NOT NULL, device_id VARCHAR(80) NOT NULL, name VARCHAR(120) NOT NULL, type VARCHAR(60) NOT NULL, device_code_hash CHAR(64) NULL, provider VARCHAR(20) NOT NULL DEFAULT 'pulsegrid', capabilities JSON NULL, status ENUM('online','offline','provisioning') NOT NULL DEFAULT 'offline', last_seen TIMESTAMP NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, UNIQUE KEY user_device (user_id, device_id), UNIQUE KEY device_code_hash_unique (device_code_hash), CONSTRAINT devices_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE) ENGINE=InnoDB");
     try { await db.execute("ALTER TABLE devices MODIFY COLUMN status ENUM('online','offline','provisioning') NOT NULL DEFAULT 'offline'"); } catch (error) { throw error; }
     try { await db.execute("ALTER TABLE devices ADD COLUMN provider VARCHAR(20) NOT NULL DEFAULT 'pulsegrid' AFTER type"); } catch (error) { if (error.code !== 'ER_DUP_FIELDNAME') throw error; }
@@ -887,6 +888,97 @@ function requireSession(request, response, next) {
   if (!request.session.user) return fail(response, 401, 'Authentication required');
   next();
 }
+
+const MOBILE_ACCESS_TOKEN_TTL_SECONDS = 15 * 60;
+const MOBILE_REFRESH_TOKEN_TTL_DAYS = 30;
+
+function mobileTokenHash(token) {
+  return crypto.createHash('sha256').update(String(token)).digest('hex');
+}
+
+function bearerToken(request) {
+  const match = String(request.get('authorization') || '').match(/^Bearer\s+([A-Za-z0-9_-]{40,})$/i);
+  return match ? match[1] : null;
+}
+
+async function issueMobileTokens(db, user, sessionId = crypto.randomUUID()) {
+  const accessToken = crypto.randomBytes(32).toString('base64url');
+  const refreshToken = crypto.randomBytes(48).toString('base64url');
+  await db.execute("INSERT INTO mobile_tokens (session_id, user_id, token_hash, token_type, expires_at) VALUES (?, ?, ?, 'access', DATE_ADD(NOW(), INTERVAL ? SECOND)), (?, ?, ?, 'refresh', DATE_ADD(NOW(), INTERVAL ? DAY))", [sessionId, user.id, mobileTokenHash(accessToken), MOBILE_ACCESS_TOKEN_TTL_SECONDS, sessionId, user.id, mobileTokenHash(refreshToken), MOBILE_REFRESH_TOKEN_TTL_DAYS]);
+  return { accessToken, refreshToken, expiresIn: MOBILE_ACCESS_TOKEN_TTL_SECONDS, user: userPayload(user) };
+}
+
+async function requireMobileAuth(request, response, next) {
+  try {
+    const token = bearerToken(request);
+    if (!token) return fail(response, 401, 'Mobile bearer token required');
+    const [rows] = await database().execute("SELECT users.id, users.name, users.email, users.role FROM mobile_tokens JOIN users ON users.id = mobile_tokens.user_id WHERE mobile_tokens.token_hash = ? AND mobile_tokens.token_type = 'access' AND mobile_tokens.revoked_at IS NULL AND mobile_tokens.expires_at > NOW() LIMIT 1", [mobileTokenHash(token)]);
+    if (!rows[0]) return fail(response, 401, 'Mobile access token expired or revoked');
+    request.mobileUser = userPayload(rows[0]);
+    next();
+  } catch (error) {
+    console.error('Mobile token validation:', error.message);
+    fail(response, 503, 'Mobile authentication is temporarily unavailable');
+  }
+}
+
+app.post('/api/mobile/auth/login', apiReady, async (request, response) => {
+  const email = String(request.body?.email || '').trim().toLowerCase();
+  const password = String(request.body?.password || '');
+  if (!email || !password) return fail(response, 422, 'Correo y contrasena son obligatorios');
+  try {
+    const [rows] = await database().execute('SELECT id, name, email, password_hash, role FROM users WHERE email = ? LIMIT 1', [email]);
+    const user = rows[0];
+    if (!user) return fail(response, 401, 'Correo o contrasena incorrectos');
+    const usesBcrypt = user.password_hash.startsWith('$2');
+    const validPassword = usesBcrypt ? await bcrypt.compare(password, user.password_hash) : await hashPassword(password) === user.password_hash;
+    if (!validPassword) return fail(response, 401, 'Correo o contrasena incorrectos');
+    if (!usesBcrypt) await database().execute('UPDATE users SET password_hash = ? WHERE id = ?', [await bcrypt.hash(password, 12), user.id]);
+    response.json(await issueMobileTokens(database(), user));
+  } catch (error) {
+    console.error('Mobile login:', error.message);
+    fail(response, 503, 'No fue posible iniciar sesion');
+  }
+});
+
+app.post('/api/mobile/auth/refresh', apiReady, async (request, response) => {
+  const rawToken = String(request.body?.refreshToken || '');
+  if (!/^[A-Za-z0-9_-]{60,}$/.test(rawToken)) return fail(response, 401, 'Refresh token invalido');
+  const connection = await database().getConnection();
+  try {
+    await connection.beginTransaction();
+    const [rows] = await connection.execute("SELECT mobile_tokens.session_id AS sessionId, mobile_tokens.user_id AS userId, mobile_tokens.revoked_at AS revokedAt, (mobile_tokens.expires_at <= NOW()) AS expired, users.name, users.email, users.role FROM mobile_tokens JOIN users ON users.id = mobile_tokens.user_id WHERE mobile_tokens.token_hash = ? AND mobile_tokens.token_type = 'refresh' LIMIT 1 FOR UPDATE", [mobileTokenHash(rawToken)]);
+    const token = rows[0];
+    if (!token) {
+      await connection.rollback();
+      return fail(response, 401, 'Refresh token invalido');
+    }
+    if (token.revokedAt || Boolean(token.expired)) {
+      await connection.execute('UPDATE mobile_tokens SET revoked_at = COALESCE(revoked_at, NOW()) WHERE session_id = ? AND revoked_at IS NULL', [token.sessionId]);
+      await connection.commit();
+      return fail(response, 401, 'Refresh token expirado o reutilizado; inicia sesion de nuevo');
+    }
+    await connection.execute('UPDATE mobile_tokens SET revoked_at = NOW() WHERE session_id = ? AND revoked_at IS NULL', [token.sessionId]);
+    const result = await issueMobileTokens(connection, { id: token.userId, name: token.name, email: token.email, role: token.role }, token.sessionId);
+    await connection.commit();
+    response.json(result);
+  } catch (error) {
+    await connection.rollback();
+    console.error('Mobile token refresh:', error.message);
+    fail(response, 503, 'No fue posible renovar la sesion');
+  } finally { connection.release(); }
+});
+
+app.post('/api/mobile/auth/logout', apiReady, async (request, response) => {
+  const rawToken = String(request.body?.refreshToken || '');
+  if (rawToken) {
+    const [tokens] = await database().execute("SELECT session_id AS sessionId FROM mobile_tokens WHERE token_hash = ? AND token_type = 'refresh' LIMIT 1", [mobileTokenHash(rawToken)]);
+    if (tokens[0]) await database().execute('UPDATE mobile_tokens SET revoked_at = COALESCE(revoked_at, NOW()) WHERE session_id = ? AND revoked_at IS NULL', [tokens[0].sessionId]);
+  }
+  response.json({ ok: true });
+});
+
+app.get('/api/mobile/me', apiReady, requireMobileAuth, (request, response) => response.json({ user: request.mobileUser }));
 
 app.get('/api/api-key', requireSession, apiReady, async (request, response) => {
   const [rows] = await database().execute('SELECT key_hint AS hint, created_at AS createdAt, last_used_at AS lastUsedAt FROM api_keys WHERE user_id = (SELECT id FROM users WHERE email = ?) LIMIT 1', [request.session.user.email]);
@@ -1058,6 +1150,55 @@ app.post('/api/commands', requireSession, apiReady, async (request, response) =>
   try {
     const { deviceId, command, payload } = request.body || {};
     const result = await queueUserDeviceCommand(database(), request.session.user.email, deviceId, command, payload);
+    response.status(result.status === 'queued' ? 201 : 200).json({ ok: true, ...result, commandId: result.id });
+  } catch (error) {
+    fail(response, error.message === 'Dispositivo no encontrado' ? 404 : 422, error.message);
+  }
+});
+
+app.get('/api/mobile/devices', apiReady, requireMobileAuth, async (request, response) => {
+  const [rows] = await database().execute("SELECT devices.device_id AS id, devices.name, devices.type, devices.provider, devices.capabilities, CASE WHEN devices.provider = 'tuya' THEN devices.status WHEN devices.status = 'provisioning' THEN 'provisioning' WHEN devices.last_seen IS NOT NULL AND devices.last_seen >= DATE_SUB(NOW(), INTERVAL 90 SECOND) THEN devices.status ELSE 'offline' END AS status, devices.last_seen AS report, (SELECT telemetry.payload FROM telemetry WHERE telemetry.device_id = devices.id ORDER BY telemetry.id DESC LIMIT 1) AS telemetry, (SELECT commands.status FROM commands WHERE commands.device_id = devices.id ORDER BY commands.id DESC LIMIT 1) AS lastCommandStatus, (SELECT commands.error_message FROM commands WHERE commands.device_id = devices.id ORDER BY commands.id DESC LIMIT 1) AS lastCommandError FROM devices WHERE devices.user_id = (SELECT id FROM users WHERE email = ?) ORDER BY devices.created_at DESC", [request.mobileUser.email]);
+  response.json({ devices: rows.map((row) => ({ ...row, capabilities: typeof row.capabilities === 'string' ? JSON.parse(row.capabilities) : row.capabilities, telemetry: typeof row.telemetry === 'string' ? JSON.parse(row.telemetry) : row.telemetry })) });
+});
+
+app.post('/api/mobile/devices', apiReady, requireMobileAuth, async (request, response) => {
+  const { name, type, deviceCode } = request.body || {};
+  const deviceId = deviceIdFromCode(deviceCode);
+  const deviceName = String(name || '').trim();
+  const deviceType = String(type || '').trim();
+  const code = String(deviceCode || '').trim();
+  if (!deviceId || !deviceName || deviceName.length > 120 || !deviceType || deviceType.length > 60) return fail(response, 422, 'Nombre, tipo y codigo unico valido son obligatorios');
+  try {
+    const db = database();
+    const [existing] = await db.execute('SELECT id, provider FROM devices WHERE user_id = (SELECT id FROM users WHERE email = ?) AND device_id = ? LIMIT 1', [request.mobileUser.email, deviceId]);
+    if (existing[0]?.provider === 'tuya') return fail(response, 409, 'No se puede registrar un codigo Pulsegrid en un dispositivo Tuya');
+    if (existing[0]) {
+      await db.execute("UPDATE devices SET name = ?, type = ?, device_code_hash = ?, status = 'provisioning', last_seen = NULL WHERE id = ?", [deviceName, deviceType, hashDeviceCode(code), existing[0].id]);
+      return response.json({ ok: true, id: existing[0].id, deviceId, status: 'provisioning' });
+    }
+    const [result] = await db.execute("INSERT INTO devices (user_id, device_id, name, type, device_code_hash, status) VALUES ((SELECT id FROM users WHERE email = ?), ?, ?, ?, ?, 'provisioning')", [request.mobileUser.email, deviceId, deviceName, deviceType, hashDeviceCode(code)]);
+    response.status(201).json({ ok: true, id: result.insertId, deviceId, status: 'provisioning' });
+  } catch (error) { fail(response, error.code === 'ER_DUP_ENTRY' ? 409 : 500, error.code === 'ER_DUP_ENTRY' ? 'El codigo ya esta vinculado a otro dispositivo' : 'No fue posible crear el dispositivo'); }
+});
+
+app.get('/api/mobile/telemetry', apiReady, requireMobileAuth, async (request, response) => {
+  const deviceId = String(request.query.deviceId || '').trim();
+  if (!deviceId) return fail(response, 422, 'deviceId es obligatorio');
+  const [devices] = await database().execute('SELECT id FROM devices WHERE user_id = (SELECT id FROM users WHERE email = ?) AND device_id = ? LIMIT 1', [request.mobileUser.email, deviceId]);
+  if (!devices[0]) return fail(response, 404, 'Dispositivo no encontrado');
+  const [rows] = await database().execute('SELECT payload, created_at AS createdAt FROM telemetry WHERE device_id = ? ORDER BY created_at DESC, id DESC LIMIT 100', [devices[0].id]);
+  response.json({ telemetry: rows.map((row) => ({ ...row, payload: typeof row.payload === 'string' ? JSON.parse(row.payload) : row.payload })) });
+});
+
+app.get('/api/mobile/commands', apiReady, requireMobileAuth, async (request, response) => {
+  const [rows] = await database().execute('SELECT commands.id, commands.command_name AS command, commands.payload, commands.status, commands.error_message AS errorMessage, commands.created_at AS createdAt, devices.device_id AS deviceId, devices.name AS deviceName FROM commands JOIN devices ON devices.id = commands.device_id WHERE devices.user_id = (SELECT id FROM users WHERE email = ?) ORDER BY commands.created_at DESC LIMIT 50', [request.mobileUser.email]);
+  response.json({ commands: rows.map((row) => ({ ...row, payload: typeof row.payload === 'string' ? JSON.parse(row.payload) : row.payload })) });
+});
+
+app.post('/api/mobile/commands', apiReady, requireMobileAuth, async (request, response) => {
+  try {
+    const { deviceId, command, payload } = request.body || {};
+    const result = await queueUserDeviceCommand(database(), request.mobileUser.email, deviceId, command, payload);
     response.status(result.status === 'queued' ? 201 : 200).json({ ok: true, ...result, commandId: result.id });
   } catch (error) {
     fail(response, error.message === 'Dispositivo no encontrado' ? 404 : 422, error.message);

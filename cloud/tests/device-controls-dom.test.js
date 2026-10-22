@@ -171,12 +171,17 @@ for (const folder of ['', 'public', 'public_html']) {
     const slider = window.document.querySelector('[data-curtain-position]');
     assert.ok(slider);
     assert.equal(slider.value, '40');
+    const speedSlider = window.document.querySelector('[data-curtain-speed]');
+    assert.ok(speedSlider);
+    assert.equal(speedSlider.value, '240');
+    speedSlider.value = '180';
+    speedSlider.dispatchEvent(new window.Event('input', { bubbles: true }));
     slider.value = '64';
     slider.dispatchEvent(new window.Event('input', { bubbles: true }));
     assert.equal(slider.parentElement.querySelector('output').value, '64%');
     slider.dispatchEvent(new window.Event('change', { bubbles: true }));
     await new Promise((resolve) => window.setTimeout(resolve, 0));
-    assert.deepEqual(f.requests[0], { endpoint: 'commands', deviceId: 'curtain-1', command: 'curtain.move', payload: { percent: 64, speed: 800, acceleration: 50, allServos: true } });
+    assert.deepEqual(f.requests[0], { endpoint: 'commands', deviceId: 'curtain-1', command: 'curtain.move', payload: { percent: 64, speed: 180, acceleration: 50, allServos: true } });
     assert.equal(window.document.querySelector('[data-curtain-position-status]').textContent, 'En cola');
     window.devices[0].telemetry.servos[1].blind_target_percent = 64;
     window.devices[0].telemetry.servos[2].blind_target_percent = 64;

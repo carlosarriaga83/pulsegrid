@@ -328,8 +328,12 @@ class CalibrationCompletionTests(unittest.TestCase):
         controller._save_persistent_state = lambda: None
 
         for target_percent in (73, 21, 53):
-            controller.move_blind(1, target_percent)
+            requested_speed = 180 if target_percent == 73 else 800
+            controller.move_blind(1, target_percent, speed=requested_speed)
             movement = controller.multiturn_tasks[1]
+            self.assertEqual(movement['speed'], requested_speed if requested_speed < controller.MAX_CURTAIN_SPEED else controller.MAX_CURTAIN_SPEED)
+            expected_initial_speed = requested_speed if requested_speed < controller.MAX_CURTAIN_SPEED else controller.MAX_CURTAIN_SPEED
+            self.assertIn(('wheel', movement['direction'] * expected_initial_speed, 50), controller.bus.calls)
             for _ in range(5000):
                 if not controller.multiturn_active[1]:
                     break
@@ -365,8 +369,10 @@ class CalibrationCompletionTests(unittest.TestCase):
         controller._last_saved_turns = {1: start_turns}
         controller._save_persistent_state = lambda: None
 
-        controller.move_blind(1, 0)
+        controller.move_blind(1, 0, speed=800)
         movement = controller.multiturn_tasks[1]
+        self.assertEqual(movement['speed'], controller.MAX_CURTAIN_SPEED)
+        self.assertEqual(controller.blind_targets[1]['speed'], controller.MAX_CURTAIN_SPEED)
         for _ in range(5000):
             if not controller.multiturn_active[1]:
                 break
@@ -375,7 +381,7 @@ class CalibrationCompletionTests(unittest.TestCase):
         self.assertTrue(movement['completed'])
         self.assertEqual(controller.bus.wheel_speed, 0)
         self.assertIn(('wheel', -60, 50), controller.bus.calls)
-        self.assertIn(('wheel', -120, 50), controller.bus.calls)
+        self.assertIn(('wheel', -240, 50), controller.bus.calls)
         self.assertIn(('move', controller.bus.current_position, 120, 50), controller.bus.calls)
         self.assertAlmostEqual(controller.absolute_turns[1], controller.blind_config[1]['rolled_turns'], delta=16 / 4096)
         self.assertEqual(controller.blind_status(1)['percent'], 0.0)

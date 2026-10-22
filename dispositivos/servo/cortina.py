@@ -7,7 +7,10 @@ from stservo import STServoBus, STServoError
 class Cortina:
     COUNTS_PER_TURN = 4096
     MAX_LONG_TURNS = 999.99
+    MAX_SPEED = 3073
+    MAX_ACCELERATION = 150
     APPROACH_SPEED = 120
+    MAX_CURTAIN_SPEED = 240
     FINAL_APPROACH_SPEED = 60
     CALIBRATION_STEP_SPEED = 240
     PRECISION_COMPLETION_TOLERANCE_COUNTS = 16
@@ -317,7 +320,7 @@ class Cortina:
             raise ValueError('vueltas de precision fuera de rango')
         speed = int(speed)
         acceleration = int(acceleration)
-        if not 0 <= speed <= self.bus.MAX_SPEED or not 0 <= acceleration <= self.bus.MAX_ACCELERATION:
+        if not 0 <= speed <= self.MAX_SPEED or not 0 <= acceleration <= self.MAX_ACCELERATION:
             raise ValueError('velocidad o aceleracion fuera de rango')
         self.bus.torque(servo_id, False)
         self.bus.set_mode(servo_id, 0)
@@ -368,9 +371,9 @@ class Cortina:
             raise ValueError('vueltas fuera de rango')
         speed = int(speed)
         acceleration = int(acceleration)
-        if not 0 <= speed <= self.bus.MAX_SPEED or not 0 <= acceleration <= self.bus.MAX_ACCELERATION:
+        if not 1 <= speed <= self.MAX_SPEED or not 0 <= acceleration <= self.MAX_ACCELERATION:
             raise ValueError('velocidad o aceleracion fuera de rango')
-        speed = min(speed, self.APPROACH_SPEED)
+        speed = min(speed, self.MAX_CURTAIN_SPEED)
         current = self.bus.position(servo_id)
         self._last_positions[servo_id] = current
         self.bus.torque(servo_id, False)
@@ -415,6 +418,11 @@ class Cortina:
     def move_blind(self, servo_id, percent, speed=800, acceleration=50):
         if servo_id not in self.servo_ids or not 0 <= float(percent) <= 100:
             raise ValueError('servo o posicion invalida')
+        speed = int(speed)
+        acceleration = int(acceleration)
+        if not 1 <= speed <= self.MAX_SPEED or not 0 <= acceleration <= self.MAX_ACCELERATION:
+            raise ValueError('velocidad o aceleracion fuera de rango')
+        speed = min(speed, self.MAX_CURTAIN_SPEED)
         percent = float(percent)
         config = self.blind_config[servo_id]
         if config.get('calibration_in_progress'):

@@ -294,6 +294,10 @@ function setupAutomationsView() {
   const form = $('#automation-form');
   if (!form || form.dataset.bound) return;
   form.dataset.bound = 'true';
+  $('#automation-speed').min = '1';
+  $('#automation-speed').max = '240';
+  $('#automation-speed').value = '240';
+  $('#automation-speed').defaultValue = '240';
   const automationList = $('.automation-list');
   const actionDeviceLabel = $('#automation-device')?.closest('label');
   const actionLabel = $('#automation-action')?.closest('label');
@@ -387,7 +391,7 @@ function setupAutomationsView() {
       (rule.conditions?.length ? rule.conditions : rule.condition ? [rule.condition] : [{}]).forEach((condition) => addCondition(condition));
       AutomationUI.editTarget(rule);
       $('#automation-position').value = rule.position == null ? 50 : rule.position;
-      $('#automation-speed').value = rule.speed == null ? 800 : rule.speed;
+      $('#automation-speed').value = Math.min(240, rule.speed == null ? 240 : rule.speed);
       $('#automation-acceleration').value = rule.acceleration == null ? 50 : rule.acceleration;
       updateActionFields();
       $('#automation-form-title').textContent = 'Editar regla';
@@ -1665,10 +1669,10 @@ function configureDeviceCommands() {
   const payload = $('#command-payload') || $('.command-compose textarea');
   if (!commandSelect || !payload) return;
   const commands = {
-    'curtain.open': { payload: {}, help: 'No requiere payload. Abre ambos servos de la cortina.' },
-    'curtain.close': { payload: {}, help: 'No requiere payload. Cierra ambos servos de la cortina.' },
+    'curtain.open': { payload: { speed: 240, acceleration: 50 }, help: 'Servo: velocidad efectiva 60-240; la aproximacion final baja a 60.' },
+    'curtain.close': { payload: { speed: 240, acceleration: 50 }, help: 'Servo: velocidad efectiva 60-240; la aproximacion final baja a 60.' },
     'curtain.stop': { payload: {}, help: 'No requiere payload. Detiene el movimiento actual de ambos servos.' },
-    'curtain.move': { payload: { servoId: 1, percent: 50, speed: 800, acceleration: 50 }, help: 'servoId: 1 o 2. percent: 0-100. speed: 0-3073. acceleration: 0-150.' },
+    'curtain.move': { payload: { servoId: 1, percent: 50, speed: 240, acceleration: 50 }, help: 'servoId: 1 o 2. percent: 0-100. speed efectivo Servo hasta 240 (aproximacion final 60); acceleration: 0-150.' },
     'servo.configure': { payload: { servoId: 1, min: 300, max: 3700, mode: 0, torqueLimit: 1000 }, help: 'servoId: 1 o 2. min/max: 0-4095. mode: 0 Servo, 1 Rueda, 3 Multivuelta. torqueLimit: 0-1000.' },
     'motion.configure': { payload: { speed: 800, acceleration: 50 }, help: 'speed: 0-3073. acceleration: 0-150.' },
     'servo.torque': { payload: { servoId: 1, enabled: true }, help: 'servoId: 1 o 2. enabled: true o false.' },
