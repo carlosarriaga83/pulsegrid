@@ -412,7 +412,7 @@ class CalibrationCompletionTests(unittest.TestCase):
         controller.blind_targets = {1: {'percent': 50.0, 'speed': 800, 'acceleration': 50}}
         controller.multiturn_tasks = {1: None}
         controller.multiturn_active = {1: False}
-        controller.bus = SimulatedWheelBus(raw_position, step_counts=16, coast_counts=260)
+        controller.bus = SimulatedWheelBus(raw_position, step_counts=16, coast_counts=900)
         controller._last_positions = {1: raw_position}
         controller._last_saved_turns = {1: start_turns}
         controller._save_persistent_state = lambda: None
@@ -432,8 +432,8 @@ class CalibrationCompletionTests(unittest.TestCase):
             controller.move_blind(1, 0)
         self.assertEqual([call for call in controller.bus.calls if call[0] == 'wheel'], wheel_commands_before_retry)
 
-    def test_twenty_degree_coast_is_accepted_and_next_absolute_setpoint_uses_actual_encoder(self):
-        module = load_cortina_module('cortina_twenty_degree_tolerance_test')
+    def test_twenty_percent_turn_coast_is_accepted_and_next_setpoint_uses_actual_encoder(self):
+        module = load_cortina_module('cortina_twenty_percent_turn_tolerance_test')
         controller = object.__new__(module.Cortina)
         start_turns = -3.0
         raw_position = round(start_turns * 4096) % 4096
@@ -454,6 +454,7 @@ class CalibrationCompletionTests(unittest.TestCase):
         controller.multiturn_tasks = {1: None}
         controller.multiturn_active = {1: False}
         tolerance = module.Cortina.MOVEMENT_POSITION_TOLERANCE_COUNTS
+        self.assertEqual(tolerance, 819)  # 20% of the 4096-count encoder revolution.
         controller.bus = SimulatedWheelBus(raw_position, step_counts=16, coast_counts=tolerance - 8)
         controller._last_positions = {1: raw_position}
         controller._last_saved_turns = {1: start_turns}

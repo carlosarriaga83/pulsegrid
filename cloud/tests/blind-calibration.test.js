@@ -160,7 +160,7 @@ test('servo firmware accepts cloud estimates only with reliable encoder state an
   assert.match(cortina, /APPROACH_COUNTS = COUNTS_PER_TURN \/\/ 16/);
   assert.match(cortina, /task\['target_counts'\] - task\['moved_counts'\] <= self\.APPROACH_COUNTS/);
   assert.match(cortina, /fault_reason = 'position_overshoot'/);
-  assert.match(cortina, /MOVEMENT_POSITION_TOLERANCE_COUNTS = int\(COUNTS_PER_TURN \* 20 \/ 360 \+ 0\.5\)/);
+  assert.match(cortina, /MOVEMENT_POSITION_TOLERANCE_COUNTS = int\(COUNTS_PER_TURN \* 0\.20 \+ 0\.5\)/);
   const stservo = fs.readFileSync(path.join(root, 'dispositivos/servo/stservo.py'), 'utf8');
   assert.match(stservo, /def move_multiturn\(self, servo_id, turns, current_position=0, speed=800, acceleration=50\):/);
   assert.match(stservo, /encoded_target = abs\(target\) \| \(\(1 << 15\) if target < 0 else 0\)/);
