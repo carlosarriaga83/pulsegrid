@@ -280,6 +280,7 @@ class CloudClient:
     def _execute_command(self, cortina, led_setter, command):
         name = command.get('name')
         payload = command.get('payload') or {}
+        print("Executing command:", name, "with payload:", payload)
         if (name in ('curtain.open', 'curtain.close', 'curtain.move', 'servo.configure', 'servo.torque', 'servo.resetTurns')
                 and any(config.get('calibration_in_progress') for config in cortina.blind_config.values())):
             raise ValueError('comando bloqueado durante la calibracion segura; usa los pasos guiados o cancela la calibracion')

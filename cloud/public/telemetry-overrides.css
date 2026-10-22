@@ -41,6 +41,17 @@
 .device-quick-actions button svg{width:13px;height:13px}.device-quick-actions small{flex-basis:100%;color:var(--muted);font-size:10px}
 .telemetry-chart-wrap{height:340px;min-height:340px;position:relative;overflow:hidden}
 .telemetry-chart-wrap canvas{display:block!important;width:100%!important;height:100%!important;min-width:0!important;max-height:340px}
+.device-card.is-command-pending{border-color:color-mix(in srgb,var(--lime,#c8f76b) 42%,var(--line,#27302b))}
+.device-command-feedback{display:flex;align-items:center;gap:9px;margin:12px 0;padding:9px 11px;border:1px solid color-mix(in srgb,var(--lime,#c8f76b) 35%,var(--line,#27302b));border-radius:8px;background:color-mix(in srgb,var(--lime,#c8f76b) 7%,var(--surface,#171d19));color:var(--text,#edf1e8);font-size:11px;line-height:1.45}
+.device-command-feedback[hidden]{display:none}
+.device-command-feedback.is-terminal{overflow:hidden;border-color:var(--line,#27302b);background:var(--surface-2,#171d19);color:var(--muted,#929b9c);animation:command-feedback-expire 5s forwards}
+.command-progress-spinner{width:13px;height:13px;flex:0 0 13px;border:2px solid color-mix(in srgb,var(--lime,#c8f76b) 30%,transparent);border-top-color:var(--lime,#c8f76b);border-radius:50%;animation:command-progress-spin .8s linear infinite}
+@keyframes command-progress-spin{to{transform:rotate(360deg)}}
+@keyframes command-feedback-expire{0%,75%{opacity:1;max-height:60px;margin-top:12px;margin-bottom:12px;padding-top:9px;padding-bottom:9px}100%{opacity:0;max-height:0;margin-top:0;margin-bottom:0;padding-top:0;padding-bottom:0;border-width:0}}
+.device-card [data-device-command-control]:disabled{cursor:wait}
+.device-card .device-parameter-switch:has(input:disabled){cursor:not-allowed}
+.device-card .device-parameter-switch input:disabled+i{opacity:.55}
+.device-curtain-speed input:disabled{opacity:.55;cursor:not-allowed}
 @media(max-width:600px){.device-parameter,.device-curtain-position{grid-template-columns:minmax(75px,.8fr) minmax(115px,1.2fr);gap:7px}}
 .device-card-header{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:start}.device-card-toggle{min-width:0}.device-card-top{display:flex;align-items:center;gap:10px}.device-card-status{margin-left:auto}.device-card-id,.device-card-type{display:block}.device-card-id{margin-top:5px}.device-card-type{color:var(--muted);font-size:10px;margin-top:3px;text-transform:capitalize}.device-card-actions{display:flex;align-items:center;gap:4px}.device-card-actions button{display:grid;place-items:center;width:32px;height:32px;padding:0;border:1px solid transparent;background:transparent;color:var(--muted);cursor:pointer}.device-card-actions button:hover,.device-card-actions button:focus-visible{border-color:var(--line);color:var(--lime)}.device-card-actions svg{width:16px;height:16px}.device-card-expand svg{transition:transform .18s ease}.device-card-expand[aria-expanded="true"] svg{transform:rotate(180deg)}
 .telemetry-toolbar{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));align-items:stretch}.telemetry-toolbar label,.telemetry-toolbar select,.telemetry-toolbar input{width:100%;min-width:0;box-sizing:border-box}.telemetry-calendar{min-width:0}.telemetry-calendar>label{min-width:0}.telemetry-calendar #telemetry-days{max-width:100%;overflow-x:auto}

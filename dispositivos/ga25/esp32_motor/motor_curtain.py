@@ -32,6 +32,8 @@ class CurtainMotor:
             a = b = 0
         self.direction_a.value(a)
         self.direction_b.value(b)
+        # print a and b for debuggingm  
+        print("Direction set: a =", a, "b =", b)
 
     def set_direction_reversed(self, reversed_value):
         self._update_position()
@@ -55,6 +57,8 @@ class CurtainMotor:
 
     def start(self, direction, speed=70, target=None):
         self._update_position()
+        # print parameters
+        print("start called with direction:", direction, "speed:", speed, "target:", target)
         direction = 1 if direction > 0 else -1 if direction < 0 else 0
         if not direction:
             return self.stop()

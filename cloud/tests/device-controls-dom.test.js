@@ -42,7 +42,8 @@ function setup(folder, requestImpl = async () => ({ status: 'succeeded' }), conf
   const requests = [];
   const escape = (value) => String(value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
   Object.assign(window, {
-    devices: [structuredClone(configuredDevice)], AutomationModel: model,
+    devices: Array.isArray(configuredDevice) ? structuredClone(configuredDevice) : [structuredClone(configuredDevice)], AutomationModel: model,
+    deviceCommandPollIntervalMs: 5,
     navigate: (view) => { window.lastView = view; },
     loadTelemetry: async (deviceId) => { window.lastTelemetryDevice = deviceId; },
     formatDateTimeInput: (value) => value.toISOString().slice(0, 16),
@@ -53,8 +54,14 @@ function setup(folder, requestImpl = async () => ({ status: 'succeeded' }), conf
     deviceStatus: (item) => `<span class="status">${escape(item.status)}</span>`,
     renderIcons() {},
     apiRequest: async (endpoint, options) => {
-      requests.push({ endpoint, ...JSON.parse(options.body) });
-      return requestImpl(endpoint, options);
+      if (options?.method === 'POST') requests.push({ endpoint, ...JSON.parse(options.body) });
+      const result = await requestImpl(endpoint, options);
+      if (endpoint.startsWith('commands/') && !result.command) {
+        const commandId = Number(endpoint.split('/').at(-1));
+        return { command: { id: commandId, deviceId: configuredDevice.id || configuredDevice[0]?.id || 'tuya-1', status: 'succeeded' } };
+      }
+      if (options?.method === 'POST' && result.commandId == null && result.id == null) return { ...result, commandId: requests.length };
+      return result;
     }
   });
   vm.runInContext("let deviceCardFilter = ''; let deviceCardStatus = 'all'; const deviceControlRequests = new Map();", context);
@@ -106,7 +113,7 @@ for (const folder of ['', 'public', 'public_html']) {
     slider.value = '40';
     await vm.runInContext("sendDeviceParameter({ target: document.querySelector('[data-code=\\\"bright_value\\\"]') })", context);
     assert.deepEqual(f.requests[0], { endpoint: 'commands', deviceId: 'tuya-1', command: 'tuya.set', payload: { code: 'bright_value', value: 40 } });
-    assert.equal(window.document.querySelector('[data-code="bright_value"]').parentElement.parentElement.querySelector('[data-control-status]').textContent, 'Enviado');
+    assert.equal(window.document.querySelector('[data-code="bright_value"]').parentElement.parentElement.querySelector('[data-control-status]').textContent, label === 'public' ? '' : 'Enviado');
 
     const readOnly = window.document.querySelector('[data-code="temp_current"]');
     assert.equal(readOnly, null);
@@ -184,7 +191,7 @@ for (const folder of ['', 'public', 'public_html']) {
     slider.dispatchEvent(new window.Event('change', { bubbles: true }));
     await new Promise((resolve) => window.setTimeout(resolve, 0));
     assert.deepEqual(f.requests[0], { endpoint: 'commands', deviceId: 'curtain-1', command: 'curtain.move', payload: { percent: 64, speed: 180, acceleration: 50, allServos: true } });
-    assert.equal(window.document.querySelector('[data-curtain-position-status]').textContent, 'En cola');
+    assert.equal(window.document.querySelector('[data-curtain-position-status]').textContent, label === 'public' ? 'Comando enviado. Esperando al dispositivo…' : 'En cola');
     window.devices[0].telemetry.servos[1].blind_target_percent = 64;
     window.devices[0].telemetry.servos[2].blind_target_percent = 64;
     vm.runInContext('renderDeviceCards()', context);
@@ -310,4 +317,112 @@ test('command history shows curtain parameters and safely redacts/escapes payloa
   assert.doesNotMatch(history.innerHTML, /do-not-render/);
   assert.match(history.innerHTML, /&lt;Servo&gt;/);
   assert.equal(history.querySelector('[data-cancel-command="42"]') !== null, false);
+});
+
+test('public card tracks queued and delivered states and unlocks after succeeded', async (t) => {
+  let status = 'queued';
+  const f = setup('public', async (endpoint) => endpoint.startsWith('commands/')
+    ? { command: { id: 1, deviceId: 'tuya-1', status } }
+    : { status: 'queued', commandId: 1 });
+  t.after(() => f.dom.window.close());
+  const { window, context } = f;
+  const toggle = window.document.querySelector('[data-code="switch_led"]');
+  toggle.checked = false;
+  const command = vm.runInContext('sendDeviceParameter({ target: document.querySelector("[data-code=\\"switch_led\\"]") })', context);
+  await new Promise((resolve) => window.setTimeout(resolve, 10));
+  const card = window.document.querySelector('[data-device-card="tuya-1"]');
+  assert.equal(card.classList.contains('is-command-pending'), true);
+  assert.equal(toggle.disabled, true);
+  assert.equal(toggle.getAttribute('aria-disabled'), 'true');
+  assert.match(card.textContent, /Comando enviado\. Esperando al dispositivo/);
+  assert.equal(card.querySelector('[data-device-toggle]').disabled, false);
+  vm.runInContext('renderDeviceCards()', context);
+  assert.equal(window.document.querySelector('[data-code="switch_led"]').disabled, true);
+  status = 'delivered';
+  await new Promise((resolve) => window.setTimeout(resolve, 15));
+  assert.match(window.document.querySelector('[data-device-card="tuya-1"]').textContent, /Comando recibido\. Ejecutando/);
+  status = 'succeeded';
+  await command;
+  assert.equal(window.document.querySelector('[data-device-card="tuya-1"]').classList.contains('is-command-pending'), false);
+  assert.equal(window.document.querySelector('[data-code="switch_led"]').disabled, false);
+  assert.match(window.document.querySelector('[data-device-command-feedback]').textContent, /Comando completado/);
+});
+
+test('public card reports failed/canceled terminal states and restores optimistic values', async (t) => {
+  let status = 'failed';
+  let errorMessage = 'No se pudo aplicar';
+  const f = setup('public', async (endpoint) => endpoint.startsWith('commands/')
+    ? { command: { id: 1, deviceId: 'tuya-1', status, errorMessage } }
+    : { status: 'queued', commandId: 1 });
+  t.after(() => f.dom.window.close());
+  const { window, context } = f;
+  const toggle = window.document.querySelector('[data-code="switch_led"]');
+  toggle.checked = false;
+  await vm.runInContext('sendDeviceParameter({ target: document.querySelector("[data-code=\\"switch_led\\"]") })', context);
+  assert.equal(window.document.querySelector('[data-code="switch_led"]').checked, true);
+  assert.equal(window.document.querySelector('[data-code="switch_led"]').disabled, false);
+  assert.match(window.document.querySelector('[data-device-card="tuya-1"]').textContent, /Error: No se pudo aplicar/);
+
+  status = 'canceled';
+  errorMessage = '';
+  const directionDevice = { ...curtainDevice, id: 'curtain-1' };
+  const canceled = setup('public', async (endpoint) => endpoint.startsWith('commands/')
+    ? { command: { id: 1, deviceId: 'curtain-1', status } }
+    : { status: 'queued', commandId: 1 }, directionDevice);
+  t.after(() => canceled.dom.window.close());
+  const direction = canceled.window.document.querySelector('[data-device-direction]');
+  direction.checked = true;
+  await vm.runInContext('sendDeviceDirection({ target: document.querySelector("[data-device-direction]") })', canceled.context);
+  assert.equal(canceled.window.document.querySelector('[data-device-direction]').checked, false);
+  assert.equal(canceled.window.document.querySelector('[data-device-direction]').disabled, false);
+  assert.match(canceled.window.document.querySelector('[data-device-card="curtain-1"]').textContent, /Comando cancelado/);
+});
+
+test('public cards reject rapid duplicate commands but allow commands on other devices', async (t) => {
+  let status = 'queued';
+  const secondDevice = { ...device, id: 'tuya-2', name: 'Lamp 2' };
+  const f = setup('public', async (endpoint, options) => endpoint.startsWith('commands/')
+    ? { command: { id: Number(endpoint.split('/').at(-1)), deviceId: endpoint.endsWith('/1') ? 'tuya-1' : 'tuya-2', status } }
+    : { status: 'queued' }, [device, secondDevice]);
+  t.after(() => f.dom.window.close());
+  const first = vm.runInContext('executeTrackedDeviceCommand("tuya-1", "tuya.set", { code: "switch_led", value: false })', f.context);
+  const duplicate = await vm.runInContext('executeTrackedDeviceCommand("tuya-1", "tuya.set", { code: "switch_led", value: true })', f.context);
+  const other = vm.runInContext('executeTrackedDeviceCommand("tuya-2", "tuya.set", { code: "switch_led", value: false })', f.context);
+  await new Promise((resolve) => f.window.setTimeout(resolve, 10));
+  assert.equal(duplicate, null);
+  assert.equal(f.requests.length, 2);
+  assert.equal(f.window.document.querySelector('[data-device-card="tuya-1"]').classList.contains('is-command-pending'), true);
+  assert.equal(f.window.document.querySelector('[data-device-card="tuya-2"]').classList.contains('is-command-pending'), true);
+  assert.equal(f.window.document.querySelector('[data-device-card="tuya-1"] [data-device-telemetry-today]').disabled, false);
+  vm.runInContext('renderDeviceCards()', f.context);
+  assert.equal(f.window.document.querySelector('[data-device-card="tuya-1"] [data-code="switch_led"]').disabled, true);
+  status = 'succeeded';
+  await Promise.all([first, other]);
+});
+
+test('public command timeout unlocks as unconfirmed and clears polling/deadline timers', async (t) => {
+  const f = setup('public', async (endpoint) => endpoint.startsWith('commands/')
+    ? { command: { id: 1, deviceId: 'tuya-1', status: 'queued' } }
+    : { status: 'queued', commandId: 1 });
+  t.after(() => f.dom.window.close());
+  const record = await vm.runInContext('executeTrackedDeviceCommand("tuya-1", "tuya.set", { code: "switch_led", value: false }, { timeoutMs: 30 })', f.context);
+  assert.equal(record.status, 'unconfirmed');
+  assert.equal(record.finished, true);
+  assert.equal(record.pollTimer, null);
+  assert.equal(record.timeoutTimer, null);
+  assert.equal(f.window.document.querySelector('[data-code="switch_led"]').disabled, false);
+  assert.match(f.window.document.querySelector('[data-device-card="tuya-1"]').textContent, /No fue posible confirmar la finalización/);
+  assert.doesNotMatch(f.window.document.querySelector('[data-device-card="tuya-1"]').textContent, /Comando completado/);
+});
+
+test('command status endpoint is authenticated and scoped to the session owner', () => {
+  const server = fs.readFileSync(path.join(root, 'server.js'), 'utf8');
+  const routeStart = server.indexOf("app.get('/api/commands/:commandId'");
+  const routeEnd = server.indexOf("app.post('/api/commands'", routeStart);
+  assert.ok(routeStart >= 0 && routeEnd > routeStart);
+  const route = server.slice(routeStart, routeEnd);
+  assert.match(route, /requireSession, apiReady/);
+  assert.match(route, /devices\.user_id = \(SELECT id FROM users WHERE email = \?\)/);
+  assert.match(route, /commands\.id, devices\.device_id AS deviceId, commands\.command_name AS command, commands\.status, commands\.error_message AS errorMessage/);
+  assert.match(route, /if \(!rows\[0\]\) return fail\(response, 404/);
 });

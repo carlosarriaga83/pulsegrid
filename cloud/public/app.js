@@ -657,7 +657,7 @@ async function loadDevices() {
     const result = await apiRequest('devices');
     devices.splice(0, devices.length, ...result.devices.map((device) => ({ ...device, ...devicePresentation(device), report: device.report ? formatDateTime(device.report) : 'sin reporte', signal: device.status === 'online' ? 'good' : 'mid' })));
   } catch {
-    devices.splice(0, devices.length);
+    // Keep the last device snapshot, including pending-command cards, on transient refresh errors.
   } finally {
     cloudRefreshInFlight = false;
   }
@@ -776,8 +776,140 @@ function deviceUiState() {
   window.deviceAccordionOpenIds ||= new Set();
   window.deviceOptimisticValues ||= new Map();
   window.devicePendingIds ||= new Set();
+  window.deviceCommandStates ||= new Map();
   window.deviceCurtainSpeeds ||= new Map();
-  return { openIds: window.deviceAccordionOpenIds, optimistic: window.deviceOptimisticValues, pending: window.devicePendingIds, curtainSpeeds: window.deviceCurtainSpeeds };
+  return { openIds: window.deviceAccordionOpenIds, optimistic: window.deviceOptimisticValues, pending: window.devicePendingIds, commandStates: window.deviceCommandStates, curtainSpeeds: window.deviceCurtainSpeeds };
+}
+
+function trackedCommandMessage(record) {
+  if (!record) return '';
+  if (record.status === 'queued') return 'Comando enviado. Esperando al dispositivo…';
+  if (record.status === 'delivered') return 'Comando recibido. Ejecutando…';
+  if (record.status === 'succeeded') return 'Comando completado';
+  if (record.status === 'failed') return record.errorMessage ? `Error: ${record.errorMessage}` : 'El comando fallo.';
+  if (record.status === 'canceled') return 'Comando cancelado';
+  if (record.status === 'unconfirmed') return 'No fue posible confirmar la finalización del comando.';
+  return 'Enviando comando…';
+}
+
+function updateTrackedCommandCard(record) {
+  const state = deviceUiState();
+  const card = $$('#device-card-grid [data-device-card]').find((item) => item.dataset.deviceCard === record.deviceId);
+  if (!card) return;
+  const busy = state.pending.has(record.deviceId);
+  card.classList.toggle('is-command-pending', busy);
+  if (!busy && record.expiresAt && record.expiresAt <= Date.now() && state.commandStates.get(record.deviceId) === record) state.commandStates.delete(record.deviceId);
+  const message = state.commandStates.get(record.deviceId) === record ? trackedCommandMessage(record) : '';
+  const feedback = card.querySelector('[data-device-command-feedback]');
+  if (feedback) {
+    feedback.hidden = !message;
+    feedback.classList.toggle('is-terminal', !busy);
+    feedback.innerHTML = `${busy ? '<span class="command-progress-spinner" aria-hidden="true"></span>' : ''}<span>${escapeTelemetryHtml(message)}</span>`;
+  }
+  const inlineStatus = card.querySelector('[data-device-command-status]');
+  if (inlineStatus) inlineStatus.textContent = message;
+  if (record.statusTarget?.isConnected) record.statusTarget.textContent = busy || ['failed', 'canceled', 'unconfirmed'].includes(record.status) ? message : '';
+  card.querySelectorAll('[data-device-command-control]').forEach((control) => {
+    if (busy) {
+      if (!control.disabled) control.dataset.commandPendingDisabled = 'true';
+      control.disabled = true;
+      control.setAttribute('aria-disabled', 'true');
+    } else if (control.dataset.commandPendingDisabled === 'true') {
+      control.disabled = false;
+      control.removeAttribute('aria-disabled');
+      delete control.dataset.commandPendingDisabled;
+    }
+  });
+}
+
+function clearTrackedCommandTimers(record) {
+  if (record.pollTimer !== null) window.clearTimeout(record.pollTimer);
+  if (record.timeoutTimer !== null) window.clearTimeout(record.timeoutTimer);
+  record.pollTimer = null;
+  record.timeoutTimer = null;
+  record.abortController?.abort();
+}
+
+function finishTrackedDeviceCommand(record, status, errorMessage = '') {
+  if (record.finished) return;
+  const state = deviceUiState();
+  record.finished = true;
+  record.status = status;
+  record.errorMessage = errorMessage || '';
+  clearTrackedCommandTimers(record);
+  state.pending.delete(record.deviceId);
+  if (status === 'failed' || status === 'canceled' || status === 'unconfirmed') {
+    record.optimistic.forEach(({ key, control, previous }) => {
+      state.optimistic.delete(key);
+      if (control?.isConnected && previous !== undefined) {
+        if (control.type === 'checkbox') control.checked = previous === true || previous === 'true';
+        else control.value = String(previous);
+      }
+    });
+  }
+  record.expiresAt = Date.now() + 5000;
+  updateTrackedCommandCard(record);
+  if (status === 'succeeded' && typeof loadDevices === 'function') void loadDevices();
+}
+
+function trackedDelay(record, milliseconds) {
+  return new Promise((resolve) => {
+    record.pollTimer = window.setTimeout(() => {
+      record.pollTimer = null;
+      resolve();
+    }, milliseconds);
+  });
+}
+
+async function monitorTrackedDeviceCommand(record, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  record.abortController = new window.AbortController();
+  record.timeoutTimer = window.setTimeout(() => finishTrackedDeviceCommand(record, 'unconfirmed'), timeoutMs);
+  while (!record.finished && Date.now() < deadline) {
+    await trackedDelay(record, Math.min(Number(window.deviceCommandPollIntervalMs) || 600, Math.max(0, deadline - Date.now())));
+    if (record.finished) return;
+    try {
+      const result = await apiRequest(`commands/${encodeURIComponent(record.commandId)}`, { signal: record.abortController.signal });
+      const command = result.command;
+      if (!command || String(command.id) !== String(record.commandId) || String(command.deviceId) !== String(record.deviceId)) continue;
+      record.status = command.status;
+      record.errorMessage = command.errorMessage || '';
+      updateTrackedCommandCard(record);
+      if (['succeeded', 'failed', 'canceled'].includes(command.status)) {
+        finishTrackedDeviceCommand(record, command.status, command.errorMessage || '');
+        return;
+      }
+    } catch {
+      // Retry transient polling errors until the defensive deadline.
+    }
+  }
+  if (!record.finished) finishTrackedDeviceCommand(record, 'unconfirmed');
+}
+
+async function executeTrackedDeviceCommand(deviceId, command, payload, { optimistic = [], statusTarget = null, timeoutMs = 120000 } = {}) {
+  const state = deviceUiState();
+  if (state.pending.has(deviceId)) return null;
+  const previous = state.commandStates.get(deviceId);
+  if (previous) clearTrackedCommandTimers(previous);
+  const record = { deviceId, commandId: null, command, status: 'submitting', errorMessage: '', optimistic, statusTarget, pollTimer: null, timeoutTimer: null, abortController: null, finished: false };
+  state.pending.add(deviceId);
+  state.commandStates.set(deviceId, record);
+  optimistic.forEach(({ key, value }) => state.optimistic.set(key, { value, expiresAt: Date.now() + timeoutMs + 15000 }));
+  updateTrackedCommandCard(record);
+  try {
+    const created = await apiRequest('commands', { method: 'POST', body: JSON.stringify({ deviceId, command, payload }) });
+    record.commandId = created.commandId ?? created.id;
+    if (record.commandId == null) throw new Error('El servidor no devolvió el identificador del comando');
+    record.status = created.status || 'queued';
+    record.errorMessage = created.errorMessage || '';
+    updateTrackedCommandCard(record);
+    if (['succeeded', 'failed', 'canceled'].includes(record.status)) finishTrackedDeviceCommand(record, record.status, record.errorMessage);
+    else await monitorTrackedDeviceCommand(record, timeoutMs);
+    return record;
+  } catch (error) {
+    finishTrackedDeviceCommand(record, 'failed', error.message);
+    return record;
+  }
 }
 
 function deviceParameterValue(device, code, value) {
@@ -825,10 +957,15 @@ function deviceCurtainPositionMarkup(device) {
   const speed = Math.max(0, Math.min(1800, Math.round(Number(selectedSpeed ?? reportedSpeed ?? 1800))));
   const servos = Object.values(telemetry.servos || {});
   const servoReady = !isServo || (servos.length > 0 && servos.every((servo) => servo.blind_calibrated === true && servo.position_recovery_required === false && servo.blind_calibration_in_progress !== true));
-  const enabled = device.status === 'online' && servoReady;
+  const pending = state.pending.has(device.id);
+  const available = device.status === 'online' && servoReady && (!isServo || speed > 0);
+  const enabled = available && !pending;
   const reason = device.status !== 'online' ? 'Fuera de línea' : isServo && servos.some((servo) => servo.position_recovery_required === true) ? 'Recupera referencia y reaplica calibración' : isServo && servos.some((servo) => servo.blind_calibrated !== true) ? 'Aplica calibración geométrica' : isServo && servos.some((servo) => servo.blind_calibration_in_progress === true) ? 'Calibración en curso' : isServo && !servos.length ? 'Esperando telemetría Servo' : '';
-  const speedControl = isServo ? `<div class="device-curtain-speed"><label for="curtain-speed-${escapeTelemetryHtml(device.id)}">Velocidad Servo <output data-curtain-speed-value>${speed}</output></label><input id="curtain-speed-${escapeTelemetryHtml(device.id)}" type="range" min="0" max="1800" step="100" value="${speed}" data-curtain-speed data-device-id="${escapeTelemetryHtml(device.id)}" aria-label="Velocidad del Servo de ${escapeTelemetryHtml(device.name)}"></div>` : '';
-  return `<div class="device-curtain-position">${speedControl}<label for="curtain-position-${escapeTelemetryHtml(device.id)}">Posición deseada</label><div class="device-curtain-position-control"><input id="curtain-position-${escapeTelemetryHtml(device.id)}" type="range" min="0" max="100" step="1" value="${Math.round(value)}" data-curtain-position data-device-id="${escapeTelemetryHtml(device.id)}" aria-label="Porcentaje de apertura deseado de ${escapeTelemetryHtml(device.name)}"${enabled ? '' : ' disabled'}><output>${Math.round(value)}%</output><small data-curtain-position-status role="status" aria-live="polite">${reason || 'Objetivo'}</small></div></div>`;
+  const pendingAttrs = pending ? ' disabled aria-disabled="true" data-command-pending-disabled="true"' : '';
+  const speedControl = isServo ? `<div class="device-curtain-speed"><label for="curtain-speed-${escapeTelemetryHtml(device.id)}">Velocidad Servo <output data-curtain-speed-value>${speed}</output></label><input id="curtain-speed-${escapeTelemetryHtml(device.id)}" type="range" min="0" max="1800" step="100" value="${speed}" data-curtain-speed data-device-id="${escapeTelemetryHtml(device.id)}" data-device-command-control${pendingAttrs} aria-label="Velocidad del Servo de ${escapeTelemetryHtml(device.name)}"></div>` : '';
+  const positionDisabled = enabled ? '' : ' disabled aria-disabled="true"';
+  const positionPending = pending && available ? ' data-command-pending-disabled="true"' : '';
+  return `<div class="device-curtain-position">${speedControl}<label for="curtain-position-${escapeTelemetryHtml(device.id)}">Posición deseada</label><div class="device-curtain-position-control"><input id="curtain-position-${escapeTelemetryHtml(device.id)}" type="range" min="0" max="100" step="1" value="${Math.round(value)}" data-curtain-position data-device-command-control data-device-id="${escapeTelemetryHtml(device.id)}" aria-label="Porcentaje de apertura deseado de ${escapeTelemetryHtml(device.name)}"${positionDisabled}${positionPending}><output>${Math.round(value)}%</output><small data-curtain-position-status role="status" aria-live="polite">${reason || 'Objetivo'}</small></div></div>`;
 }
 
 function deviceDirectionParameterMarkup(device) {
@@ -841,7 +978,8 @@ function deviceDirectionParameterMarkup(device) {
   const reversed = optimistic && optimistic.expiresAt > Date.now() ? optimistic.value : reported;
   if (optimistic && String(optimistic.value) === String(reported)) state.optimistic.delete(key);
   else if (optimistic && optimistic.expiresAt <= Date.now()) state.optimistic.delete(key);
-  return `<div class="device-parameter device-direction-parameter"><div class="device-parameter-heading"><strong>Sentido del motor</strong></div><div class="device-parameter-control"><label class="device-parameter-switch"><input type="checkbox" data-device-direction data-device-id="${escapeTelemetryHtml(device.id)}"${reversed ? ' checked' : ''} aria-label="Sentido del motor"><i></i></label><small data-direction-status role="status" aria-live="polite">${reversed ? 'Reversa' : 'Normal'}</small></div></div>`;
+  const pending = state.pending.has(device.id);
+  return `<div class="device-parameter device-direction-parameter"><div class="device-parameter-heading"><strong>Sentido del motor</strong></div><div class="device-parameter-control"><label class="device-parameter-switch"><input type="checkbox" data-device-direction data-device-command-control data-device-id="${escapeTelemetryHtml(device.id)}"${reversed ? ' checked' : ''}${pending ? ' disabled aria-disabled="true" data-command-pending-disabled="true"' : ''} aria-label="Sentido del motor"><i></i></label><small data-direction-status role="status" aria-live="polite">${reversed ? 'Reversa' : 'Normal'}</small></div></div>`;
 }
 
 function deviceLedParameterMarkup(device) {
@@ -854,7 +992,8 @@ function deviceLedParameterMarkup(device) {
   const enabled = optimistic && optimistic.expiresAt > Date.now() ? optimistic.value : reported;
   if (optimistic && String(optimistic.value) === String(reported)) state.optimistic.delete(key);
   else if (optimistic && optimistic.expiresAt <= Date.now()) state.optimistic.delete(key);
-  return `<div class="device-parameter device-led-parameter"><div class="device-parameter-heading"><strong>LED del dispositivo</strong></div><div class="device-parameter-control"><label class="device-parameter-switch"><input type="checkbox" data-device-led data-device-id="${escapeTelemetryHtml(device.id)}"${enabled ? ' checked' : ''} aria-label="LED del dispositivo"><i></i></label><small data-led-status role="status" aria-live="polite">${enabled ? 'Encendido' : 'Apagado'}</small></div></div>`;
+  const pending = state.pending.has(device.id);
+  return `<div class="device-parameter device-led-parameter"><div class="device-parameter-heading"><strong>LED del dispositivo</strong></div><div class="device-parameter-control"><label class="device-parameter-switch"><input type="checkbox" data-device-led data-device-command-control data-device-id="${escapeTelemetryHtml(device.id)}"${enabled ? ' checked' : ''}${pending ? ' disabled aria-disabled="true" data-command-pending-disabled="true"' : ''} aria-label="LED del dispositivo"><i></i></label><small data-led-status role="status" aria-live="polite">${enabled ? 'Encendido' : 'Apagado'}</small></div></div>`;
 }
 
 function deviceParameterMarkup(device) {
@@ -870,19 +1009,19 @@ function deviceParameterMarkup(device) {
     const current = value !== null && typeof value === 'object' ? JSON.stringify(value) : String(value ?? '—');
     let control = `<span class="device-parameter-value">${escapeTelemetryHtml(current)}</span>`;
     if (option?.type === 'boolean') {
-      control = `<label class="device-parameter-switch"><input type="checkbox" data-device-control data-device-id="${escapeTelemetryHtml(device.id)}" data-code="${escapeTelemetryHtml(code)}"${value === true || value === 'true' ? ' checked' : ''} aria-label="${escapeTelemetryHtml(label)}"><i></i></label>`;
+      control = `<label class="device-parameter-switch"><input type="checkbox" data-device-control data-device-command-control data-device-id="${escapeTelemetryHtml(device.id)}" data-code="${escapeTelemetryHtml(code)}"${value === true || value === 'true' ? ' checked' : ''}${deviceUiState().pending.has(device.id) ? ' disabled aria-disabled="true" data-command-pending-disabled="true"' : ''} aria-label="${escapeTelemetryHtml(label)}"><i></i></label>`;
     } else if (option?.type === 'number') {
       const ranged = option.min != null && option.max != null && Number.isFinite(Number(option.min)) && Number.isFinite(Number(option.max)) && Number(option.min) <= Number(option.max);
       const type = ranged ? 'range' : 'number';
       const step = option.step ?? (option.integer ? 1 : 'any');
       const bounds = `${option.min != null ? ` min="${escapeTelemetryHtml(option.min)}"` : ''}${option.max != null ? ` max="${escapeTelemetryHtml(option.max)}"` : ''}`;
       const inputValue = value !== null && value !== undefined && Number.isFinite(Number(value)) ? String(value) : '';
-      control = `<div class="device-parameter-editor"><input type="${type}" data-device-control data-device-id="${escapeTelemetryHtml(device.id)}" data-code="${escapeTelemetryHtml(code)}" value="${escapeTelemetryHtml(inputValue)}" step="${escapeTelemetryHtml(step)}"${bounds} aria-label="${escapeTelemetryHtml(label)}">${ranged ? `<output>${escapeTelemetryHtml(inputValue !== '' ? inputValue : '—')}</output>` : ''}</div>`;
+      control = `<div class="device-parameter-editor"><input type="${type}" data-device-control data-device-command-control data-device-id="${escapeTelemetryHtml(device.id)}" data-code="${escapeTelemetryHtml(code)}" value="${escapeTelemetryHtml(inputValue)}" step="${escapeTelemetryHtml(step)}"${bounds}${deviceUiState().pending.has(device.id) ? ' disabled aria-disabled="true" data-command-pending-disabled="true"' : ''} aria-label="${escapeTelemetryHtml(label)}">${ranged ? `<output>${escapeTelemetryHtml(inputValue !== '' ? inputValue : '—')}</output>` : ''}</div>`;
     } else if (option?.range?.length) {
       const choices = option.range.map((item) => `<option value="${escapeTelemetryHtml(item)}"${String(item) === String(value) ? ' selected' : ''}>${escapeTelemetryHtml(item)}</option>`).join('');
-      control = `<select data-device-control data-device-id="${escapeTelemetryHtml(device.id)}" data-code="${escapeTelemetryHtml(code)}" aria-label="${escapeTelemetryHtml(label)}"><option value="">Selecciona un valor</option>${choices}</select>`;
+      control = `<select data-device-control data-device-command-control data-device-id="${escapeTelemetryHtml(device.id)}" data-code="${escapeTelemetryHtml(code)}"${deviceUiState().pending.has(device.id) ? ' disabled aria-disabled="true" data-command-pending-disabled="true"' : ''} aria-label="${escapeTelemetryHtml(label)}"><option value="">Selecciona un valor</option>${choices}</select>`;
     } else if (option?.type === 'string') {
-      control = `<input type="text" maxlength="1000" data-device-control data-device-id="${escapeTelemetryHtml(device.id)}" data-code="${escapeTelemetryHtml(code)}" value="${escapeTelemetryHtml(value ?? '')}" aria-label="${escapeTelemetryHtml(label)}">`;
+      control = `<input type="text" maxlength="1000" data-device-control data-device-command-control data-device-id="${escapeTelemetryHtml(device.id)}" data-code="${escapeTelemetryHtml(code)}" value="${escapeTelemetryHtml(value ?? '')}"${deviceUiState().pending.has(device.id) ? ' disabled aria-disabled="true" data-command-pending-disabled="true"' : ''} aria-label="${escapeTelemetryHtml(label)}">`;
     }
     return `<div class="device-parameter"><div class="device-parameter-heading"><strong title="${escapeTelemetryHtml(code)}">${escapeTelemetryHtml(label)}</strong>${option ? '' : '<span class="device-parameter-lock" aria-label="Solo lectura">Lectura</span>'}</div><div class="device-parameter-control">${control}<small data-control-status role="status" aria-live="polite">${option ? (value == null ? 'Sin lectura' : 'Actual') : escapeTelemetryHtml(current)}</small></div></div>`;
   }).join('')}${direction}${led}</div>`;
@@ -892,7 +1031,10 @@ function deviceQuickCommandMarkup(device) {
   if (device.provider === 'tuya') return '';
   const commands = AutomationModel.commands(device).filter((command) => ['open', 'close', 'position'].includes(command.value));
   if (!commands.length) return '';
-  return `<div class="device-quick-actions" aria-label="Acciones rapidas">${commands.filter((command) => command.value !== 'position').map((command) => `<button type="button" data-device-quick-command="${escapeTelemetryHtml(command.commandName)}" data-device-id="${escapeTelemetryHtml(device.id)}"><i data-lucide="${command.value === 'open' ? 'arrow-up' : 'arrow-down'}"></i>${escapeTelemetryHtml(command.label)}</button>`).join('')}<small data-device-command-status role="status" aria-live="polite"></small></div>`;
+  const state = deviceUiState();
+  const pending = state.pending.has(device.id);
+  const record = state.commandStates.get(device.id);
+  return `<div class="device-quick-actions" aria-label="Acciones rapidas">${commands.filter((command) => command.value !== 'position').map((command) => `<button type="button" data-device-command-control data-device-quick-command="${escapeTelemetryHtml(command.commandName)}" data-device-id="${escapeTelemetryHtml(device.id)}"${pending ? ' disabled aria-disabled="true" data-command-pending-disabled="true"' : ''}><i data-lucide="${command.value === 'open' ? 'arrow-up' : 'arrow-down'}"></i>${escapeTelemetryHtml(command.label)}</button>`).join('')}<small data-device-command-status role="status" aria-live="polite">${record ? escapeTelemetryHtml(trackedCommandMessage(record)) : ''}</small></div>`;
 }
 
 function renderDeviceCards(filter = deviceCardFilter, status = deviceCardStatus) {
@@ -902,13 +1044,12 @@ function renderDeviceCards(filter = deviceCardFilter, status = deviceCardStatus)
   deviceCardStatus = status;
   const uiState = deviceUiState();
   if (grid.contains(document.activeElement) && document.activeElement.matches('[data-device-control], [data-device-direction], [data-curtain-position], [data-curtain-speed]')) return;
-  if ([...uiState.pending].some((deviceId) => grid.querySelector(`[data-device-card="${CSS.escape(deviceId)}"]`))) return;
   const filtered = devices.filter((device) => {
     const matchesSearch = `${device.name} ${device.id}`.toLowerCase().includes(filter.toLowerCase());
     const matchesStatus = status === 'all' || device.status === status;
     return matchesSearch && matchesStatus;
   });
-  grid.innerHTML = filtered.length ? filtered.map((device) => { const open = uiState.openIds.has(device.id); return `<article class="device-card" data-device-card="${escapeTelemetryHtml(device.id)}"><div class="device-card-header"><button type="button" class="device-card-toggle" data-device-toggle="${escapeTelemetryHtml(device.id)}" aria-expanded="${String(open)}"><span class="device-card-top"><span class="device-icon status-${['online', 'provisioning'].includes(device.status) ? device.status : 'offline'}"><i data-lucide="${device.icon}"></i></span><span class="device-card-status">${deviceStatus(device)}</span></span><strong>${escapeTelemetryHtml(device.name)}</strong><span class="device-card-id">UID: ${escapeTelemetryHtml(device.id)}</span><span class="device-card-type">${escapeTelemetryHtml(device.type)}</span><span class="device-status ${device.status}"><i data-lucide="clock-3"></i> Ultimo reporte: ${escapeTelemetryHtml(device.report)}</span><span class="device-meta">${device.meta.map((item) => `<span><i data-lucide="${item.icon}"></i> ${item.text}</span>`).join('')}</span></button><div class="device-card-actions"><button type="button" class="row-menu" data-device-menu="${escapeTelemetryHtml(device.id)}" title="Gestionar ${escapeTelemetryHtml(device.name)}" aria-label="Gestionar ${escapeTelemetryHtml(device.name)}"><i data-lucide="more-vertical"></i></button><button type="button" class="device-card-telemetry" data-device-telemetry-today="${escapeTelemetryHtml(device.id)}" title="Ver telemetria de hoy" aria-label="Ver telemetria de hoy de ${escapeTelemetryHtml(device.name)}"><i data-lucide="chart-no-axes-combined"></i></button><button type="button" class="device-card-expand" data-device-toggle="${escapeTelemetryHtml(device.id)}" aria-expanded="${String(open)}" title="${open ? 'Ocultar' : 'Mostrar'} parametros y funciones" aria-label="${open ? 'Ocultar' : 'Mostrar'} parametros y funciones"><i data-lucide="chevron-down"></i></button></div></div>${deviceCurtainPositionMarkup(device)}<div class="device-card-content"${open ? '' : ' hidden'}>${deviceDirectionMarkup(device)}${deviceQuickCommandMarkup(device)}${deviceParameterMarkup(device)}</div></article>`; }).join('') : '<div class="panel" style="padding:30px;color:var(--muted)">No encontramos dispositivos con ese criterio.</div>';
+  grid.innerHTML = filtered.length ? filtered.map((device) => { const open = uiState.openIds.has(device.id); let record = uiState.commandStates.get(device.id); if (!uiState.pending.has(device.id) && record?.expiresAt && record.expiresAt <= Date.now()) { uiState.commandStates.delete(device.id); record = null; } const busy = uiState.pending.has(device.id); return `<article class="device-card${busy ? ' is-command-pending' : ''}" data-device-card="${escapeTelemetryHtml(device.id)}"><div class="device-card-header"><button type="button" class="device-card-toggle" data-device-toggle="${escapeTelemetryHtml(device.id)}" aria-expanded="${String(open)}"><span class="device-card-top"><span class="device-icon status-${['online', 'provisioning'].includes(device.status) ? device.status : 'offline'}"><i data-lucide="${device.icon}"></i></span><span class="device-card-status">${deviceStatus(device)}</span></span><strong>${escapeTelemetryHtml(device.name)}</strong><span class="device-card-id">UID: ${escapeTelemetryHtml(device.id)}</span><span class="device-card-type">${escapeTelemetryHtml(device.type)}</span><span class="device-status ${device.status}"><i data-lucide="clock-3"></i> Ultimo reporte: ${escapeTelemetryHtml(device.report)}</span><span class="device-meta">${device.meta.map((item) => `<span><i data-lucide="${item.icon}"></i> ${item.text}</span>`).join('')}</span></button><div class="device-card-actions"><button type="button" class="row-menu" data-device-menu="${escapeTelemetryHtml(device.id)}" title="Gestionar ${escapeTelemetryHtml(device.name)}" aria-label="Gestionar ${escapeTelemetryHtml(device.name)}"><i data-lucide="more-vertical"></i></button><button type="button" class="device-card-telemetry" data-device-telemetry-today="${escapeTelemetryHtml(device.id)}" title="Ver telemetria de hoy" aria-label="Ver telemetria de hoy de ${escapeTelemetryHtml(device.name)}"><i data-lucide="chart-no-axes-combined"></i></button><button type="button" class="device-card-expand" data-device-toggle="${escapeTelemetryHtml(device.id)}" aria-expanded="${String(open)}" title="${open ? 'Ocultar' : 'Mostrar'} parametros y funciones" aria-label="${open ? 'Ocultar' : 'Mostrar'} parametros y funciones"><i data-lucide="chevron-down"></i></button></div></div>${record ? `<div class="device-command-feedback${busy ? '' : ' is-terminal'}" data-device-command-feedback role="status" aria-live="polite">${busy ? '<span class="command-progress-spinner" aria-hidden="true"></span>' : ''}<span>${escapeTelemetryHtml(trackedCommandMessage(record))}</span></div>` : '<div class="device-command-feedback" data-device-command-feedback role="status" aria-live="polite" hidden></div>'}${deviceCurtainPositionMarkup(device)}<div class="device-card-content"${open ? '' : ' hidden'}>${deviceDirectionMarkup(device)}${deviceQuickCommandMarkup(device)}${deviceParameterMarkup(device)}</div></article>`; }).join('') : '<div class="panel" style="padding:30px;color:var(--muted)">No encontramos dispositivos con ese criterio.</div>';
   renderIcons();
 }
 
@@ -958,26 +1099,12 @@ async function sendCurtainPosition(event) {
   const value = Math.max(0, Math.min(100, Math.round(Number(input.value))));
   const state = deviceUiState();
   const key = `${device.id}\u0000curtainPosition`;
-  state.pending.add(device.id);
-  state.optimistic.set(key, { value, expiresAt: Date.now() + 15000 });
-  input.disabled = true;
   status.textContent = 'Enviando…';
-  try {
-    const payload = { percent: value, speed: isServo ? selectedSpeed : 800, acceleration: 50 };
-    if (isServo) payload.allServos = true;
-    const result = await apiRequest('commands', { method: 'POST', body: JSON.stringify({ deviceId: device.id, command: 'curtain.move', payload }) });
-    status.textContent = result.status === 'succeeded' ? 'Enviado' : 'En cola';
-    if (typeof loadDevices === 'function') window.setTimeout(() => void loadDevices(), 2500);
-  } catch (error) {
-    state.optimistic.delete(key);
-    input.value = String(Math.round(curtainPositionValue(device) ?? value));
-    const output = input.parentElement.querySelector('output');
-    if (output) output.value = `${input.value}%`;
-    status.textContent = `Error: ${error.message}`;
-  } finally {
-    state.pending.delete(device.id);
-    if (input.isConnected) input.disabled = false;
-  }
+  const payload = { percent: value, speed: isServo ? selectedSpeed : 800, acceleration: 50 };
+  if (isServo) payload.allServos = true;
+  await executeTrackedDeviceCommand(device.id, 'curtain.move', payload, {
+    optimistic: [{ key, value, previous: curtainPositionValue(device), control: input }], statusTarget: status
+  });
 }
 
 async function sendDeviceParameter(event) {
@@ -990,29 +1117,21 @@ async function sendDeviceParameter(event) {
   const status = input.closest('.device-parameter-control')?.querySelector('[data-control-status]');
   if (!device || !option || !status) return;
   const key = `${device.id}\u0000${option.value}`;
-  const requestId = (deviceControlRequests.get(key) || 0) + 1;
-  deviceControlRequests.set(key, requestId);
   const uiState = deviceUiState();
   const previousValue = deviceParameterEntries(device).find(([code]) => code === option.value)?.[1];
   let value;
   try {
     const raw = input.type === 'checkbox' ? input.checked : input.value;
     value = AutomationModel.typedValue(raw, option);
-    uiState.pending.add(device.id);
-    uiState.optimistic.set(key, { value, expiresAt: Date.now() + 15000 });
-    input.disabled = true;
     status.textContent = 'Enviando…';
-    const result = await apiRequest('commands', { method: 'POST', body: JSON.stringify({ deviceId: device.id, command: 'tuya.set', payload: { code: option.value, value } }) });
-    if (deviceControlRequests.get(key) === requestId && input.isConnected) status.textContent = result.status === 'succeeded' ? 'Enviado' : 'En cola';
+    await executeTrackedDeviceCommand(device.id, 'tuya.set', { code: option.value, value }, {
+      optimistic: [{ key, value, previous: previousValue, control: input }], statusTarget: status
+    });
   } catch (error) {
     uiState.optimistic.delete(key);
     if (input.type === 'checkbox') input.checked = previousValue === true || previousValue === 'true';
     else if (previousValue !== undefined) input.value = String(previousValue);
-    if (deviceControlRequests.get(key) === requestId && input.isConnected) status.textContent = `Error: ${error.message}`;
-  } finally {
-    uiState.pending.delete(device.id);
-    if (deviceControlRequests.get(key) === requestId && input.isConnected) input.disabled = false;
-    if (typeof loadDevices === 'function') void loadDevices();
+    if (input.isConnected) status.textContent = `Error: ${error.message}`;
   }
 }
 
@@ -1029,22 +1148,10 @@ async function sendDeviceDirection(event) {
   const reversed = input.checked;
   const uiState = deviceUiState();
   const key = `${device.id}\u0000directionReversed`;
-  uiState.pending.add(device.id);
-  uiState.optimistic.set(key, { value: reversed, expiresAt: Date.now() + 15000 });
-  input.disabled = true;
   status.textContent = 'Enviando...';
-  try {
-    const result = await apiRequest('commands', { method: 'POST', body: JSON.stringify({ deviceId: device.id, command: 'direction.configure', payload: { reversed } }) });
-    status.textContent = result.status === 'succeeded' ? (reversed ? 'Reversa' : 'Normal') : 'En cola';
-    if (typeof loadDevices === 'function') setTimeout(() => void loadDevices(), 2500);
-  } catch (error) {
-    uiState.optimistic.delete(key);
-    input.checked = previousValue;
-    status.textContent = `Error: ${error.message}`;
-  } finally {
-    uiState.pending.delete(device.id);
-    if (input.isConnected) input.disabled = false;
-  }
+  await executeTrackedDeviceCommand(device.id, 'direction.configure', { reversed }, {
+    optimistic: [{ key, value: reversed, previous: previousValue, control: input }], statusTarget: status
+  });
 }
 
 async function sendDeviceLed(event) {
@@ -1058,22 +1165,10 @@ async function sendDeviceLed(event) {
   const enabled = input.checked;
   const uiState = deviceUiState();
   const key = `${device.id}\u0000ledEnabled`;
-  uiState.pending.add(device.id);
-  uiState.optimistic.set(key, { value: enabled, expiresAt: Date.now() + 15000 });
-  input.disabled = true;
   status.textContent = 'Enviando...';
-  try {
-    const result = await apiRequest('commands', { method: 'POST', body: JSON.stringify({ deviceId: device.id, command: 'led.configure', payload: { enabled } }) });
-    status.textContent = result.status === 'succeeded' ? (enabled ? 'Encendido' : 'Apagado') : 'En cola';
-    if (typeof loadDevices === 'function') setTimeout(() => void loadDevices(), 2500);
-  } catch (error) {
-    uiState.optimistic.delete(key);
-    input.checked = !enabled;
-    status.textContent = `Error: ${error.message}`;
-  } finally {
-    uiState.pending.delete(device.id);
-    if (input.isConnected) input.disabled = false;
-  }
+  await executeTrackedDeviceCommand(device.id, 'led.configure', { enabled }, {
+    optimistic: [{ key, value: enabled, previous: !enabled, control: input }], statusTarget: status
+  });
 }
 
 function bindDeviceCardControls() {
@@ -1107,19 +1202,14 @@ function bindDeviceCardControls() {
     if (quickCommand) {
       event.preventDefault();
       event.stopPropagation();
-      const status = quickCommand.parentElement.querySelector('[data-device-command-status]');
-      quickCommand.disabled = true;
-      status.textContent = 'Enviando...';
       const device = devices.find((item) => item.id === quickCommand.dataset.deviceId);
       const telemetry = parseTelemetry(device?.telemetry);
       const isServo = String(telemetry.firmwareTarget || '').toLowerCase() === 'servo';
       const speed = Number(quickCommand.closest('[data-device-card]')?.querySelector('[data-curtain-speed]')?.value ?? 1800);
+      const status = quickCommand.parentElement.querySelector('[data-device-command-status]');
       if (isServo && speed === 0) { status.textContent = 'Selecciona una velocidad mayor que 0 para mover el Servo.'; return; }
       const payload = isServo ? { speed, acceleration: 50 } : {};
-      apiRequest('commands', { method: 'POST', body: JSON.stringify({ deviceId: quickCommand.dataset.deviceId, command: quickCommand.dataset.deviceQuickCommand, payload }) })
-        .then(() => { status.textContent = 'Comando enviado'; if (typeof loadDevices === 'function') void loadDevices(); })
-        .catch((error) => { status.textContent = `Error: ${error.message}`; })
-        .finally(() => { if (quickCommand.isConnected) quickCommand.disabled = false; });
+      void executeTrackedDeviceCommand(quickCommand.dataset.deviceId, quickCommand.dataset.deviceQuickCommand, payload, { statusTarget: status });
       return;
     }
     const control = event.target.closest('[data-device-control]');
@@ -1167,10 +1257,14 @@ function openDeviceConfiguration(device) {
     const submit = event.currentTarget.querySelector('button[type="submit"]');
     submit.disabled = true;
     try {
-      await apiRequest('commands', { method: 'POST', body: JSON.stringify({ deviceId: device.id, command: 'direction.configure', payload: { reversed: form.get('reversed') === 'true' } }) });
-      close();
-      showToast('Configuracion enviada');
-      await loadCommandHistory();
+      const record = await executeTrackedDeviceCommand(device.id, 'direction.configure', { reversed: form.get('reversed') === 'true' });
+      if (record?.status === 'succeeded') {
+        close();
+        await loadCommandHistory();
+      } else {
+        showToast(trackedCommandMessage(record));
+        submit.disabled = false;
+      }
     } catch (error) { showToast(error.message); submit.disabled = false; }
   });
   renderIcons();
@@ -1182,9 +1276,13 @@ async function queueFirmwareUpdate(device) {
   const release = result.releases?.find((item) => item.isActive && (item.targetModel === targetModel || item.targetModel === 'Todos los dispositivos')) || result.releases?.find((item) => item.targetModel === targetModel);
   if (!release) throw new Error('No hay una version de firmware publicada');
   if (!window.confirm(`Actualizar ${device.name} a ${release.version}? El dispositivo se reiniciara.`)) return;
-  await apiRequest('commands', { method: 'POST', body: JSON.stringify({ deviceId: device.id, command: 'firmware.update', payload: { version: release.version, targetModel } }) });
-  await loadCommandHistory();
-  showToast(`Actualizacion ${release.version} enviada`);
+  const record = await executeTrackedDeviceCommand(device.id, 'firmware.update', { version: release.version, targetModel });
+  if (record?.status === 'succeeded') {
+    await loadCommandHistory();
+    showToast(`Actualización de firmware ${release.version} completada`);
+  } else {
+    showToast(trackedCommandMessage(record));
+  }
 }
 
 function openDeviceMenu(button, device) {
@@ -1603,10 +1701,11 @@ async function waitForCalibrationIdle(deviceId, servoId, startPosition, timeout 
 async function waitForCalibrationCommand(commandId, timeout = 30000) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeout) {
-    const result = await apiRequest('commands');
-    const command = result.commands.find((item) => Number(item.id) === Number(commandId));
+    const result = await apiRequest(`commands/${encodeURIComponent(commandId)}`);
+    const command = result.command;
     if (command?.status === 'succeeded') return;
     if (command?.status === 'failed') throw new Error(command.errorMessage || 'El dispositivo rechazo el comando');
+    if (command?.status === 'canceled') throw new Error('El comando fue cancelado');
     await new Promise((resolve) => window.setTimeout(resolve, 500));
   }
   throw new Error('El dispositivo no confirmo el comando');

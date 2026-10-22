@@ -1146,6 +1146,14 @@ app.get('/api/commands', requireSession, apiReady, async (request, response) => 
   response.json({ commands: rows });
 });
 
+app.get('/api/commands/:commandId', requireSession, apiReady, async (request, response) => {
+  const commandId = Number(request.params.commandId);
+  if (!Number.isSafeInteger(commandId) || commandId <= 0) return fail(response, 404, 'Comando no encontrado');
+  const [rows] = await database().execute('SELECT commands.id, devices.device_id AS deviceId, commands.command_name AS command, commands.status, commands.error_message AS errorMessage FROM commands JOIN devices ON devices.id = commands.device_id WHERE commands.id = ? AND devices.user_id = (SELECT id FROM users WHERE email = ?) LIMIT 1', [commandId, request.session.user.email]);
+  if (!rows[0]) return fail(response, 404, 'Comando no encontrado');
+  response.json({ command: rows[0] });
+});
+
 app.post('/api/commands', requireSession, apiReady, async (request, response) => {
   try {
     const { deviceId, command, payload } = request.body || {};

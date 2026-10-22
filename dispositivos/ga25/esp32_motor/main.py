@@ -519,9 +519,11 @@ def update_firmware(version):
 
 
 def execute(command):
+
     global pending_configuration, restart_requested, led_override, ga25_calibration_started_at, FULL_TRAVEL_MS
     name = command.get("name") or command.get("command")
     payload = command.get("payload") or {}
+    print("Decoded command:", name, "with payload:", payload)
     if ga25_calibration_started_at is not None and name not in ("blind.ga25CalibrationStop", "blind.ga25CalibrationCancel", "curtain.stop"):
         raise ValueError("Deten la calibracion GA25 antes de enviar otro comando")
     if name == "led.configure":
