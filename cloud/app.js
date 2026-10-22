@@ -296,9 +296,9 @@ function setupAutomationsView() {
   if (!form || form.dataset.bound) return;
   form.dataset.bound = 'true';
   $('#automation-speed').min = '1';
-  $('#automation-speed').max = '240';
-  $('#automation-speed').value = '240';
-  $('#automation-speed').defaultValue = '240';
+  $('#automation-speed').max = '1800';
+  $('#automation-speed').value = '1800';
+  $('#automation-speed').defaultValue = '1800';
   const automationList = $('.automation-list');
   const actionDeviceLabel = $('#automation-device')?.closest('label');
   const actionLabel = $('#automation-action')?.closest('label');
@@ -392,7 +392,7 @@ function setupAutomationsView() {
       (rule.conditions?.length ? rule.conditions : rule.condition ? [rule.condition] : [{}]).forEach((condition) => addCondition(condition));
       AutomationUI.editTarget(rule);
       $('#automation-position').value = rule.position == null ? 50 : rule.position;
-      $('#automation-speed').value = Math.min(240, rule.speed == null ? 240 : rule.speed);
+      $('#automation-speed').value = Math.min(1800, rule.speed == null ? 1800 : rule.speed);
       $('#automation-acceleration').value = rule.acceleration == null ? 50 : rule.acceleration;
       updateActionFields();
       $('#automation-form-title').textContent = 'Editar regla';
@@ -825,12 +825,12 @@ function deviceCurtainPositionMarkup(device) {
   const isServo = String(telemetry.firmwareTarget || '').toLowerCase() === 'servo';
   const reportedSpeed = Object.values(telemetry.servos || {}).map((servo) => Number(servo.blind_target_speed)).find(Number.isFinite);
   const selectedSpeed = state.curtainSpeeds.get(device.id);
-  const speed = Math.max(60, Math.min(240, Math.round(Number(selectedSpeed ?? reportedSpeed ?? 240))));
+  const speed = Math.max(0, Math.min(1800, Math.round(Number(selectedSpeed ?? reportedSpeed ?? 1800))));
   const servos = Object.values(telemetry.servos || {});
   const servoReady = !isServo || (servos.length > 0 && servos.every((servo) => servo.blind_calibrated === true && servo.position_recovery_required === false && servo.blind_calibration_in_progress !== true));
-  const enabled = device.status === 'online' && servoReady;
-  const reason = device.status !== 'online' ? 'Fuera de línea' : isServo && servos.some((servo) => servo.position_recovery_required === true) ? 'Recupera referencia y reaplica calibración' : isServo && servos.some((servo) => servo.blind_calibrated !== true) ? 'Aplica calibración geométrica' : isServo && servos.some((servo) => servo.blind_calibration_in_progress === true) ? 'Calibración en curso' : isServo && !servos.length ? 'Esperando telemetría Servo' : '';
-  const speedControl = isServo ? `<div class="device-curtain-speed"><label for="curtain-speed-${escapeTelemetryHtml(device.id)}">Velocidad Servo <output data-curtain-speed-value>${speed}</output></label><input id="curtain-speed-${escapeTelemetryHtml(device.id)}" type="range" min="60" max="240" step="30" value="${speed}" data-curtain-speed data-device-id="${escapeTelemetryHtml(device.id)}" aria-label="Velocidad del Servo de ${escapeTelemetryHtml(device.name)}"></div>` : '';
+  const enabled = device.status === 'online' && servoReady && (!isServo || speed > 0);
+  const reason = device.status !== 'online' ? 'Fuera de línea' : isServo && speed === 0 ? 'Velocidad 0: selecciona al menos 1 para mover' : isServo && servos.some((servo) => servo.position_recovery_required === true) ? 'Recupera referencia y reaplica calibración' : isServo && servos.some((servo) => servo.blind_calibrated !== true) ? 'Aplica calibración geométrica' : isServo && servos.some((servo) => servo.blind_calibration_in_progress === true) ? 'Calibración en curso' : isServo && !servos.length ? 'Esperando telemetría Servo' : '';
+  const speedControl = isServo ? `<div class="device-curtain-speed"><label for="curtain-speed-${escapeTelemetryHtml(device.id)}">Velocidad Servo <output data-curtain-speed-value>${speed}</output></label><input id="curtain-speed-${escapeTelemetryHtml(device.id)}" type="range" min="0" max="1800" step="100" value="${speed}" data-curtain-speed data-device-id="${escapeTelemetryHtml(device.id)}" aria-label="Velocidad del Servo de ${escapeTelemetryHtml(device.name)}"></div>` : '';
   return `<div class="device-curtain-position">${speedControl}<label for="curtain-position-${escapeTelemetryHtml(device.id)}">Posición deseada</label><div class="device-curtain-position-control"><input id="curtain-position-${escapeTelemetryHtml(device.id)}" type="range" min="0" max="100" step="1" value="${Math.round(value)}" data-curtain-position data-device-id="${escapeTelemetryHtml(device.id)}" aria-label="Porcentaje de apertura deseado de ${escapeTelemetryHtml(device.name)}"${enabled ? '' : ' disabled'}><output>${Math.round(value)}%</output><small data-curtain-position-status role="status" aria-live="polite">${reason || 'Objetivo'}</small></div></div>`;
 }
 
@@ -940,6 +940,9 @@ async function sendCurtainPosition(event) {
   const status = input.parentElement.querySelector('[data-curtain-position-status]');
   if (!device || !status || device.status !== 'online') return;
   const telemetry = parseTelemetry(device.telemetry);
+  const isServo = String(telemetry.firmwareTarget || '').toLowerCase() === 'servo';
+  const selectedSpeed = Number([...document.querySelectorAll('[data-curtain-speed]')].find((item) => item.dataset.deviceId === device.id)?.value ?? 1800);
+  if (isServo && selectedSpeed === 0) { status.textContent = 'Selecciona una velocidad mayor que 0 para mover el Servo.'; return; }
   if (String(telemetry.firmwareTarget || '').toLowerCase() === 'servo') {
     const servos = Object.values(telemetry.servos || {});
     if (!servos.length || !servos.every((servo) => servo.blind_calibrated === true && servo.position_recovery_required === false && servo.blind_calibration_in_progress !== true)) {
@@ -957,8 +960,6 @@ async function sendCurtainPosition(event) {
   input.disabled = true;
   status.textContent = 'Enviando…';
   try {
-    const selectedSpeed = Number([...document.querySelectorAll('[data-curtain-speed]')].find((item) => item.dataset.deviceId === device.id)?.value || 240);
-    const isServo = String(telemetry.firmwareTarget || '').toLowerCase() === 'servo';
     const payload = { percent: value, speed: isServo ? selectedSpeed : 800, acceleration: 50 };
     if (isServo) payload.allServos = true;
     const result = await apiRequest('commands', { method: 'POST', body: JSON.stringify({ deviceId: device.id, command: 'curtain.move', payload }) });
@@ -1116,7 +1117,8 @@ function bindDeviceCardControls() {
       const device = devices.find((item) => item.id === quickCommand.dataset.deviceId);
       const telemetry = parseTelemetry(device?.telemetry);
       const isServo = String(telemetry.firmwareTarget || '').toLowerCase() === 'servo';
-      const speed = Number(quickCommand.closest('[data-device-card]')?.querySelector('[data-curtain-speed]')?.value || 240);
+      const speed = Number(quickCommand.closest('[data-device-card]')?.querySelector('[data-curtain-speed]')?.value ?? 1800);
+      if (isServo && speed === 0) { status.textContent = 'Selecciona una velocidad mayor que 0 para mover el Servo.'; return; }
       const payload = isServo ? { speed, acceleration: 50 } : {};
       apiRequest('commands', { method: 'POST', body: JSON.stringify({ deviceId: quickCommand.dataset.deviceId, command: quickCommand.dataset.deviceQuickCommand, payload }) })
         .then(() => { status.textContent = 'Comando enviado'; if (typeof loadDevices === 'function') void loadDevices(); })
@@ -1822,10 +1824,10 @@ function configureDeviceCommands() {
   const payload = $('#command-payload') || $('.command-compose textarea');
   if (!commandSelect || !payload) return;
   const commands = {
-    'curtain.open': { payload: { speed: 240, acceleration: 50 }, help: 'Servo: velocidad efectiva 60-240; la aproximacion final baja a 60.' },
-    'curtain.close': { payload: { speed: 240, acceleration: 50 }, help: 'Servo: velocidad efectiva 60-240; la aproximacion final baja a 60.' },
+    'curtain.open': { payload: { speed: 1800, acceleration: 50 }, help: 'Servo: velocidad 0-1800; la aproximacion final baja a 60.' },
+    'curtain.close': { payload: { speed: 1800, acceleration: 50 }, help: 'Servo: velocidad 0-1800; la aproximacion final baja a 60.' },
     'curtain.stop': { payload: {}, help: 'No requiere payload. Detiene el movimiento actual de ambos servos.' },
-    'curtain.move': { payload: { servoId: 1, percent: 50, speed: 240, acceleration: 50 }, help: 'servoId: 1 o 2. percent: 0-100. speed efectivo Servo hasta 240 (aproximacion final 60); acceleration: 0-150.' },
+    'curtain.move': { payload: { servoId: 1, percent: 50, speed: 1800, acceleration: 50 }, help: 'servoId: 1 o 2. percent: 0-100. Servo speed: 0-1800; aproximacion final 60; acceleration: 0-150.' },
     'servo.configure': { payload: { servoId: 1, min: 300, max: 3700, mode: 0, torqueLimit: 1000 }, help: 'servoId: 1 o 2. min/max: 0-4095. mode: 0 Servo, 1 Rueda, 3 Multivuelta. torqueLimit: 0-1000.' },
     'motion.configure': { payload: { speed: 800, acceleration: 50 }, help: 'speed: 0-3073. acceleration: 0-150.' },
     'servo.torque': { payload: { servoId: 1, enabled: true }, help: 'servoId: 1 o 2. enabled: true o false.' },

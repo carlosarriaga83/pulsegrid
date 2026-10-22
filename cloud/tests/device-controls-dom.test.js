@@ -173,7 +173,9 @@ for (const folder of ['', 'public', 'public_html']) {
     assert.equal(slider.value, '40');
     const speedSlider = window.document.querySelector('[data-curtain-speed]');
     assert.ok(speedSlider);
-    assert.equal(speedSlider.value, '240');
+    assert.equal(speedSlider.value, '1800');
+    assert.equal(speedSlider.min, '0');
+    assert.equal(speedSlider.max, '1800');
     speedSlider.value = '180';
     speedSlider.dispatchEvent(new window.Event('input', { bubbles: true }));
     slider.value = '64';
@@ -187,6 +189,15 @@ for (const folder of ['', 'public', 'public_html']) {
     window.devices[0].telemetry.servos[2].blind_target_percent = 64;
     vm.runInContext('renderDeviceCards()', context);
     assert.equal(window.document.querySelector('[data-curtain-position]').value, '64');
+    const currentSpeedSlider = window.document.querySelector('[data-curtain-speed]');
+    currentSpeedSlider.value = '0';
+    currentSpeedSlider.dispatchEvent(new window.Event('input', { bubbles: true }));
+    const currentPositionSlider = window.document.querySelector('[data-curtain-position]');
+    currentPositionSlider.value = '70';
+    currentPositionSlider.dispatchEvent(new window.Event('change', { bubbles: true }));
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    assert.equal(f.requests.length, 1);
+    assert.match(window.document.querySelector('[data-curtain-position-status]').textContent, /velocidad mayor que 0/i);
     window.devices[0].telemetry.servos[1].blind_percent = 31;
     window.devices[0].telemetry.servos[2].blind_percent = 35;
     vm.runInContext('renderDeviceCards()', context);

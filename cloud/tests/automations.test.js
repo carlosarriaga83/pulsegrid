@@ -59,11 +59,11 @@ test('backend validates exclusive shapes, dangerous paths and preserves legacy r
   const b = backend();
   assert.equal(b.automationCondition(param()).kind, 'parameter');
   assert.equal(b.automationInput(input()).commandPayload.value, true);
-  assert.equal(b.automationInput(input({ action: 'open', commandName: '', commandPayload: null, conditions: [] })).speed, 240); // Default Servo wheel speed; NOT NULL database column.
+  assert.equal(b.automationInput(input({ action: 'open', commandName: '', commandPayload: null, conditions: [] })).speed, 1800); // Default Servo wheel speed; NOT NULL database column.
   assert.deepEqual(JSON.parse(JSON.stringify(b.automationAction('position', 65, 210, 45))), { command: 'curtain.move', payload: { servoId: 1, percent: 65, speed: 210, acceleration: 45 } });
   assert.equal(b.automationInput(input({ checkIntervalSeconds: 5 })).checkIntervalSeconds, 5);
   assert.equal(b.automationInput(input()).checkIntervalSeconds, 30);
-  assert.throws(() => b.automationInput(input({ speed: 0 })), /Velocidad debe estar entre 1 y 3073/);
+  assert.throws(() => b.automationInput(input({ action: 'open', commandName: '', commandPayload: null, conditions: [], speed: 0 })), /Velocidad debe estar entre 1 y 1800/);
   assert.throws(() => b.automationInput(input({ checkIntervalSeconds: 4 })));
   assert.equal(b.automationConditions(undefined, param())[0].path, 'Power');
   for (const value of [param('__proto__.x'), param('status.constructor.x'), param('a..b'), param('Power', NaN), { ...param(), commandName: 'tuya.set' }, { ...command(), path: 'Power' }, command({ commandCode: undefined }), command({ commandField: 'status' }), { ...param(), kind: 'other' }]) assert.throws(() => b.automationCondition(value));
@@ -233,7 +233,7 @@ test('HTML loads automation helpers before app and mirrors are synchronized', ()
     const html = fs.readFileSync(path.join(root, folder, 'index.html'), 'utf8');
     assert.ok(html.indexOf('automation-model.js?v=47') >= 0);
     assert.ok(html.indexOf('automation-ui.js?v=56') >= 0);
-    assert.ok(html.indexOf('app.js?v=69') >= 0);
+    assert.ok(html.indexOf('app.js?v=70') >= 0);
     assert.ok(html.indexOf('blind-calibration-model.js?v=2') >= 0);
     assert.ok(html.indexOf('blind-calibration-ui.js?v=5') >= 0);
     assert.ok(html.indexOf('cloud-blind-calibration-ui.js?v=5') >= 0);
@@ -242,11 +242,11 @@ test('HTML loads automation helpers before app and mirrors are synchronized', ()
     assert.ok(html.indexOf('automation-ui.js?v=56') < html.indexOf('blind-calibration-model.js?v=2'));
     assert.ok(html.indexOf('blind-calibration-model.js?v=2') < html.indexOf('blind-calibration-ui.js?v=5'));
     assert.ok(html.indexOf('blind-calibration-ui.js?v=5') < html.indexOf('cloud-blind-calibration-ui.js?v=5'));
-    assert.ok(html.indexOf('cloud-blind-calibration-ui.js?v=5') < html.indexOf('app.js?v=69'));
+    assert.ok(html.indexOf('cloud-blind-calibration-ui.js?v=5') < html.indexOf('app.js?v=70'));
     assert.match(html, /automations.css\?v=48/);
     const app = fs.readFileSync(path.join(root, folder, 'app.js'), 'utf8');
-    assert.match(app, /\$\('#automation-speed'\)\.value = '240'/);
-    assert.match(app, /\$\('#automation-speed'\)\.max = '240'/);
+    assert.match(app, /\$\('#automation-speed'\)\.value = '1800'/);
+    assert.match(app, /\$\('#automation-speed'\)\.max = '1800'/);
     assert.match(app, /pad\(date\.getHours\(\)\)}:\$\{pad\(date\.getMinutes\(\)\)}:\$\{pad\(date\.getSeconds\(\)\)/);
     assert.match(app, /tooltipFormat: 'yyyy-MM-dd HH:mm:ss'/);
     assert.match(app, /}, 3000\);/);

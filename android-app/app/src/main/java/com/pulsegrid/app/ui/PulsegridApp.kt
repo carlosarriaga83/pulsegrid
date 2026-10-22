@@ -218,11 +218,11 @@ private fun DeviceCard(device: DeviceDto, model: PulsegridViewModel) {
         val servo = servoStates?.get(id.toString())?.takeIf { it.isJsonObject }?.asJsonObject
         servo?.get("blind_calibrated")?.asBoolean == true && servo?.get("position_recovery_required")?.asBoolean == false
     }
-    val canMoveCurtain = device.status == "online" && servoReady
     val curtainExtra = if (isServo) mapOf("allServos" to true) else emptyMap()
-    val reportedSpeed = telemetry?.get("servos")?.asJsonObject?.get("1")?.asJsonObject?.get("blind_target_speed")?.asInt ?: 240
-    var speed by remember(device.id, reportedSpeed) { mutableFloatStateOf(reportedSpeed.coerceIn(60, 240).toFloat()) }
+    val reportedSpeed = telemetry?.get("servos")?.asJsonObject?.get("1")?.asJsonObject?.get("blind_target_speed")?.asInt ?: 1800
+    var speed by remember(device.id, reportedSpeed) { mutableFloatStateOf(reportedSpeed.coerceIn(0, 1800).toFloat()) }
     val commandSpeed = if (isServo) speed.toInt() else 100
+    val canMoveCurtain = device.status == "online" && servoReady && (!isServo || speed > 0f)
     
     Card(colors = CardDefaults.cardColors(containerColor = Color.White), elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)) {
         Column(Modifier.fillMaxWidth().padding(16.dp)) {
@@ -244,8 +244,9 @@ private fun DeviceCard(device: DeviceDto, model: PulsegridViewModel) {
                 Text("Posición ${percentValue?.let { "${it.toInt()}%" } ?: "—"}", color = Color.Black, fontWeight = FontWeight.SemiBold)
                 if (!servoReady) Text("Completa la referencia y calibración Servo desde Pulsegrid antes de mover.", color = Color.Red, style = MaterialTheme.typography.bodySmall)
                 if (isServo) {
-                    Text("Velocidad Servo: ${speed.toInt()} (límite efectivo 240)", color = Color.DarkGray, style = MaterialTheme.typography.bodySmall)
-                    Slider(value = speed, onValueChange = { speed = it }, valueRange = 60f..240f, steps = 5, enabled = device.status == "online")
+                    Text("Velocidad Servo: ${speed.toInt()} (rango 0–1800)", color = Color.DarkGray, style = MaterialTheme.typography.bodySmall)
+                    Slider(value = speed, onValueChange = { speed = it }, valueRange = 0f..1800f, steps = 17, enabled = device.status == "online")
+                    if (speed == 0f) Text("Velocidad 0: selecciona al menos 1 para mover.", color = Color.Red, style = MaterialTheme.typography.bodySmall)
                 }
                 Slider(value = percent, onValueChange = { percent = it }, valueRange = 0f..100f, enabled = canMoveCurtain)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
