@@ -1389,8 +1389,8 @@ app.get('/api/device-commands', apiReady, async (request, response) => {
   await db.execute("UPDATE devices SET status = 'online', last_seen = NOW() WHERE id = ?", [authenticated.id]);
   const priorityOnly = String(request.query.priorityOnly || '') === '1';
   const [commands] = priorityOnly
-    ? await db.execute("SELECT id, command_name AS name, payload FROM commands WHERE device_id = ? AND status IN ('queued', 'delivered') AND command_name IN ('blind.safeCalibrationStop', 'blind.safeCalibrationCancel', 'curtain.stop') ORDER BY created_at ASC LIMIT 1", [authenticated.id])
-    : await db.execute("SELECT id, command_name AS name, payload FROM commands WHERE device_id = ? AND status IN ('queued', 'delivered') ORDER BY CASE WHEN command_name IN ('blind.safeCalibrationStop', 'blind.safeCalibrationCancel', 'curtain.stop') THEN 0 ELSE 1 END, created_at ASC LIMIT 1", [authenticated.id]);
+  ? await db.execute("SELECT id, command_name AS name, payload FROM commands WHERE device_id = ? AND status IN ('queued', 'delivered') AND command_name IN ('blind.safeCalibrationStop', 'blind.safeCalibrationCancel', 'curtain.stop', 'tenstar.stop') ORDER BY created_at ASC LIMIT 1", [authenticated.id])
+    : await db.execute("SELECT id, command_name AS name, payload FROM commands WHERE device_id = ? AND status IN ('queued', 'delivered') ORDER BY CASE WHEN command_name IN ('blind.safeCalibrationStop', 'blind.safeCalibrationCancel', 'curtain.stop', 'tenstar.stop') THEN 0 ELSE 1 END, created_at ASC LIMIT 1", [authenticated.id]);
   if (!commands[0]) return response.json({ command: null });
   await db.execute("UPDATE commands SET status = 'delivered' WHERE id = ? AND status = 'queued'", [commands[0].id]);
   response.json({ command: { id: commands[0].id, name: commands[0].name, payload: typeof commands[0].payload === 'string' ? JSON.parse(commands[0].payload) : commands[0].payload } });

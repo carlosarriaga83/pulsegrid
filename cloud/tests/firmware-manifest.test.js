@@ -15,7 +15,7 @@ function tupleAfter(source, marker) {
   return [...match[1].matchAll(/["']([^"']+)["']/g)].map((item) => item[1]);
 }
 
-for (const [model, directory] of [['servo', 'dispositivos/servo'], ['ga25', 'dispositivos/ga25/esp32_motor']]) {
+for (const [model, directory] of [['servo', 'dispositivos/servo'], ['ga25', 'dispositivos/ga25/esp32_motor'], ['tenstar', 'dispositivos/tenstar']]) {
   test(`${model}: burner profile matches firmware and OTA manifests`, () => {
     const profile = burner.slice(burner.indexOf(`"${model}": {`));
     const burnerFiles = tupleAfter(profile, '"files":');
@@ -25,6 +25,24 @@ for (const [model, directory] of [['servo', 'dispositivos/servo'], ['ga25', 'dis
     for (const file of burnerFiles) assert.equal(fs.existsSync(path.join(root, directory, file)), true, `${model} missing ${file}`);
   });
 }
+
+test('Tenstar firmware limits calibrated travel and uses Pulsegrid device commands', () => {
+  const main = fs.readFileSync(path.join(root, 'dispositivos/tenstar/main.py'), 'utf8');
+  const motor = fs.readFileSync(path.join(root, 'dispositivos/tenstar/tenstar_motor.py'), 'utf8');
+  const burnerProfile = burner.slice(burner.indexOf('"tenstar": {'));
+  assert.match(main, /'firmwareTarget': FIRMWARE_TARGET/);
+  assert.match(main, /'kind': 'curtain'/);
+  for (const command of ['curtain.open', 'curtain.close', 'curtain.move', 'curtain.stop', 'tenstar.zero', 'tenstar.jog']) {
+    assert.ok(main.includes(command), `Tenstar must handle ${command}`);
+  }
+  assert.match(main, /if not position_valid:/);
+  assert.match(main, /TRAVEL_TURNS/);
+  assert.match(main, /priorityOnly=1/);
+  assert.match(main, /ack_queue.append\(\(pending_motion_command, 'succeeded', None\)\)/);
+  assert.match(motor, /motion_timeout_ms/);
+  assert.match(motor, /Pin\(in1_pin\), freq=1000/);
+  assert.match(burnerProfile, /"files": \("boot.py", "main.py", "tenstar_motor.py"\)/);
+});
 
 test('persistent calibration/state files are never OTA payloads or burner cleanup targets', () => {
   const servoMain = fs.readFileSync(path.join(root, 'dispositivos/servo/main.py'), 'utf8');
@@ -83,7 +101,7 @@ test('calibration wizard selects a timed GA25 flow without sending servo command
   for (const folder of ['', 'public', 'public_html', 'legacy-root']) {
     const file = path.join(root, 'cloud', folder, 'app.js');
     const source = fs.readFileSync(file, 'utf8');
-    assert.match(source, /const supportsServo = targetModel === 'servo' \|\| \(!targetModel && !\/ga25\/i\.test\(identity\)\)/, folder || 'cloud root');
+    assert.match(source, /const supportsServo = targetModel === 'servo' \|\| \(!targetModel && !\/ga25\|tenstar\/i\.test\(identity\)\)/, folder || 'cloud root');
     assert.match(source, /if \(!supportsServo && !supportsGa25\) \{ \$\('#calibration-wizard'\)\?\.remove\(\); return; \}/, folder || 'cloud root');
     assert.match(source, /getCalibrationDeviceModel/);
     assert.match(source, /mountBlindCalibrationWizard\(\{ \$, \$\$, apiRequest, loadDevices, getCalibrationPosition, waitForCalibrationCommand, waitForCalibrationIdle, getCalibrationDeviceModel, devices: \(\) => devices, parseTelemetry, showToast, renderIcons \}\)/, folder || 'cloud root');

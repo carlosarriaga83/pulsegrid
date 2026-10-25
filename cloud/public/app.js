@@ -971,6 +971,7 @@ function deviceCurtainPositionMarkup(device) {
 function deviceDirectionParameterMarkup(device) {
   if (device.provider === 'tuya' || !AutomationModel.curtain(device)) return '';
   const telemetry = parseTelemetry(device.telemetry);
+  if (String(telemetry.firmwareTarget || '').toLowerCase() === 'tenstar') return '';
   const state = deviceUiState();
   const key = `${device.id}\u0000directionReversed`;
   const reported = telemetry.directionReversed === true || telemetry.directionReversed === 'true';
@@ -985,6 +986,7 @@ function deviceDirectionParameterMarkup(device) {
 function deviceLedParameterMarkup(device) {
   if (device.provider === 'tuya' || !AutomationModel.curtain(device)) return '';
   const telemetry = parseTelemetry(device.telemetry);
+  if (String(telemetry.firmwareTarget || '').toLowerCase() === 'tenstar') return '';
   const state = deviceUiState();
   const key = `${device.id}\u0000ledEnabled`;
   const reported = telemetry.ledEnabled === true || telemetry.ledEnabled === 'true';
@@ -1272,7 +1274,7 @@ function openDeviceConfiguration(device) {
 
 async function queueFirmwareUpdate(device) {
   const result = await apiRequest('firmware/releases');
-  const targetModel = parseTelemetry(device.telemetry).firmwareTarget || (String(device.type || '').toLowerCase().includes('ga25') ? 'ga25' : 'servo');
+  const targetModel = parseTelemetry(device.telemetry).firmwareTarget || (/tenstar/i.test(`${device.name || ''} ${device.type || ''}`) ? 'tenstar' : String(device.type || '').toLowerCase().includes('ga25') ? 'ga25' : 'servo');
   const release = result.releases?.find((item) => item.isActive && (item.targetModel === targetModel || item.targetModel === 'Todos los dispositivos')) || result.releases?.find((item) => item.targetModel === targetModel);
   if (!release) throw new Error('No hay una version de firmware publicada');
   if (!window.confirm(`Actualizar ${device.name} a ${release.version}? El dispositivo se reiniciara.`)) return;
@@ -1837,7 +1839,7 @@ function renderCalibrationWizard() {
   const telemetry = parseTelemetry(selectedDevice?.telemetry);
   const targetModel = String(telemetry.firmwareTarget || '').toLowerCase();
   const identity = `${selectedDevice?.name || ''} ${selectedDevice?.type || ''} ${selectedDevice?.id || ''}`;
-  const supportsServo = targetModel === 'servo' || (!targetModel && !/ga25/i.test(identity));
+  const supportsServo = targetModel === 'servo' || (!targetModel && !/ga25|tenstar/i.test(identity));
   const supportsGa25 = targetModel === 'ga25' || (!targetModel && /ga25/i.test(identity));
   if (!supportsServo && !supportsGa25) { $('#calibration-wizard')?.remove(); return; }
   if (supportsServo && typeof window.mountCloudBlindCalibrationWizard === 'function') {
@@ -1935,9 +1937,10 @@ function configureDeviceCommands() {
   const targetModel = String(selectedTelemetry.firmwareTarget || '').toLowerCase();
   const selectedIdentity = `${selectedDevice?.name || ''} ${selectedDevice?.type || ''} ${selectedDevice?.id || ''}`;
   const isGa25Device = targetModel === 'ga25' || (!targetModel && /ga25/i.test(selectedIdentity));
+  const isTenstarDevice = targetModel === 'tenstar' || (!targetModel && /tenstar/i.test(selectedIdentity));
   const tuyaCommands = isTuyaDevice ? tuyaCommandOptions(selectedDevice) : [];
   commandSelect.id = 'command-name';
-  commandSelect.innerHTML = tuyaCommands.length ? tuyaCommands.map((item) => `<option value="${escapeTelemetryHtml(item.value)}">${escapeTelemetryHtml(item.label)}</option>`).join('') : isTuyaDevice ? '<option value="">Tuya no expone controles para este equipo</option>' : isGa25Device ? '<option value="curtain.open">Abrir cortina</option><option value="curtain.close">Cerrar cortina</option><option value="curtain.stop">Detener cortina</option><option value="curtain.move">Mover cortina</option>' : '<option value="curtain.open">Abrir cortina</option><option value="curtain.close">Cerrar cortina</option><option value="curtain.stop">Detener cortina</option><option value="curtain.move">Mover cortina</option><option value="servo.configure">Configurar servo</option><option value="motion.configure">Configurar movimiento</option><option value="servo.torque">Configurar torque</option><option value="servo.resetTurns">Reiniciar vueltas</option>';
+  commandSelect.innerHTML = tuyaCommands.length ? tuyaCommands.map((item) => `<option value="${escapeTelemetryHtml(item.value)}">${escapeTelemetryHtml(item.label)}</option>`).join('') : isTuyaDevice ? '<option value="">Tuya no expone controles para este equipo</option>' : isTenstarDevice ? '<option value="curtain.open">Abrir cortina</option><option value="curtain.close">Cerrar cortina</option><option value="curtain.stop">Detener cortina</option><option value="curtain.move">Mover a porcentaje</option><option value="tenstar.zero">Fijar cero (cortina cerrada)</option><option value="tenstar.jog">Pulso manual temporizado</option>' : isGa25Device ? '<option value="curtain.open">Abrir cortina</option><option value="curtain.close">Cerrar cortina</option><option value="curtain.stop">Detener cortina</option><option value="curtain.move">Mover cortina</option>' : '<option value="curtain.open">Abrir cortina</option><option value="curtain.close">Cerrar cortina</option><option value="curtain.stop">Detener cortina</option><option value="curtain.move">Mover cortina</option><option value="servo.configure">Configurar servo</option><option value="motion.configure">Configurar movimiento</option><option value="servo.torque">Configurar torque</option><option value="servo.resetTurns">Reiniciar vueltas</option>';
   payload.id = 'command-payload';
   let help = $('#command-payload-help');
   if (!help) {
@@ -1949,6 +1952,17 @@ function configureDeviceCommands() {
   const applyCommandTemplate = () => {
     const definition = tuyaCommands.find((item) => item.value === commandSelect.value) || commands[commandSelect.value];
     const commandPayload = { ...(definition?.payload || {}) };
+    if (isTenstarDevice) {
+      const tenstarPayloads = {
+        'curtain.open': { speedPct: 70 },
+        'curtain.close': { speedPct: 70 },
+        'curtain.stop': {},
+        'curtain.move': { percent: 50, speedPct: 50 },
+        'tenstar.zero': {},
+        'tenstar.jog': { direction: 1, speedPct: 25, durationMs: 1000 }
+      };
+      Object.assign(commandPayload, tenstarPayloads[commandSelect.value] || {});
+    }
     if (isGa25Device && ['curtain.open', 'curtain.close', 'curtain.move'].includes(commandSelect.value)) commandPayload.speed = 70;
     payload.value = JSON.stringify(commandPayload, null, 2);
     help.textContent = definition?.help || (isTuyaDevice ? 'Tuya no expone controles para este equipo; la telemetria seguira disponible.' : '');

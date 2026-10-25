@@ -214,13 +214,14 @@ class CloudClient:
 
     def _log_heap(self, label):
         try:
-            print('Heap MicroPython {}: {}'.format(label, gc.mem_free()))
+            #print('Heap MicroPython {}: {}'.format(label, gc.mem_free()))
+            pass
         except AttributeError:
             pass
         try:
             import esp32
-            print('Heap ESP32 {} (total, libre, bloque mayor, minimo libre): {}'.format(
-                label, esp32.idf_heap_info(esp32.HEAP_DATA)))
+            #print('Heap ESP32 {} (total, libre, bloque mayor, minimo libre): {}'.format(
+            #    label, esp32.idf_heap_info(esp32.HEAP_DATA)))
         except Exception:
             pass
 

@@ -187,7 +187,8 @@ test('cloud command queue prioritizes emergency curtain and calibration stops', 
   const source = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
   assert.match(source, /blind\.safeCalibrationCancel/);
   assert.match(source, /priorityOnly = String\(request\.query\.priorityOnly \|\| ''\) === '1'/);
-  assert.match(source, /ORDER BY CASE WHEN command_name IN \('blind\.safeCalibrationStop', 'blind\.safeCalibrationCancel', 'curtain\.stop'\) THEN 0 ELSE 1 END, created_at ASC/);
+  assert.match(source, /ORDER BY CASE WHEN command_name IN \('blind\.safeCalibrationStop', 'blind\.safeCalibrationCancel', 'curtain\.stop', 'tenstar\.stop'\) THEN 0 ELSE 1 END, created_at ASC/);
+  assert.match(source, /command_name IN \('blind\.safeCalibrationStop', 'blind\.safeCalibrationCancel', 'curtain\.stop', 'tenstar\.stop'\)/);
 });
 
 test('all dashboard copies provide a distinct timed GA25 calibration flow', () => {

@@ -35,6 +35,12 @@ const servoCurtainDevice = {
   } }
 };
 
+const tenstarCurtainDevice = {
+  ...curtainDevice,
+  name: 'Tenstar C3',
+  telemetry: { kind: 'curtain', firmwareTarget: 'tenstar', position: 24, positionValid: true, moving: false, pulsesPerRevolution: 1980 }
+};
+
 function setup(folder, requestImpl = async () => ({ status: 'succeeded' }), configuredDevice = device) {
   const dom = new JSDOM('<div id="device-card-grid"></div>', { runScripts: 'outside-only', url: 'http://localhost/' });
   const { window } = dom;
@@ -209,6 +215,16 @@ for (const folder of ['', 'public', 'public_html']) {
     window.devices[0].telemetry.servos[2].blind_percent = 35;
     vm.runInContext('renderDeviceCards()', context);
     assert.equal(window.document.querySelector('[data-curtain-position]').value, '64');
+  });
+
+  test(`${label}: Tenstar is rendered as a position-controlled curtain without unsupported controls`, (t) => {
+    const f = setup(folder, undefined, tenstarCurtainDevice); t.after(() => f.dom.window.close());
+    const { window } = f;
+    const slider = window.document.querySelector('[data-curtain-position]');
+    assert.ok(slider);
+    assert.equal(slider.value, '24');
+    assert.equal(slider.disabled, false);
+    assert.equal(window.document.querySelector('[data-device-direction]'), null);
   });
 
   test(`${label}: curtain position slider is disabled until Servo calibration is ready`, (t) => {

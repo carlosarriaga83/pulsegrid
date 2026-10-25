@@ -1,6 +1,6 @@
 # Quemador ESP32 de Pulsegrid
 
-GUI de Tkinter para preparar una ESP32 nueva: detecta el puerto, identifica el chip, verifica MicroPython, borra y flashea una imagen `.bin`, y carga el perfil de archivos correcto para `servo`, `GA25` u `otros`.
+GUI de Tkinter para preparar una ESP32 nueva: detecta el puerto, identifica el chip, verifica MicroPython, borra y flashea una imagen `.bin`, y carga el perfil de archivos correcto para `servo`, `GA25`, `Tenstar C3` u `otros`.
 
 ## Instalacion
 
@@ -20,7 +20,7 @@ Tkinter forma parte de la instalacion normal de Python para Windows. La placa de
 ## Flujo recomendado
 
 1. Conecta la ESP32 por USB.
-2. Selecciona el modelo: `servo`, `ga25` u `otros`.
+2. Selecciona el modelo: `servo`, `ga25`, `tenstar` u `otros`.
 3. Selecciona el tipo de chip o deja `Auto`.
 4. Selecciona el COM.
 6. Si el COM está ocupado por un intento anterior del quemador, pulsa `Liberar COM`. El botón detiene herramientas lanzadas por el quemador y comprueba que el puerto pueda abrirse.
@@ -73,6 +73,12 @@ wifi_recovery.py
 
 Genera y carga `config.py` con Wi-Fi, API URL HTTPS, código único, Device ID, recorrido y sentido del motor. Registra el Device ID y el código mostrado en el cloud. El portal local solo cambia Wi-Fi y conserva los ajustes del motor.
 El `Device ID` se asigna como `PULSE_` seguido de los 12 dígitos hexadecimales de la MAC. El código se deriva de forma determinista de la misma MAC y puede calcularse antes de conectar la placa. Su derivación pública implica que no es un secreto; consulta la advertencia del perfil Servo.
+
+### Tenstar C3 Super Mini
+
+Carga `boot.py`, `main.py` y `tenstar_motor.py` desde `dispositivos/tenstar` y genera `config.py` con Wi-Fi, identidad y ajustes de encoder. El perfil selecciona ESP32-C3 y permite configurar pulsos por vuelta (inicialmente 1980), recorrido calibrado en vueltas, PWM mínimo y sentido de apertura. No ofrece OTA: usa el quemador por USB para instalar firmware.
+
+Consulta `dispositivos/tenstar/README.md` antes de energizar el motor. No hay finales de carrera: primero fija manualmente la posición cerrada con `tenstar.zero` y prueba desplazamientos pequeños con una forma de cortar la alimentación accesible.
 
 ### Otros
 
