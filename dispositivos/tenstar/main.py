@@ -22,7 +22,7 @@ try:
     API_URL = getattr(config, 'API_URL', 'https://pulse.2api2.com')
     DEVICE_CODE = getattr(config, 'DEVICE_CODE', '')
     DEVICE_ID = getattr(config, 'DEVICE_ID', '')
-    PULSES_PER_REVOLUTION = getattr(config, 'PULSES_PER_REVOLUTION', 8580)
+    PULSES_PER_REVOLUTION = getattr(config, 'PULSES_PER_REVOLUTION', 11880)
     KP = getattr(config, 'KP', 0.3)
     MINIMUM_SPEED_PCT = getattr(config, 'MINIMUM_SPEED_PCT', 20)
     COMMANDS_ENABLED = getattr(config, 'COMMANDS_ENABLED', True)
@@ -31,7 +31,7 @@ try:
 except ImportError:
     WIFI_SSID = WIFI_PASSWORD = DEVICE_CODE = DEVICE_ID = ''
     API_URL = 'https://pulse.2api2.com'
-    PULSES_PER_REVOLUTION = 8580
+    PULSES_PER_REVOLUTION = 11880
     KP = 0.3
     MINIMUM_SPEED_PCT = 20
     COMMANDS_ENABLED = True

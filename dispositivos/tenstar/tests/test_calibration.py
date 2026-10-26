@@ -32,7 +32,7 @@ class Motor:
     def move_turns(self, turns, direction, speed):
         if self.moving:
             raise ValueError('Movimiento activo')
-        self.target = self.position + int(turns * 8580) * direction
+        self.target = self.position + int(turns * 11880) * direction
         self.speed = speed
 
     def complete(self):
