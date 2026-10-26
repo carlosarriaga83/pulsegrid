@@ -5,6 +5,7 @@ _pin = None
 _active_low = True
 _status = None
 _started_at = 0
+_enabled = True
 _patterns = {
     'online': (1, 1),
     'offline': (120, 2000),
@@ -32,9 +33,21 @@ def set_status(status):
     tick()
 
 
+def set_enabled(enabled):
+    global _enabled
+    if not isinstance(enabled, bool):
+        raise ValueError('enabled debe ser booleano')
+    _enabled = enabled
+    tick()
+
+
+def is_enabled():
+    return _enabled
+
+
 def tick():
     if _pin is None or _status is None:
         return
     on_ms, period_ms = _patterns[_status]
-    on = time.ticks_diff(time.ticks_ms(), _started_at) % period_ms < on_ms
+    on = _enabled and time.ticks_diff(time.ticks_ms(), _started_at) % period_ms < on_ms
     _pin.value(int(not on) if _active_low else int(on))

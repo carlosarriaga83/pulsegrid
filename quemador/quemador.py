@@ -52,7 +52,7 @@ MODEL_PROFILES = {
     "tenstar": {
         "label": "Tenstar C3 Super Mini",
         "directory": TENSTAR_DIR,
-        "files": ("boot.py", "main.py", "tenstar_motor.py", "ota_boot.py", "pulsegrid_ota.py", "board_led.py", "captive_portal.py", "wifi_recovery.py", "tenstar_http.py", "tenstar_calibration.py"),
+        "files": ("boot.py", "main.py", "tenstar_motor.py", "ota_boot.py", "pulsegrid_ota.py", "board_led.py", "captive_portal.py", "wifi_recovery.py", "tenstar_http.py", "tenstar_calibration.py", "tenstar_state.py"),
         "sources": {"ota_boot.py": SERVO_DIR / "ota_boot.py", "pulsegrid_ota.py": SERVO_DIR / "pulsegrid_ota.py", "wifi_recovery.py": SERVO_DIR / "wifi_recovery.py"},
         "remove": ("cortina.py", "stservo.py", "servo_calibration.py", "motor_curtain.py", "pulsegrid_firmware.py"),
         "config": "config.py",

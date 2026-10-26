@@ -84,6 +84,8 @@ Consulta `dispositivos/tenstar/README.md` antes de energizar el motor. No hay fi
 
 Desde Tenstar r6, la red HTTPS y el portal se pausan durante los movimientos para no perder pulsos del encoder software. **La parada remota Cloud no está disponible durante el giro**; mantén un corte físico accesible y usa pasos cortos. Los pulsos por vuelta siguen en 1980; no se compensan pérdidas de conteo cambiando la escala. Actualiza también el servidor y la interfaz para mostrar esta limitación.
 
+Tenstar r7 incluye `tenstar_state.py`: conserva recorrido, posición detenida y preferencia de LED con dos registros verificados. Tras un corte durante el movimiento conserva la calibración pero solicita confirmar un extremo manualmente. No borres `tenstar_calibration.json`, `.0`, `.1` ni `.moving` al actualizar. El asistente vertical muestra pasos completados y termina cerrado; el siguiente movimiento debe ser abrir o mover. El LED GPIO8 puede habilitarse/deshabilitarse desde Cloud.
+
 ### Otros
 
 Selecciona una carpeta propia. La herramienta carga todos sus archivos `.py`, excepto archivos de configuración conocidos. Para este perfil debes incluir manualmente el archivo de configuración que tu firmware necesite.

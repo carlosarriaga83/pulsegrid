@@ -110,17 +110,50 @@ class CalibrationTest(unittest.TestCase):
                         self.motor.complete()
                     self.assertEqual(self.motor.target_position, percent)
 
-    def test_reboot_load_preserves_span_but_requires_reference(self):
+    def test_reboot_load_restores_calibration_and_stationary_position(self):
         span = self.calibrated('up')
         self.main.position_valid = False
         self.main.load_calibration()
         self.assertEqual(self.main.calibration['open_span_pulses'], span)
-        self.command('curtain.open', success=False)
+        self.assertTrue(self.main.position_valid)
+        self.assertEqual(self.motor.position, 0)
+        self.command('curtain.close', success=False)
         self.command('tenstar.calibration.referenceOpen')
         self.assertEqual(self.motor.position, span)
         self.assertEqual(self.motor.target_position, 100)
         self.command('curtain.close')
         self.assertEqual(self.motor.target, 0)
+
+    def test_cut_during_motion_preserves_span_but_requires_manual_reference(self):
+        span = self.calibrated('up')
+        self.command('curtain.open')
+        self.motor.stop()
+        self.main.load_calibration()
+        self.assertTrue(self.main.calibration['calibrated'])
+        self.assertEqual(self.main.calibration['open_span_pulses'], span)
+        self.assertFalse(self.main.position_valid)
+        self.command('curtain.open', success=False)
+        self.command('tenstar.calibration.referenceClosed')
+        self.assertTrue(self.main.position_valid)
+
+    def test_led_command_is_boolean_persistent_and_does_not_move_motor(self):
+        self.calibrated('down')
+        self.command('led.configure', {'enabled': False})
+        self.assertFalse(self.led.is_enabled())
+        self.led.set_enabled(True)
+        self.main.load_calibration()
+        self.assertFalse(self.led.is_enabled())
+        self.assertTrue(self.main.position_valid)
+        self.assertFalse(self.motor.moving)
+        self.command('led.configure', {'enabled': 1}, success=False)
+
+    def test_finished_calibration_is_closed_and_rejects_repeated_close(self):
+        self.calibrated('down')
+        self.assertEqual(self.motor.target_position, 0)
+        self.command('curtain.close', success=False)
+        self.assertFalse(self.motor.moving)
+        self.command('curtain.move', {'percent': 30})
+        self.assertTrue(self.motor.moving)
 
     def test_incomplete_calibration_cannot_resume_after_reboot(self):
         self.begin()
@@ -140,6 +173,16 @@ class CalibrationTest(unittest.TestCase):
         self.assertEqual(self.motor.position, -5000)
         self.command('curtain.close')
         self.assertEqual(self.motor.target, 0)
+
+    def test_legacy_calibration_survives_interrupted_first_migration(self):
+        Path(self.main.CALIBRATION_FILE).write_text(json.dumps({
+            'calibrated': True, 'closed_marked': True, 'open_marked': True,
+            'open_span_pulses': 5000, 'open_direction': -1,
+        }))
+        Path(self.main.CALIBRATION_FILE + '.0').write_text('{')
+        self.main.load_calibration()
+        self.assertTrue(self.main.calibration['calibrated'])
+        self.assertFalse(self.main.position_valid)
 
     def test_transition_validation_no_zeroing_on_unconfirmed_open(self):
         self.motor.position = 123
@@ -193,8 +236,26 @@ class CalibrationTest(unittest.TestCase):
         self.command('tenstar.calibration.referenceOpen', success=False)
         self.assertIn('flash full', str(self.acks[-1][2]))
         self.assertFalse(self.main.position_valid)
-        self.assertFalse(self.main.calibration['calibrated'])
+        self.assertTrue(self.main.calibration['calibrated'])
         self.command('curtain.close', success=False)
+
+    def test_flash_failure_before_motion_never_starts_motor(self):
+        self.calibrated('down')
+        self.main.prepare_motion = lambda: (_ for _ in ()).throw(OSError('flash full'))
+        self.command('curtain.open', success=False)
+        self.assertFalse(self.motor.moving)
+        self.assertIn('flash full', str(self.acks[-1][2]))
+
+    def test_saved_midpoint_restores_after_reset_without_recalibration(self):
+        span = self.calibrated('up')
+        self.command('curtain.move', {'percent': 50})
+        self.motor.complete()
+        self.main.save_calibration()
+        self.motor.zero()
+        self.main.load_calibration()
+        self.assertTrue(self.main.position_valid)
+        self.assertLessEqual(abs(self.motor.position - span // 2), 1)
+        self.assertEqual(self.motor.target_position, 50)
 
     def test_small_down_steps_recover_an_upward_direction_test(self):
         self.begin()

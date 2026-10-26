@@ -7,7 +7,7 @@ def empty():
     }
 
 
-def handle(name, payload, motor, state, pulses_per_turn, minimum_speed, referenced):
+def handle(name, payload, motor, state, pulses_per_turn, minimum_speed, referenced, before_move=None):
     if motor.moving:
         raise ValueError('Deten el motor antes de cambiar la calibracion')
     fields = {
@@ -51,6 +51,8 @@ def handle(name, payload, motor, state, pulses_per_turn, minimum_speed, referenc
         if state['test_started']:
             raise ValueError('La prueba ya se hizo; confirma si subio o bajo')
         origin = motor.snapshot()
+        if before_move:
+            before_move()
         motor.move_turns(0.05, 1, max(25, minimum_speed))
         state['test_origin'] = origin
         state['test_started'] = True
@@ -77,6 +79,8 @@ def handle(name, payload, motor, state, pulses_per_turn, minimum_speed, referenc
         projected = current + delta * sign * state['close_direction']
         if delta < 1 or (projected < 0 and projected <= current) or projected > pulses_per_turn * 20:
             raise ValueError('El paso sale de la referencia abierta o supera 20 vueltas')
+        if before_move:
+            before_move()
         motor.move_turns(turns, sign, max(25, minimum_speed))
         motor.target_position = None
     elif name == 'tenstar.calibration.setClosed':

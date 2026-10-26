@@ -1,6 +1,20 @@
 # Tenstar C3 Super Mini + DRV8871
 
-Firmware MicroPython para controlar un motor de cortina con encoder incremental desde Pulsegrid. El quemador carga `boot.py`, `main.py`, `tenstar_motor.py`, `tenstar_calibration.py`, `tenstar_http.py`, `board_led.py`, `captive_portal.py` y los módulos compartidos `ota_boot.py`, `pulsegrid_ota.py` y `wifi_recovery.py`; genera `config.py` para la placa.
+Firmware MicroPython para controlar un motor de cortina con encoder incremental desde Pulsegrid. El quemador carga `boot.py`, `main.py`, `tenstar_motor.py`, `tenstar_calibration.py`, `tenstar_state.py`, `tenstar_http.py`, `board_led.py`, `captive_portal.py` y los módulos compartidos `ota_boot.py`, `pulsegrid_ota.py` y `wifi_recovery.py`; genera `config.py` para la placa.
+
+## Persistencia y recuperación en r7
+
+El recorrido, el sentido, la última posición detenida y la preferencia del LED se guardan en dos registros redundantes: `tenstar_calibration.json.0` y `.1`, con generación y checksum SHA-256. Cada escritura se sincroniza y verifica antes de actualizar la otra copia. No se elimina la última copia válida para reemplazarla. Estos archivos, el marcador `.moving` y el archivo antiguo `tenstar_calibration.json` son datos, nunca payloads de OTA.
+
+Antes de habilitar un movimiento se guarda y sincroniza `tenstar_calibration.json.moving`; si falla, el motor no arranca. Al terminar se guardan ambas copias de la posición real antes del ACK y se elimina el marcador. Así:
+
+- Reinicio/corte con la cortina detenida: restaura automáticamente recorrido y posición, sin volver a calibrar.
+- Corte durante un movimiento o escritura interrumpida/copia dañada: conserva el recorrido recuperable, pero exige confirmar manualmente abierto o cerrado. No adivina dónde se detuvo.
+- Actualización desde r6: conserva el recorrido anterior; necesita confirmar un extremo una vez porque el formato antiguo no tenía una posición segura.
+- Si moviste el eje sin alimentación, recupera manualmente la referencia: el encoder incremental no registra ese desplazamiento.
+- Una calibración incompleta no se reanuda después de reiniciar: vuelve a iniciar desde abierto.
+
+Se escribe antes/después de los movimientos y al cambiar configuración, no por cada pulso. Los errores de almacenamiento se notifican y no se confirma un movimiento como exitoso si no pudo guardarse su posición.
 
 ## Cableado
 
@@ -47,6 +61,8 @@ Cloud comprueba la presencia reciente mediante `last_seen`, actualizado al recib
 
 El LED integrado de la C3 Super Mini se configura con `LED_PIN = 8` y `LED_ACTIVE_LOW = True`. Para una variante de placa con polaridad distinta, cambia `LED_ACTIVE_LOW` en `config.py`. Los estados se actualizan en el bucle local, sin esperar las llamadas de red.
 
+Desde r7 el interruptor **LED del dispositivo** en Cloud envía `led.configure` con `{"enabled": true}` o `false`. Desactivar apaga todos los patrones; activar restaura el patrón del estado actual. La preferencia se conserva tras reiniciar y se reporta como `ledEnabled`.
+
 ### Memoria TLS en ESP32-C3
 
 La r4 separa el transporte HTTP en `tenstar_http.py` para reducir el pico de memoria al compilar los archivos Python durante el arranque. No vuelvas a unir este módulo con `main.py`: en MicroPython el heap Python puede crecer tomando memoria del heap interno ESP-IDF, y `gc.collect()` no devuelve necesariamente esa región a TLS.
@@ -68,10 +84,12 @@ La r5 con el nuevo módulo de calibración también se cargó por COM11: aproxim
 5. Coloca manualmente la cortina completamente **abierta**, sin forzar el tope, y pulsa **Estoy en abierto · iniciar / resetear calibración**. Esto borra la calibración anterior y pone el encoder en cero, sin mover el motor.
 6. Pulsa **Probar un paso pequeño (0,05 vueltas)**, vigila el mecanismo y confirma **El paso subió** o **El paso bajó**. Se usa encoder y PWM de al menos 25% (o el mínimo configurado, hasta 35%). Si no se registran pulsos, revisa el encoder y reinicia el asistente; no se adivina el sentido.
 7. Introduce las vueltas por movimiento y usa **Bajar** o **Subir** tantas veces como haga falta. El ESP registra los pulsos reales, incluyendo la prueba y las correcciones. Cada orden y el recorrido total tienen un máximo de 20 vueltas; no se permite avanzar por encima del origen abierto. En r6 **no hay parada remota durante el giro**: mantén accesible el corte físico y usa pasos cortos.
-8. Cuando compruebes que está completamente **cerrada**, sin empujar contra el tope, pulsa **Está completamente cerrada · guardar recorrido**. Se guardan recorrido y sentido en `tenstar_calibration.json`; abierto queda en 100% y cerrado en 0%.
-9. Tras cada reinicio, coloca manualmente la cortina en abierto y pulsa **Estoy en abierto · recuperar referencia**, sin repetir toda la calibración. El encoder es incremental: el origen es una referencia de software, no una posición absoluta recuperable tras apagar. Una calibración interrumpida debe empezar otra vez desde abierto; las calibraciones completas anteriores se conservan.
+8. Cuando compruebes que está completamente **cerrada**, sin empujar contra el tope, pulsa **Está completamente cerrada · guardar recorrido**. Se guardan recorrido, sentido y posición cerrada en las dos copias redundantes; abierto queda en 100% y cerrado en 0%. Los cuatro pasos verticales muestran **✓ Completado**; el asistente termina aquí, sin movimiento adicional.
+9. Tras un reinicio normal conserva la posición detenida. Solo si aparece **recuperar referencia**, confirma **Estoy en abierto** o **Estoy en cerrado** según la posición física actual, sin repetir la calibración.
 
 Este asistente requiere firmware **r5 o posterior** y actualizar tanto `server.js` como los archivos web de Cloud. Carga también el nuevo módulo `tenstar_calibration.py` al actualizar por USB. La pantalla muestra las vueltas y pulsos relativos; el botón inicial y la confirmación final no mueven el motor.
+
+La persistencia resiliente y el LED requieren r7, incluyendo `tenstar_state.py`. Al terminar de calibrar la cortina queda cerrada: **Cerrar** se rechaza tanto en firmware como en Cloud mientras ya esté cerrada. Los siguientes movimientos disponibles en el asistente son **Abrir** o **Mover** a otro porcentaje. El LED y la recuperación/configuración siguen disponibles; no se bloquea el cierre después de haber abierto.
 
 ## Controles Pulsegrid
 

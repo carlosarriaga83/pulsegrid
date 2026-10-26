@@ -849,7 +849,7 @@ function deviceDirectionParameterMarkup(device) {
 function deviceLedParameterMarkup(device) {
   if (device.provider === 'tuya' || !AutomationModel.curtain(device)) return '';
   const telemetry = parseTelemetry(device.telemetry);
-  if (String(telemetry.firmwareTarget || '').toLowerCase() === 'tenstar') return '';
+
   const state = deviceUiState();
   const key = `${device.id}\u0000ledEnabled`;
   const reported = telemetry.ledEnabled === true || telemetry.ledEnabled === 'true';
@@ -1849,6 +1849,8 @@ function configureDeviceCommands() {
   commandSelect.id = 'command-name';
   commandSelect.innerHTML = tuyaCommands.length ? tuyaCommands.map((item) => `<option value="${escapeTelemetryHtml(item.value)}">${escapeTelemetryHtml(item.label)}</option>`).join('') : isTuyaDevice ? '<option value="">Tuya no expone controles para este equipo</option>' : isTenstarDevice ? '<option value="curtain.open">Abrir cortina</option><option value="curtain.close">Cerrar cortina</option><option value="curtain.stop">Detener cortina</option><option value="curtain.move">Mover a porcentaje</option><option value="tenstar.zero">Fijar cero (cortina cerrada)</option>' : isGa25Device ? '<option value="curtain.open">Abrir cortina</option><option value="curtain.close">Cerrar cortina</option><option value="curtain.stop">Detener cortina</option><option value="curtain.move">Mover cortina</option>' : '<option value="curtain.open">Abrir cortina</option><option value="curtain.close">Cerrar cortina</option><option value="curtain.stop">Detener cortina</option><option value="curtain.move">Mover cortina</option><option value="servo.configure">Configurar servo</option><option value="motion.configure">Configurar movimiento</option><option value="servo.torque">Configurar torque</option><option value="servo.resetTurns">Reiniciar vueltas</option>';
   if (isTenstarDevice) commandSelect.querySelector('option[value="tenstar.zero"]')?.remove();
+  if (isTenstarDevice && selectedTelemetry.atClosed === true && selectedTelemetry.positionValid === true) commandSelect.querySelector('option[value="curtain.close"]')?.remove();
+  if (isTenstarDevice && selectedTelemetry.remoteStopDuringMotion === false) commandSelect.querySelector('option[value="curtain.stop"]')?.remove();
   payload.id = 'command-payload';
   let help = $('#command-payload-help');
   if (!help) {

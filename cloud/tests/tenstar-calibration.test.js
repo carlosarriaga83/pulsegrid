@@ -38,7 +38,7 @@ test('Tenstar wizard is loaded and mounted only through the dedicated cloud path
     const html = fs.readFileSync(path.join(base, 'index.html'), 'utf8');
     const app = fs.readFileSync(path.join(base, 'app.js'), 'utf8');
     const wizard = fs.readFileSync(path.join(base, 'tenstar-calibration-ui.js'), 'utf8');
-    assert.match(html, /tenstar-calibration-ui\.js\?v=3/);
+    assert.match(html, /tenstar-calibration-ui\.js\?v=4/);
     assert.match(app, /mountTenstarCalibrationWizard/);
     assert.match(wizard, /tenstar\.calibration\.setClosed/);
     assert.match(wizard, /tenstar\.calibration\.begin/);
@@ -157,4 +157,26 @@ test('Tenstar with motion-isolated networking explicitly disables remote stop', 
   assert.match($('#tenstar-stop').textContent, /no disponible/);
   assert.match($('#calibration-status').textContent, /corte físico/);
   assert.match($('#calibration-status').textContent, /HTTPS y portal se pausan/);
+});
+
+test('Tenstar completed flow marks all vertical steps and offers open or move but not close', async (t) => {
+  const f = makeWizard({ calibration: { calibrated: true, open_marked: true, direction_confirmed: true }, positionValid: true, atClosed: true });
+  t.after(() => f.dom.window.close());
+  const $ = (selector) => f.window.document.querySelector(selector);
+  const steps = [...f.window.document.querySelectorAll('.tenstar-calibration-steps > li')];
+  assert.equal(steps.length, 4);
+  assert.ok(steps.every((step) => step.dataset.complete === 'true' && step.textContent.includes('✓ Completado')));
+  assert.equal($('#tenstar-completed').hidden, false);
+  assert.equal($('#tenstar-reference-recovery').hidden, true);
+  assert.equal($('#tenstar-calibrated-controls').hidden, false);
+  assert.equal($('#tenstar-mark-closed').disabled, true);
+  $('#tenstar-open').click();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(f.requests[0].options.body.command, 'curtain.open');
+  $('#tenstar-position').value = '35';
+  $('#tenstar-move').click();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(f.requests[1].options.body.payload, { percent: 35 });
+  assert.equal(f.requests[1].options.body.command, 'curtain.move');
+  assert.equal($('#tenstar-close'), null);
 });

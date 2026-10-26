@@ -225,6 +225,7 @@ for (const folder of ['', 'public', 'public_html']) {
     assert.equal(slider.value, '24');
     assert.equal(slider.disabled, false);
     assert.equal(window.document.querySelector('[data-device-direction]'), null);
+    assert.ok(window.document.querySelector('[data-device-led]'));
   });
 
   test(`${label}: Tenstar position slider is locked until calibrated and referenced`, (t) => {
@@ -238,6 +239,14 @@ for (const folder of ['', 'public', 'public_html']) {
       vm.runInContext('renderDeviceCards()', context);
       assert.equal(window.document.querySelector('[data-curtain-position]').disabled, true);
     }
+  });
+
+  test(`${label}: Tenstar LED switch sends the shared boolean command`, async (t) => {
+    const f = setup(folder, undefined, tenstarCurtainDevice); t.after(() => f.dom.window.close());
+    const toggle = f.window.document.querySelector('[data-device-led]');
+    toggle.checked = true;
+    await vm.runInContext('sendDeviceLed({ target: document.querySelector("[data-device-led]") })', f.context);
+    assert.deepEqual(f.requests[0], { endpoint: 'commands', deviceId: 'curtain-1', command: 'led.configure', payload: { enabled: true } });
   });
 
   test(`${label}: curtain position slider is disabled until Servo calibration is ready`, (t) => {

@@ -11,6 +11,7 @@ import captive_portal
 import wifi_recovery
 import tenstar_http
 import tenstar_calibration
+import tenstar_state
 
 captive_portal.recover_config_file()
 
@@ -38,12 +39,12 @@ except ImportError:
     LED_ACTIVE_LOW = True
 
 FIRMWARE_TARGET = 'tenstar'
-FIRMWARE_VERSION = '2026.10.25.tenstar-r6'
+FIRMWARE_VERSION = '2026.10.26.tenstar-r7'
 try:
     from pulsegrid_firmware import VERSION as FIRMWARE_VERSION
 except (ImportError, AttributeError):
     pass
-FIRMWARE_FILES = ('boot.py', 'main.py', 'tenstar_motor.py', 'ota_boot.py', 'pulsegrid_ota.py', 'board_led.py', 'captive_portal.py', 'wifi_recovery.py', 'tenstar_http.py', 'tenstar_calibration.py')
+FIRMWARE_FILES = ('boot.py', 'main.py', 'tenstar_motor.py', 'ota_boot.py', 'pulsegrid_ota.py', 'board_led.py', 'captive_portal.py', 'wifi_recovery.py', 'tenstar_http.py', 'tenstar_calibration.py', 'tenstar_state.py')
 CALIBRATION_FILE = 'tenstar_calibration.json'
 COMMAND_POLL_MS = 1000
 TELEMETRY_MS = 2000
@@ -72,11 +73,23 @@ calibration = tenstar_calibration.empty()
 
 
 def load_calibration():
-    global calibration
+    global calibration, position_valid
+    calibration = tenstar_calibration.empty()
+    position_valid = False
+    saved, trusted = tenstar_state.load(CALIBRATION_FILE)
+    if saved is None and not tenstar_state.exists(CALIBRATION_FILE + '.1'):
+        if tenstar_state.exists(CALIBRATION_FILE):
+            try:
+                with open(CALIBRATION_FILE, 'r') as state_file:
+                    saved = json.loads(state_file.read())
+            except (OSError, ValueError) as error:
+                print('Tenstar: calibracion anterior ilegible:', error)
+    if saved is None:
+        print('Tenstar: sin estado persistente valido')
+        return
     try:
-        with open(CALIBRATION_FILE, 'r') as state_file:
-            saved = json.loads(state_file.read())
         if isinstance(saved, dict):
+            board_led.set_enabled(saved.get('led_enabled', True) is True)
             span = int(saved.get('open_span_pulses', 0))
             direction = int(saved.get('open_direction', 1))
             valid = bool(saved.get('calibrated')) and bool(saved.get('closed_marked')) and bool(saved.get('open_marked')) and 100 <= span <= PULSES_PER_REVOLUTION * 20 and direction in (-1, 1)
@@ -85,25 +98,25 @@ def load_calibration():
                 calibration.update({'closed_marked': True, 'open_marked': True, 'calibrated': True,
                                     'open_span_pulses': span, 'open_direction': direction,
                                     'close_direction': -direction, 'direction_confirmed': True})
-    except (OSError, ValueError, TypeError):
-        pass
+                pulses = saved.get('position_pulses')
+                if trusted and saved.get('position_valid') is True and isinstance(pulses, int) and -3 <= pulses * direction <= span + 3:
+                    motor.set_position(pulses)
+                    motor.target_position = round(max(0, min(span, pulses * direction)) * 100 / span)
+                    position_valid = True
+                print('Tenstar: recorrido restaurado; referencia', position_valid)
+    except (ValueError, TypeError) as error:
+        print('Tenstar: calibracion guardada invalida:', error)
 
 
 def save_calibration():
-    temporary = CALIBRATION_FILE + '.tmp'
-    with open(temporary, 'w') as state_file:
-        state_file.write(json.dumps(calibration))
-    try:
-        import os
-        os.rename(temporary, CALIBRATION_FILE)
-    except OSError:
-        try:
-            import os
-            os.remove(CALIBRATION_FILE)
-        except OSError:
-            pass
-        import os
-        os.rename(temporary, CALIBRATION_FILE)
+    saved = dict(calibration)
+    saved.update({'position_pulses': motor.snapshot(), 'position_valid': position_valid,
+                  'led_enabled': board_led.is_enabled()})
+    tenstar_state.save(CALIBRATION_FILE, saved)
+
+
+def prepare_motion():
+    tenstar_state.mark_moving(CALIBRATION_FILE)
 
 
 def cloud_online():
@@ -156,6 +169,9 @@ def send_telemetry():
         'calibrationMode': 'open-first-v1',
         'networkDuringMotion': False,
         'remoteStopDuringMotion': False,
+        'ledEnabled': board_led.is_enabled(),
+        'referenceRecoveryRequired': calibration['calibrated'] and not position_valid,
+        'atClosed': calibration['calibrated'] and position_valid and abs(pulses) <= 3,
         'online': True,
         'positionPulses': pulses,
         'positionTurns': round(pulses / float(PULSES_PER_REVOLUTION), 4),
@@ -183,20 +199,35 @@ def execute(command):
     try:
         if command_id is None:
             raise ValueError('El comando cloud no tiene ID')
-        if name in ('tenstar.stop', 'curtain.stop'):
+        if name == 'led.configure':
+            if not isinstance(payload, dict) or set(payload) != {'enabled'} or not isinstance(payload['enabled'], bool):
+                raise ValueError('enabled debe ser booleano')
+            if motor.moving:
+                raise ValueError('Espera a que termine el movimiento')
+            previous = board_led.is_enabled()
+            board_led.set_enabled(payload['enabled'])
+            try:
+                save_calibration()
+            except OSError:
+                board_led.set_enabled(previous)
+                raise
+            send_telemetry()
+            acknowledge(command_id, 'succeeded')
+        elif name in ('tenstar.stop', 'curtain.stop'):
             if payload:
                 raise ValueError('El comando stop no recibe payload')
             with motor_lock:
                 motor.stop()
                 interrupted = pending_motion_command
                 pending_motion_command = None
+                save_calibration()
             if interrupted is not None:
                 acknowledge(interrupted, 'failed', 'Movimiento detenido por comando de parada')
             send_telemetry()
             acknowledge(command_id, 'succeeded')
         elif str(name).startswith('tenstar.calibration.'):
             with motor_lock:
-                position_valid = tenstar_calibration.handle(name, payload, motor, calibration, PULSES_PER_REVOLUTION, MINIMUM_SPEED_PCT, position_valid)
+                position_valid = tenstar_calibration.handle(name, payload, motor, calibration, PULSES_PER_REVOLUTION, MINIMUM_SPEED_PCT, position_valid, prepare_motion)
                 started_motion = motor.moving
                 if started_motion:
                     pending_motion_command = command_id
@@ -206,7 +237,6 @@ def execute(command):
                     except OSError:
                         position_valid = False
                         calibration['active'] = False
-                        calibration['calibrated'] = False
                         raise
                 last_telemetry = 0
             if not started_motion:
@@ -230,6 +260,7 @@ def execute(command):
                 if projected < 0 or projected > maximum:
                     raise ValueError('El movimiento solicitado sale del recorrido calibrado')
                 delta = target - current
+                prepare_motion()
                 motor.move_turns(abs(delta) / float(PULSES_PER_REVOLUTION), 1 if delta > 0 else -1, speed)
                 motor.target_position = round(projected / float(maximum) * 100)
                 pending_motion_command = command_id
@@ -239,6 +270,8 @@ def execute(command):
                 raise ValueError('Payload de cortina contiene campos no compatibles con Tenstar')
             if not position_valid or not calibration['calibrated']:
                 raise ValueError('Completa la calibracion de extremos y fija la referencia cerrada desde Cloud')
+            if name == 'curtain.close' and abs(motor.snapshot()) <= 3:
+                raise ValueError('La cortina ya esta completamente cerrada; usa abrir o mover')
             if name == 'curtain.open':
                 percent = 100
             elif name == 'curtain.close':
@@ -262,6 +295,7 @@ def execute(command):
                 if speed < MINIMUM_SPEED_PCT or speed > 100:
                     raise ValueError('speedPct fuera de rango')
                 with motor_lock:
+                    prepare_motion()
                     motor.move_turns(turns, direction, speed)
                     motor.target_position = percent
                     pending_motion_command = command_id
@@ -433,6 +467,7 @@ def main():
             with motor_lock:
                 completed = motor.update()
                 if completed is True and pending_motion_command is not None:
+                    save_calibration()
                     ack_queue.append((pending_motion_command, 'succeeded', None))
                     pending_motion_command = None
                     last_telemetry = 0
@@ -440,6 +475,7 @@ def main():
             print('Tenstar control local:', error)
             with motor_lock:
                 motor.stop()
+                position_valid = False
                 failed_command = pending_motion_command
                 pending_motion_command = None
             if failed_command is not None:

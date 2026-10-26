@@ -233,7 +233,7 @@ test('HTML loads automation helpers before app and mirrors are synchronized', ()
     const html = fs.readFileSync(path.join(root, folder, 'index.html'), 'utf8');
     assert.ok(html.indexOf('automation-model.js?v=47') >= 0);
     assert.ok(html.indexOf('automation-ui.js?v=56') >= 0);
-    assert.ok(html.indexOf('app.js?v=73') >= 0);
+    assert.ok(html.indexOf('app.js?v=74') >= 0);
     assert.ok(html.indexOf('blind-calibration-model.js?v=2') >= 0);
     assert.ok(html.indexOf('blind-calibration-ui.js?v=8') >= 0);
     assert.ok(html.indexOf('cloud-blind-calibration-ui.js?v=5') >= 0);
@@ -242,7 +242,7 @@ test('HTML loads automation helpers before app and mirrors are synchronized', ()
     assert.ok(html.indexOf('automation-ui.js?v=56') < html.indexOf('blind-calibration-model.js?v=2'));
     assert.ok(html.indexOf('blind-calibration-model.js?v=2') < html.indexOf('blind-calibration-ui.js?v=8'));
     assert.ok(html.indexOf('blind-calibration-ui.js?v=8') < html.indexOf('cloud-blind-calibration-ui.js?v=5'));
-    assert.ok(html.indexOf('cloud-blind-calibration-ui.js?v=5') < html.indexOf('app.js?v=73'));
+    assert.ok(html.indexOf('cloud-blind-calibration-ui.js?v=5') < html.indexOf('app.js?v=74'));
     assert.match(html, /automations.css\?v=48/);
     const app = fs.readFileSync(path.join(root, folder, 'app.js'), 'utf8');
     assert.match(app, /\$\('#automation-speed'\)\.value = '1800'/);
@@ -422,6 +422,10 @@ test('Tenstar backend restricts open-first transitions, turn steps, and movement
   assert.throws(() => b.validateTenstarCommand('tenstar.calibration.begin', { atOpen: true }, { ...initial, calibrationMode: undefined }), /r5/);
   assert.throws(() => b.validateTenstarCommand('tenstar.calibration.setClosed', {}, initial), /Inicia primero/);
   assert.throws(() => b.validateTenstarCommand('curtain.open', { speedPct: 70 }, initial), /Calibra ambos/);
+  const finishedClosed = { ...initial, calibration: { calibrated: true }, positionValid: true, atClosed: true };
+  assert.throws(() => b.validateTenstarCommand('curtain.close', {}, finishedClosed), /ya está completamente cerrada/);
+  assert.doesNotThrow(() => b.validateTenstarCommand('curtain.open', {}, finishedClosed));
+  assert.doesNotThrow(() => b.validateTenstarCommand('curtain.move', { percent: 30 }, finishedClosed));
   const opened = { ...initial, calibration: { active: true, open_marked: true }, positionValid: true, pulsesPerRevolution: 1980, positionPulses: 99 };
   assert.doesNotThrow(() => b.validateTenstarCommand('tenstar.calibration.testDirection', {}, opened));
   assert.throws(() => b.validateTenstarCommand('tenstar.calibration.step', { direction: 'down', turns: 1 }, opened), /Confirma primero/);

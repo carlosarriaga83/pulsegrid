@@ -74,7 +74,7 @@ function createApiKey() {
   return `pg_live_${crypto.randomBytes(24).toString('base64url')}`;
 }
 
-const firmwareFiles = new Set(['main.py', 'cloud_client.py', 'board_led.py', 'servo_calibration.py', 'cloud_loop.py', 'pulsegrid.py', 'pulsegrid_min.py', 'pulsegrid_commands.py', 'pulsegrid_ota.py', 'pulsegrid_bootstrap.py', 'webserver.py', 'webserver_min.py', 'webserver_portal.py', 'cortina.py', 'stservo.py', 'ssd1306.py', 'captive_portal.py', 'motor_curtain.py', 'tenstar_motor.py', 'tenstar_http.py', 'tenstar_calibration.py', 'boot.py', 'ota_boot.py', 'wifi_recovery.py']);
+const firmwareFiles = new Set(['main.py', 'cloud_client.py', 'board_led.py', 'servo_calibration.py', 'cloud_loop.py', 'pulsegrid.py', 'pulsegrid_min.py', 'pulsegrid_commands.py', 'pulsegrid_ota.py', 'pulsegrid_bootstrap.py', 'webserver.py', 'webserver_min.py', 'webserver_portal.py', 'cortina.py', 'stservo.py', 'ssd1306.py', 'captive_portal.py', 'motor_curtain.py', 'tenstar_motor.py', 'tenstar_http.py', 'tenstar_calibration.py', 'tenstar_state.py', 'boot.py', 'ota_boot.py', 'wifi_recovery.py']);
 
 function firmwareVersion(version) {
   if (!/^[A-Za-z0-9._-]{1,40}$/.test(String(version || ''))) throw new Error('Invalid firmware version');
@@ -765,6 +765,7 @@ function validateTenstarCommand(command, payload, telemetry) {
   }
   if (command === 'curtain.move' && (!Number.isFinite(payload.percent) || payload.percent < 0 || payload.percent > 100)) throw new Error('percent debe estar entre 0 y 100');
   if (['curtain.open', 'curtain.close', 'curtain.move'].includes(command)) {
+    if (command === 'curtain.close' && telemetry.atClosed === true && telemetry.positionValid === true) throw new Error('La cortina ya está completamente cerrada; usa abrir o mover');
     const speedPct = payload.speedPct ?? (payload.speed == null ? 70 : Math.round(Number(payload.speed) / 18));
     if (!Number.isFinite(speedPct) || speedPct < 20 || speedPct > 100) throw new Error('Velocidad Tenstar fuera de rango');
     if (speedPct < (Number(telemetry.minimumSpeedPct) || 20)) throw new Error('Velocidad inferior al PWM mínimo configurado para Tenstar');
