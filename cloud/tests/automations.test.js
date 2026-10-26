@@ -429,3 +429,30 @@ test('Tenstar backend restricts calibration transitions, JOG bounds, and movemen
   assert.throws(() => b.validateTenstarCommand('tenstar.zero', {}, initial), /no compatible/);
   assert.doesNotThrow(() => b.validateTenstarCommand('curtain.stop', {}, { ...initial, moving: true }));
 });
+
+test('Tenstar online gate uses authenticated heartbeat even when deduplicated telemetry is old', async () => {
+  const b = backend();
+  const row = {
+    payload: { firmwareTarget: 'tenstar', online: true, calibration: {}, positionValid: false, moving: false },
+    createdAt: new Date(Date.now() - 3600000),
+    lastSeen: new Date()
+  };
+  let inserted = 0;
+  const db = { execute: async (sql) => {
+    if (sql.startsWith('SELECT')) return [[row]];
+    if (sql.startsWith('INSERT INTO commands')) return [{ insertId: ++inserted }];
+    throw new Error(sql);
+  } };
+  const device = { id: 4, provider: 'pulsegrid' };
+  const result = await b.dispatchDeviceCommand(db, device, 'tenstar.calibration.setClosed', {});
+  assert.equal(result.status, 'queued');
+  for (const lastSeen of [null, 'invalid-date', new Date(Date.now() - 16000)]) {
+    row.lastSeen = lastSeen;
+    await assert.rejects(b.dispatchDeviceCommand(db, device, 'tenstar.calibration.setClosed', {}), /Tenstar debe estar en línea/);
+  }
+  assert.equal(inserted, 1);
+  assert.equal((await b.dispatchDeviceCommand(db, device, 'tenstar.stop', {})).status, 'queued');
+  row.lastSeen = new Date();
+  row.payload.online = false;
+  await assert.rejects(b.dispatchDeviceCommand(db, device, 'tenstar.calibration.setClosed', {}), /Tenstar debe estar en línea/);
+});

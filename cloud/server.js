@@ -649,12 +649,13 @@ async function validateAutomationDevices(db, email, target, rule) {
 async function dispatchDeviceCommand(db, device, command, payload, context = {}) {
   if (device.provider !== 'tuya') {
     if (String(command).startsWith('tenstar.') || ['curtain.open', 'curtain.close', 'curtain.move'].includes(command)) {
-      const [readings] = await db.execute('SELECT payload, created_at AS createdAt FROM telemetry WHERE device_id = ? ORDER BY created_at DESC, id DESC LIMIT 1', [device.id]);
+      const [readings] = await db.execute('SELECT telemetry.payload, devices.last_seen AS lastSeen FROM telemetry JOIN devices ON devices.id = telemetry.device_id WHERE telemetry.device_id = ? ORDER BY telemetry.created_at DESC, telemetry.id DESC LIMIT 1', [device.id]);
       const rawTelemetry = readings[0]?.payload;
       const telemetry = typeof rawTelemetry === 'string' ? JSON.parse(rawTelemetry) : rawTelemetry;
       if (String(telemetry?.firmwareTarget || '').toLowerCase() === 'tenstar') {
-        if (!['tenstar.stop', 'curtain.stop'].includes(command) && (!telemetry.online || !readings[0]?.createdAt || Date.now() - new Date(readings[0].createdAt).getTime() > 15000)) {
-          throw new Error('Tenstar debe estar en línea y reportar telemetría reciente para calibrar o mover');
+        const lastSeen = new Date(readings[0]?.lastSeen || 0).getTime();
+        if (!['tenstar.stop', 'curtain.stop'].includes(command) && (telemetry.online !== true || !lastSeen || !Number.isFinite(lastSeen) || Date.now() - lastSeen > 15000)) {
+          throw new Error('Tenstar debe estar en línea y tener comunicación reciente con Cloud para calibrar o mover');
         }
         validateTenstarCommand(command, payload, telemetry);
       }

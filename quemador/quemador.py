@@ -52,9 +52,9 @@ MODEL_PROFILES = {
     "tenstar": {
         "label": "Tenstar C3 Super Mini",
         "directory": TENSTAR_DIR,
-        "files": ("boot.py", "main.py", "tenstar_motor.py", "ota_boot.py", "pulsegrid_ota.py"),
-        "sources": {"ota_boot.py": SERVO_DIR / "ota_boot.py", "pulsegrid_ota.py": SERVO_DIR / "pulsegrid_ota.py"},
-        "remove": ("cortina.py", "stservo.py", "servo_calibration.py", "motor_curtain.py", "captive_portal.py", "pulsegrid_firmware.py"),
+        "files": ("boot.py", "main.py", "tenstar_motor.py", "ota_boot.py", "pulsegrid_ota.py", "board_led.py", "captive_portal.py", "wifi_recovery.py"),
+        "sources": {"ota_boot.py": SERVO_DIR / "ota_boot.py", "pulsegrid_ota.py": SERVO_DIR / "pulsegrid_ota.py", "wifi_recovery.py": SERVO_DIR / "wifi_recovery.py"},
+        "remove": ("cortina.py", "stservo.py", "servo_calibration.py", "motor_curtain.py", "pulsegrid_firmware.py"),
         "config": "config.py",
     },
 }
@@ -522,7 +522,7 @@ class BurnerApp(tk.Tk):
             if pulses <= 0 or not 20 <= minimum_speed <= 35:
                 raise BurnerError("Tenstar requiere pulsos por vuelta > 0 y PWM minimo entre 20 y 35%")
             content = ("WIFI_SSID = {!r}\nWIFI_PASSWORD = {!r}\nAPI_URL = {!r}\nDEVICE_CODE = {!r}\n"
-                       "DEVICE_ID = {!r}\nPULSES_PER_REVOLUTION = {}\nMINIMUM_SPEED_PCT = {}\nCOMMANDS_ENABLED = {!r}\n").format(
+                       "DEVICE_ID = {!r}\nPULSES_PER_REVOLUTION = {}\nMINIMUM_SPEED_PCT = {}\nCOMMANDS_ENABLED = {!r}\nLED_PIN = 8\nLED_ACTIVE_LOW = True\n").format(
                            values["ssid"], values["password"], values["api_url"], values["device_code"],
                            values["device_id"], pulses, minimum_speed, settings["commands"])
             temporary.write_text(content, encoding="ascii")

@@ -23,7 +23,7 @@ for (const [model, directory] of [['servo', 'dispositivos/servo'], ['ga25', 'dis
     const firmwareFiles = tupleAfter(main, 'FIRMWARE_FILES =');
     assert.deepEqual(burnerFiles, firmwareFiles);
     for (const file of burnerFiles) {
-      const sourceDirectory = model === 'tenstar' && ['ota_boot.py', 'pulsegrid_ota.py'].includes(file) ? 'dispositivos/servo' : directory;
+      const sourceDirectory = model === 'tenstar' && ['ota_boot.py', 'pulsegrid_ota.py', 'wifi_recovery.py'].includes(file) ? 'dispositivos/servo' : directory;
       assert.equal(fs.existsSync(path.join(root, sourceDirectory, file)), true, `${model} missing ${file}`);
     }
   });
@@ -33,7 +33,7 @@ test('Tenstar firmware limits calibrated travel and uses Pulsegrid device comman
   const main = fs.readFileSync(path.join(root, 'dispositivos/tenstar/main.py'), 'utf8');
   const motor = fs.readFileSync(path.join(root, 'dispositivos/tenstar/tenstar_motor.py'), 'utf8');
   const burnerProfile = burner.slice(burner.indexOf('"tenstar": {'));
-  assert.match(burnerProfile, /"sources": \{"ota_boot\.py": SERVO_DIR \/ "ota_boot\.py", "pulsegrid_ota\.py": SERVO_DIR \/ "pulsegrid_ota\.py"\}/);
+  assert.match(burnerProfile, /"sources": \{"ota_boot\.py": SERVO_DIR \/ "ota_boot\.py", "pulsegrid_ota\.py": SERVO_DIR \/ "pulsegrid_ota\.py", "wifi_recovery\.py": SERVO_DIR \/ "wifi_recovery\.py"\}/);
   assert.match(burner, /sources\.get\(name, profile\["directory"\] \/ name\)/);
   assert.match(main, /'firmwareTarget': FIRMWARE_TARGET/);
   assert.match(main, /'kind': 'curtain'/);
@@ -49,7 +49,7 @@ test('Tenstar firmware limits calibrated travel and uses Pulsegrid device comman
   assert.match(main, /ack_queue.append\(\(pending_motion_command, 'succeeded', None\)\)/);
   assert.match(motor, /motion_timeout_ms/);
   assert.match(motor, /Pin\(in1_pin\), freq=1000/);
-  assert.match(burnerProfile, /"files": \("boot.py", "main.py", "tenstar_motor.py", "ota_boot.py", "pulsegrid_ota.py"\)/);
+  assert.match(burnerProfile, /"files": \("boot.py", "main.py", "tenstar_motor.py", "ota_boot.py", "pulsegrid_ota.py", "board_led.py", "captive_portal.py", "wifi_recovery.py"\)/);
   assert.match(main, /pulsegrid_ota\.update\(API_URL, DEVICE_CODE, DEVICE_ID, version, FIRMWARE_TARGET, FIRMWARE_FILES\)/);
   assert.match(main, /ota_boot\.confirm\(\)/);
   assert.match(main, /ota_boot\.feed\(\)/);

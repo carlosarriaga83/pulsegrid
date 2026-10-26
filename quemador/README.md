@@ -76,7 +76,9 @@ El `Device ID` se asigna como `PULSE_` seguido de los 12 dígitos hexadecimales 
 
 ### Tenstar C3 Super Mini
 
-Carga `boot.py`, `main.py` y `tenstar_motor.py` desde `dispositivos/tenstar`, además de los módulos OTA compartidos, y genera `config.py` con Wi-Fi, identidad y ajustes de encoder. El perfil selecciona ESP32-C3 y permite configurar pulsos por vuelta (inicialmente 1980) y PWM mínimo de calibración (20–35%). El recorrido y el sentido de apertura se aprenden marcando los extremos físicos desde Pulsegrid Cloud; el quemador no estima esos valores. Las futuras versiones se pueden instalar desde Cloud por OTA; usa el quemador por USB para instalar MicroPython inicialmente o recuperar la placa.
+Carga `boot.py`, `main.py`, `tenstar_motor.py`, `board_led.py` y `captive_portal.py` desde `dispositivos/tenstar`, además de los módulos compartidos de OTA y recuperación Wi-Fi, y genera `config.py` con Wi-Fi, identidad, LED GPIO8 activo en bajo y ajustes de encoder. El perfil selecciona ESP32-C3 y permite configurar pulsos por vuelta (inicialmente 1980) y PWM mínimo de calibración (20–35%). El recorrido y el sentido de apertura se aprenden marcando los extremos físicos desde Pulsegrid Cloud; el quemador no estima esos valores. Las futuras versiones se pueden instalar desde Cloud por OTA; usa el quemador por USB para instalar MicroPython inicialmente o recuperar la placa.
+
+Sin conexión Wi-Fi, Tenstar ofrece la red abierta `Pulsegrid-Tenstar-XXXX` y el portal `http://192.168.4.1/`; con conexión, el formulario está en la IP local impresa en Thonny. El portal conserva identidad y ajustes del motor. Tres reinicios físicos rápidos activan recuperación Wi-Fi, igual que en Servo/GA25. Al actualizar desde una instalación anterior, carga el perfil completo, no solo `main.py`: ahora requiere también los módulos de portal, LED y recuperación.
 
 Consulta `dispositivos/tenstar/README.md` antes de energizar el motor. No hay finales de carrera: calibra desde Pulsegrid Cloud con pulsos breves y supervisados, sin buscar los topes mecánicos.
 

@@ -7,6 +7,11 @@ import time
 import _thread
 
 from tenstar_motor import TenstarMotor
+import board_led
+import captive_portal
+import wifi_recovery
+
+captive_portal.recover_config_file()
 
 try:
     import config
@@ -19,6 +24,8 @@ try:
     KP = getattr(config, 'KP', 0.3)
     MINIMUM_SPEED_PCT = getattr(config, 'MINIMUM_SPEED_PCT', 20)
     COMMANDS_ENABLED = getattr(config, 'COMMANDS_ENABLED', True)
+    LED_PIN = getattr(config, 'LED_PIN', 8)
+    LED_ACTIVE_LOW = getattr(config, 'LED_ACTIVE_LOW', True)
 except ImportError:
     WIFI_SSID = WIFI_PASSWORD = DEVICE_CODE = DEVICE_ID = ''
     API_URL = 'https://pulse.2api2.com'
@@ -26,14 +33,16 @@ except ImportError:
     KP = 0.3
     MINIMUM_SPEED_PCT = 20
     COMMANDS_ENABLED = True
+    LED_PIN = 8
+    LED_ACTIVE_LOW = True
 
 FIRMWARE_TARGET = 'tenstar'
-FIRMWARE_VERSION = '2026.10.25.tenstar-r2'
+FIRMWARE_VERSION = '2026.10.25.tenstar-r3'
 try:
     from pulsegrid_firmware import VERSION as FIRMWARE_VERSION
 except (ImportError, AttributeError):
     pass
-FIRMWARE_FILES = ('boot.py', 'main.py', 'tenstar_motor.py', 'ota_boot.py', 'pulsegrid_ota.py')
+FIRMWARE_FILES = ('boot.py', 'main.py', 'tenstar_motor.py', 'ota_boot.py', 'pulsegrid_ota.py', 'board_led.py', 'captive_portal.py', 'wifi_recovery.py')
 CALIBRATION_FILE = 'tenstar_calibration.json'
 COMMAND_POLL_MS = 1000
 TELEMETRY_MS = 2000
@@ -47,6 +56,13 @@ last_poll = 0
 last_telemetry = 0
 next_request_at = 0
 next_wifi_retry = 0
+wifi_connect_started = None
+wifi_was_connected = False
+cloud_last_success = None
+cloud_error = None
+recovery_mode = False
+worker_started = False
+boot_started_at = time.ticks_ms()
 pending_motion_command = None
 ack_queue = []
 position_valid = False
@@ -90,80 +106,152 @@ def save_calibration():
         os.rename(temporary, CALIBRATION_FILE)
 
 
-def _read_response(client):
-    response = b''
-    while True:
-        chunk = client.recv(512)
+def _recv(client, size):
+    reader = getattr(client, 'read', None)
+    return reader(size) if reader else client.recv(size)
+
+
+def _send_all(client, data):
+    sent = 0
+    while sent < len(data):
+        writer = getattr(client, 'write', None)
+        count = writer(data[sent:]) if writer else client.send(data[sent:])
+        if count is None or count <= 0:
+            raise OSError('Envio HTTP incompleto')
+        sent += count
+
+
+def _read_until(client, buffer, marker, limit):
+    while marker not in buffer:
+        chunk = _recv(client, 256)
         if not chunk:
-            break
-        response += chunk
-        if len(response) > 20000:
+            raise ValueError('Respuesta HTTP incompleta')
+        buffer += chunk
+        if marker not in buffer and len(buffer) > limit:
             raise ValueError('Respuesta HTTP demasiado grande')
-    split_at = response.find(b'\r\n\r\n')
-    if split_at < 0:
-        raise ValueError('Respuesta HTTP incompleta')
-    header = response[:split_at].lower()
-    status_line = response.split(b'\r\n', 1)[0]
-    status = int(status_line[9:12])
-    body = response[split_at + 4:]
-    if b'transfer-encoding: chunked' in header:
-        decoded = b''
-        offset = 0
-        while offset < len(body):
-            end = body.find(b'\r\n', offset)
-            if end < 0:
-                raise ValueError('Respuesta chunked incompleta')
-            size = int(body[offset:end].split(b';', 1)[0].strip(), 16)
+    index = buffer.find(marker)
+    if index > limit:
+        raise ValueError('Encabezado HTTP demasiado grande')
+    return buffer[:index], buffer[index + len(marker):]
+
+
+def _read_response(client):
+    header, body = _read_until(client, b'', b'\r\n\r\n', 4096)
+    lines = header.split(b'\r\n')
+    status = int(lines[0].split(b' ', 2)[1])
+    headers = {}
+    for line in lines[1:]:
+        if b':' in line:
+            key, value = line.split(b':', 1)
+            headers[key.strip().lower()] = value.strip().lower()
+    if b'chunked' in headers.get(b'transfer-encoding', b''):
+        decoded = bytearray()
+        while True:
+            line, body = _read_until(client, body, b'\r\n', 128)
+            size = int(line.split(b';', 1)[0].strip(), 16)
+            if size < 0 or len(decoded) + size > 20000:
+                raise ValueError('Respuesta HTTP demasiado grande')
             if size == 0:
+                while True:
+                    trailer, body = _read_until(client, body, b'\r\n', 1024)
+                    if not trailer:
+                        break
                 break
-            start = end + 2
-            decoded += body[start:start + size]
-            offset = start + size + 2
-        body = decoded
+            while len(body) < size + 2:
+                part = _recv(client, min(512, size + 2 - len(body)))
+                if not part:
+                    raise ValueError('Respuesta chunked incompleta')
+                body += part
+            if body[size:size + 2] != b'\r\n':
+                raise ValueError('Separador chunked invalido')
+            decoded.extend(body[:size])
+            body = body[size + 2:]
+        body = bytes(decoded)
+    elif b'content-length' in headers:
+        length = int(headers[b'content-length'])
+        if length < 0 or length > 20000:
+            raise ValueError('Longitud HTTP fuera de rango')
+        while len(body) < length:
+            part = _recv(client, min(512, length - len(body)))
+            if not part:
+                raise ValueError('Respuesta HTTP incompleta')
+            body += part
+        body = body[:length]
+    elif status != 204:
+        while True:
+            part = _recv(client, 512)
+            if not part:
+                break
+            body += part
+            if len(body) > 20000:
+                raise ValueError('Respuesta HTTP demasiado grande')
     if status < 200 or status >= 300:
-        raise ValueError('HTTP {}'.format(status))
+        detail = body[:200].decode()
+        raise ValueError('HTTP {}: {}'.format(status, detail))
     return json.loads(body.decode()) if body else {}
 
 
+def cloud_online():
+    return wlan.isconnected() and cloud_last_success is not None and time.ticks_diff(time.ticks_ms(), cloud_last_success) < 15000
+
+
 def request(method, path, payload=None):
-    global next_request_at
-    if not API_URL.startswith('https://') or not DEVICE_CODE or not DEVICE_ID:
-        return None
+    global next_request_at, cloud_last_success, cloud_error
     now = time.ticks_ms()
-    if time.ticks_diff(now, next_request_at) < 0:
+    if next_request_at and time.ticks_diff(now, next_request_at) < 0:
         return None
     client = None
+    phase = 'configuracion'
     try:
+        if not API_URL.startswith('https://'):
+            raise ValueError('API_URL debe usar HTTPS; revisar config.py con Quemador')
+        if not DEVICE_CODE or not DEVICE_ID:
+            raise ValueError('Falta DEVICE_CODE o DEVICE_ID; generar identidad con Quemador y registrar en Cloud')
         gc.collect()
-        host = API_URL.split('://', 1)[1].split('/', 1)[0]
-        address = socket.getaddrinfo(host, 443, 0, socket.SOCK_STREAM)[0][-1]
+        authority, _, prefix = API_URL.split('://', 1)[1].partition('/')
+        parts = authority.split(':', 1)
+        host = parts[0]
+        port = int(parts[1]) if len(parts) > 1 else 443
+        path = ('/' + prefix.rstrip('/') if prefix else '') + path
+        phase = 'DNS'
+        address = socket.getaddrinfo(host, port, 0, socket.SOCK_STREAM)[0][-1]
         client = socket.socket()
         client.settimeout(REQUEST_TIMEOUT)
+        phase = 'TCP'
         client.connect(address)
+        phase = 'TLS'
         try:
             import ussl as tls
         except ImportError:
             import ssl as tls
+        gc.collect()
         client = tls.wrap_socket(client, server_hostname=host)
         body = json.dumps(payload) if payload is not None else ''
         headers = 'Connection: close\r\nX-Device-Code: {}\r\n'.format(DEVICE_CODE)
         if body:
             headers += 'Content-Type: application/json\r\nContent-Length: {}\r\n'.format(len(body.encode()))
-        message = '{} {} HTTP/1.1\r\nHost: {}\r\n{}\r\n{}'.format(method, path, host, headers, body)
-        client.write(message.encode())
+        message = '{} {} HTTP/1.1\r\nHost: {}\r\n{}\r\n{}'.format(method, path, authority, headers, body)
+        phase = 'HTTP'
+        _send_all(client, message.encode())
         result = _read_response(client)
+        if cloud_last_success is None or cloud_error:
+            print('Cloud conectado: {} · {}'.format(DEVICE_ID, API_URL))
+        cloud_last_success = time.ticks_ms()
+        cloud_error = None
         next_request_at = 0
         return result
     except Exception as error:
-        print('Pulsegrid:', error)
+        cloud_last_success = None
+        cloud_error = '{}: {}'.format(phase, error)
+        print('Cloud {} {} fallo en {}'.format(method, path.split('?', 1)[0], cloud_error))
         next_request_at = time.ticks_add(time.ticks_ms(), RETRY_MS)
         return None
     finally:
         if client:
             try:
                 client.close()
-            except Exception:
-                pass
+            except OSError as error:
+                print('Cloud cierre de conexion:', error)
         gc.collect()
 
 
@@ -203,6 +291,11 @@ def execute(command):
     name = command.get('name')
     payload = command.get('payload') or {}
     command_id = command.get('id')
+    # print the command variables for debugging
+    print("Executing command:", command)
+    print("Command name:", name)
+    print("Command payload:", payload)
+    print("Command ID:", command_id)
     try:
         if command_id is None:
             raise ValueError('El comando cloud no tiene ID')
@@ -371,29 +464,54 @@ def poll_command():
 
 
 def connect_wifi():
+    global wifi_connect_started, wifi_was_connected, next_wifi_retry, cloud_last_success
+    now = time.ticks_ms()
     try:
-        wlan.active(True)
         if wlan.isconnected():
+            if not wifi_was_connected:
+                print('Wi-Fi conectado: IP {}'.format(wlan.ifconfig()[0]))
+            wifi_was_connected = True
+            wifi_connect_started = None
             return True
-        wlan.connect(WIFI_SSID, WIFI_PASSWORD)
+        if wifi_was_connected:
+            print('Wi-Fi desconectado; reintentando')
+            cloud_last_success = None
+            wifi_was_connected = False
+        if recovery_mode or not WIFI_SSID:
+            return False
+        if wifi_connect_started is not None:
+            if time.ticks_diff(now, wifi_connect_started) < 15000:
+                return False
+            print('Wi-Fi: conexion agotada, estado {}'.format(wlan.status()))
+            wlan.disconnect()
+            wifi_connect_started = None
+            next_wifi_retry = time.ticks_add(now, 10000)
+        elif not next_wifi_retry or time.ticks_diff(now, next_wifi_retry) >= 0:
+            wlan.active(True)
+            print('Wi-Fi: conectando a la red guardada')
+            wlan.connect(WIFI_SSID, WIFI_PASSWORD)
+            wifi_connect_started = now
     except Exception as error:
         print('Wi-Fi:', error)
-        return False
-    started = time.ticks_ms()
-    while not wlan.isconnected() and time.ticks_diff(time.ticks_ms(), started) < 15000:
-        time.sleep_ms(250)
-    return wlan.isconnected()
+        wifi_connect_started = None
+        next_wifi_retry = time.ticks_add(now, 10000)
+    return False
 
 
 def network_loop():
-    global last_poll, last_telemetry, next_wifi_retry
+    global last_poll, last_telemetry, worker_started
+    print('Tenstar: worker de red iniciado')
+    try:
+        portal = captive_portal.Portal(wlan, recovery_mode)
+    except Exception as error:
+        print('ERROR: no se pudo iniciar el portal Tenstar:', error)
+        raise
+    worker_started = True
     while True:
         now = time.ticks_ms()
         try:
-            if not wlan.isconnected():
-                if time.ticks_diff(now, next_wifi_retry) >= 0:
-                    connect_wifi()
-                    next_wifi_retry = time.ticks_add(time.ticks_ms(), 10000)
+            portal.poll(allow_save=not motor.moving and not restart_requested)
+            if not connect_wifi():
                 time.sleep_ms(100)
                 continue
             while ack_queue:
@@ -407,14 +525,15 @@ def network_loop():
                     break
             with motor_lock:
                 moving = motor.moving
-            if moving and time.ticks_diff(now, last_poll) >= COMMAND_POLL_MS:
+            if COMMANDS_ENABLED and moving and time.ticks_diff(now, last_poll) >= COMMAND_POLL_MS:
                 result = request('GET', '/api/device-commands?deviceId={}&priorityOnly=1'.format(DEVICE_ID))
                 command = result.get('command') if result else None
                 if command:
                     execute(command)
                 last_poll = time.ticks_ms()
             elif not moving and time.ticks_diff(now, last_poll) >= COMMAND_POLL_MS:
-                poll_command()
+                if not ack_queue:
+                    poll_command()
                 last_poll = time.ticks_ms()
             if restart_requested:
                 time.sleep_ms(250)
@@ -428,21 +547,54 @@ def network_loop():
 
 
 def main():
-    global pending_motion_command, position_valid
-    if not WIFI_SSID:
-        raise RuntimeError('El quemador debe generar config.py con la red Wi-Fi')
+    global pending_motion_command, position_valid, recovery_mode
+    board_led.init(LED_PIN, LED_ACTIVE_LOW)
     load_calibration()
+    reset_cause = machine.reset_cause()
+    count_reset = reset_cause in (getattr(machine, 'PWRON_RESET', 1), getattr(machine, 'HARD_RESET', 2))
+    recovery_mode = wifi_recovery.register_boot(count_reset)
+    print('Tenstar: reset {} · recuperacion Wi-Fi {}'.format(reset_cause, recovery_mode))
+    if recovery_mode or not WIFI_SSID:
+        wlan.active(False)
+    else:
+        connect_wifi()
+    if not WIFI_SSID:
+        print('Wi-Fi sin configurar: usa el portal Tenstar en http://192.168.4.1/')
+    if not DEVICE_ID or not DEVICE_CODE:
+        print('Cloud pendiente: falta DEVICE_ID o DEVICE_CODE; generar con Quemador y registrar en Cloud')
+    if not COMMANDS_ENABLED:
+        print('Cloud: comandos deshabilitados; solo se enviara telemetria')
     try:
         import ota_boot
         ota_boot.confirm()
     except ImportError:
         ota_boot = None
-    if not connect_wifi():
-        print('No se pudo conectar a Wi-Fi; reinicia o vuelve a cargar config.py desde el quemador')
     print('Tenstar Pulsegrid iniciado · {} · firmware {}'.format(DEVICE_ID, FIRMWARE_VERSION))
+    print('Cloud destino: {} · LED GPIO{} activo {}'.format(API_URL, LED_PIN, 'bajo' if LED_ACTIVE_LOW else 'alto'))
+    _thread.stack_size(16384)
     _thread.start_new_thread(network_loop, ())
+    recovery_counter_cleared = False
+    worker_warning = False
     while True:
         try:
+            if not recovery_mode and not recovery_counter_cleared and time.ticks_diff(time.ticks_ms(), boot_started_at) >= wifi_recovery.STABLE_BOOT_MS:
+                wifi_recovery.clear_counter()
+                recovery_counter_cleared = True
+            if not worker_started and not worker_warning and time.ticks_diff(time.ticks_ms(), boot_started_at) >= 5000:
+                print('ERROR: worker de red no inicio; revisa los errores de portal/firmware en Thonny')
+                worker_warning = True
+            if recovery_mode:
+                board_led.set_status('recovery')
+            elif motor.moving:
+                board_led.set_status('moving')
+            elif not WIFI_SSID or not DEVICE_CODE or not DEVICE_ID:
+                board_led.set_status('provisioning')
+            elif cloud_online():
+                board_led.set_status('online')
+            elif not wlan.isconnected():
+                board_led.set_status('connecting')
+            else:
+                board_led.set_status('offline')
             if ota_boot:
                 ota_boot.feed()
             with motor_lock:
@@ -451,6 +603,7 @@ def main():
                     ack_queue.append((pending_motion_command, 'succeeded', None))
                     pending_motion_command = None
         except Exception as error:
+            print('Tenstar control local:', error)
             with motor_lock:
                 motor.stop()
                 failed_command = pending_motion_command
