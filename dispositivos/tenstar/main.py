@@ -22,7 +22,7 @@ try:
     API_URL = getattr(config, 'API_URL', 'https://pulse.2api2.com')
     DEVICE_CODE = getattr(config, 'DEVICE_CODE', '')
     DEVICE_ID = getattr(config, 'DEVICE_ID', '')
-    PULSES_PER_REVOLUTION = getattr(config, 'PULSES_PER_REVOLUTION', 1980)
+    PULSES_PER_REVOLUTION = getattr(config, 'PULSES_PER_REVOLUTION', 8580)
     KP = getattr(config, 'KP', 0.3)
     MINIMUM_SPEED_PCT = getattr(config, 'MINIMUM_SPEED_PCT', 20)
     COMMANDS_ENABLED = getattr(config, 'COMMANDS_ENABLED', True)
@@ -31,7 +31,7 @@ try:
 except ImportError:
     WIFI_SSID = WIFI_PASSWORD = DEVICE_CODE = DEVICE_ID = ''
     API_URL = 'https://pulse.2api2.com'
-    PULSES_PER_REVOLUTION = 1980
+    PULSES_PER_REVOLUTION = 8580
     KP = 0.3
     MINIMUM_SPEED_PCT = 20
     COMMANDS_ENABLED = True
@@ -259,7 +259,7 @@ def execute(command):
                 raise ValueError('Payload tenstar.moveTurns contiene campos desconocidos')
             turns = float(payload.get('turns'))
             direction = int(payload.get('direction'))
-            speed = int(payload.get('speedPct', 70))
+            speed = int(payload.get('speedPct', 40))
             if not 0 < turns <= 20 or direction not in (-1, 1) or speed < MINIMUM_SPEED_PCT or speed > 100:
                 raise ValueError('turns: (0,20], direction: -1 o 1, speedPct: {}-100'.format(MINIMUM_SPEED_PCT))
             if not position_valid or not calibration['calibrated']:

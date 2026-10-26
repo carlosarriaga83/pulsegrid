@@ -38,7 +38,7 @@ const servoCurtainDevice = {
 const tenstarCurtainDevice = {
   ...curtainDevice,
   name: 'Tenstar C3',
-  telemetry: { kind: 'curtain', firmwareTarget: 'tenstar', position: 24, positionValid: true, calibration: { calibrated: true }, moving: false, pulsesPerRevolution: 1980 }
+  telemetry: { kind: 'curtain', firmwareTarget: 'tenstar', position: 24, positionValid: true, calibration: { calibrated: true }, moving: false, pulsesPerRevolution: 8580 }
 };
 
 function setup(folder, requestImpl = async () => ({ status: 'succeeded' }), configuredDevice = device) {

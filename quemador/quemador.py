@@ -100,7 +100,7 @@ class BurnerApp(tk.Tk):
         self.wifi_ssid = tk.StringVar()
         self.wifi_password = tk.StringVar()
         self.full_travel = tk.IntVar(value=15000)
-        self.pulses_per_revolution = tk.IntVar(value=1980)
+        self.pulses_per_revolution = tk.IntVar(value=8580)
         self.tenstar_minimum_speed = tk.IntVar(value=20)
         self.reversed = tk.BooleanVar(value=False)
         self.commands = tk.BooleanVar(value=True)

@@ -13,7 +13,7 @@ _QUADRATURE = (0, 1, -1, 0,
 
 class TenstarMotor:
     def __init__(self, in1_pin=0, in2_pin=1, encoder_a_pin=3, encoder_b_pin=4,
-                 pulses_per_revolution=1980, kp=0.3, minimum_speed=20):
+                 pulses_per_revolution=8580, kp=0.3, minimum_speed=20):
         self.in1 = PWM(Pin(in1_pin), freq=1000, duty_u16=0)
         self.in2 = PWM(Pin(in2_pin), freq=1000, duty_u16=0)
         self.pin_a = Pin(encoder_a_pin, Pin.IN, Pin.PULL_UP)

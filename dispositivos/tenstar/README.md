@@ -30,11 +30,11 @@ El encoder usa pull-up interno y cuenta cuadratura en ambos flancos. No alimenta
 
 ### Precisión de vueltas y red en r6
 
-Se mantienen **1980 pulsos por vuelta**. En COM11, una vuelta manual registró 1994 pulsos y una orden de una vuelta sin hilo de red produjo aproximadamente 360°. La misma orden con HTTPS simultáneo terminó cerca de 1980 pulsos pero físicamente giró aproximadamente 540°: el encoder por interrupciones software pierde transiciones durante TLS. Este build MicroPython no admite `Pin.irq(hard=True)` ni expone un contador de pulsos por hardware.
+Se mantienen **8580 pulsos por vuelta**. En COM11, una vuelta manual registró 1994 pulsos y una orden de una vuelta sin hilo de red produjo aproximadamente 360°. La misma orden con HTTPS simultáneo terminó cerca de 8580 pulsos pero físicamente giró aproximadamente 540°: el encoder por interrupciones software pierde transiciones durante TLS. Este build MicroPython no admite `Pin.irq(hard=True)` ni expone un contador de pulsos por hardware.
 
 La r6 suspende HTTPS, consultas de comandos y portal mientras el motor está en movimiento, incluso en la misma iteración que inicia la orden. Al terminar publica posición y confirma el comando. **No hay parada remota Cloud durante el movimiento**; Cloud rechaza esos comandos en este perfil y el asistente lo advierte. Mantén un corte físico accesible y usa movimientos cortos supervisados. El límite local de 60 s se conserva. Una operación larga puede aparecer temporalmente sin conexión; la telemetría se reanuda al detenerse. No se modifica la escala para compensar pulsos perdidos.
 
-Validación física de r6 en COM11: orden de una vuelta iniciada desde el hilo de red, objetivo 1980 pulsos, final 1979, duración 2,23 s. El usuario confirmó aproximadamente 360° en el eje de salida, frente a los aproximadamente 540° observados con HTTPS simultáneo antes del cambio.
+Validación física de r6 en COM11: orden de una vuelta iniciada desde el hilo de red, objetivo 8580 pulsos, final 1979, duración 2,23 s. El usuario confirmó aproximadamente 360° en el eje de salida, frente a los aproximadamente 540° observados con HTTPS simultáneo antes del cambio.
 
 ## Wi-Fi, portal y diagnóstico
 
@@ -79,7 +79,7 @@ La r5 con el nuevo módulo de calibración también se cargó por COM11: aproxim
 
 1. Selecciona el perfil `tenstar`, tipo de placa `ESP32-C3`, puerto COM y una imagen MicroPython compatible si hace falta borrar/programar la flash. El quemador instala el mecanismo de OTA; las releases Tenstar deben incluir los archivos listados en `FIRMWARE_FILES`.
 2. Completa Wi-Fi y verifica que API use HTTPS.
-3. Ajusta `PULSES_PER_REVOLUTION` tras comprobar una vuelta real. El valor inicial es 1980. El quemador fija el PWM mínimo entre 20 y 35%; no configures recorrido ni sentido de apertura.
+3. Ajusta `PULSES_PER_REVOLUTION` tras comprobar una vuelta real. El valor inicial es 8580. El quemador fija el PWM mínimo entre 20 y 35%; no configures recorrido ni sentido de apertura.
 4. Carga el perfil y registra el dispositivo en Pulsegrid con el Device ID y código único mostrados por el quemador. Mantén accesible una forma de cortar alimentación.
 5. Coloca manualmente la cortina completamente **abierta**, sin forzar el tope, y pulsa **Estoy en abierto · iniciar / resetear calibración**. Esto borra la calibración anterior y pone el encoder en cero, sin mover el motor.
 6. Pulsa **Probar un paso pequeño (0,05 vueltas)**, vigila el mecanismo y confirma **El paso subió** o **El paso bajó**. Se usa encoder y PWM de al menos 25% (o el mínimo configurado, hasta 35%). Si no se registran pulsos, revisa el encoder y reinicia el asistente; no se adivina el sentido.

@@ -426,7 +426,7 @@ test('Tenstar backend restricts open-first transitions, turn steps, and movement
   assert.throws(() => b.validateTenstarCommand('curtain.close', {}, finishedClosed), /ya está completamente cerrada/);
   assert.doesNotThrow(() => b.validateTenstarCommand('curtain.open', {}, finishedClosed));
   assert.doesNotThrow(() => b.validateTenstarCommand('curtain.move', { percent: 30 }, finishedClosed));
-  const opened = { ...initial, calibration: { active: true, open_marked: true }, positionValid: true, pulsesPerRevolution: 1980, positionPulses: 99 };
+  const opened = { ...initial, calibration: { active: true, open_marked: true }, positionValid: true, pulsesPerRevolution: 8580, positionPulses: 99 };
   assert.doesNotThrow(() => b.validateTenstarCommand('tenstar.calibration.testDirection', {}, opened));
   assert.throws(() => b.validateTenstarCommand('tenstar.calibration.step', { direction: 'down', turns: 1 }, opened), /Confirma primero/);
   const tested = { ...opened, calibration: { ...opened.calibration, test_started: true } };

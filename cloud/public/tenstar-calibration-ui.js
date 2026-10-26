@@ -102,7 +102,7 @@
       get('#tenstar-calibration-state').textContent = !online ? 'Tenstar fuera de línea' : !supported ? 'Actualiza el firmware a Tenstar r5 o posterior' : state.calibrated ? (telemetry.positionValid ? 'Recorrido guardado: abierto 100% · cerrado 0%' : 'Recorrido guardado; recupera la referencia en abierto') : active ? (confirmed ? 'Sentido confirmado. Avanza por vueltas hasta cerrar.' : state.test_started ? 'Observa el paso: ¿subió o bajó?' : 'Abierto fijado como origen. Prueba el sentido.') : 'Coloca la cortina en abierto para empezar';
       const relative = Number(telemetry.positionTurns);
       const span = Number(state.open_span_pulses) || 0;
-      get('#tenstar-calibration-detail').textContent = state.calibrated ? `Recorrido: ${(span / (Number(telemetry.pulsesPerRevolution) || 1980)).toFixed(3)} vueltas · ${span} pulsos` : `Desde abierto: ${Number.isFinite(relative) ? relative.toFixed(3) : '—'} vueltas · ${Number(telemetry.positionPulses) || 0} pulsos`;
+      get('#tenstar-calibration-detail').textContent = state.calibrated ? `Recorrido: ${(span / (Number(telemetry.pulsesPerRevolution) || 8580)).toFixed(3)} vueltas · ${span} pulsos` : `Desde abierto: ${Number.isFinite(relative) ? relative.toFixed(3) : '—'} vueltas · ${Number(telemetry.positionPulses) || 0} pulsos`;
       const safety = remoteStop ? '' : ' HTTPS y portal se pausan al girar. No hay parada remota durante el movimiento: mantén accesible el corte físico de alimentación.';
       status.textContent = (message || 'Sigue los cuatro pasos. El motor no se mueve al iniciar ni al guardar los extremos.') + safety;
       get('#tenstar-calibration-begin').disabled = !idle;
