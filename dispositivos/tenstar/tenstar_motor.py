@@ -46,11 +46,14 @@ class TenstarMotor:
         return value
 
     def zero(self):
+        return self.set_position(0)
+
+    def set_position(self, pulses):
         irq_state = machine_disable_irq()
-        self.position = 0
+        self.position = int(pulses)
         self.previous_state = (self.pin_a.value() << 1) | self.pin_b.value()
         machine_enable_irq(irq_state)
-        return 0
+        return self.position
 
     def brake(self):
         self.in1.duty_u16(65535)
@@ -81,6 +84,7 @@ class TenstarMotor:
         if not delta:
             raise ValueError('El movimiento debe ser mayor que cero')
         self.target = self.snapshot() + delta
+        self.motion_timeout_ms = 60000
         self.maximum_speed = max(self.minimum_speed, min(100, int(maximum_speed)))
         self.stable_cycles = 0
         self.started_at = time.ticks_ms()

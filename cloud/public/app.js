@@ -957,8 +957,9 @@ function deviceCurtainPositionMarkup(device) {
   const speed = Math.max(0, Math.min(1800, Math.round(Number(selectedSpeed ?? reportedSpeed ?? 1800))));
   const servos = Object.values(telemetry.servos || {});
   const servoReady = !isServo || (servos.length > 0 && servos.every((servo) => servo.blind_calibrated === true && servo.position_recovery_required === false && servo.blind_calibration_in_progress !== true));
+  const tenstarReady = telemetry.firmwareTarget !== 'tenstar' || (telemetry.calibration?.calibrated === true && telemetry.positionValid === true && telemetry.calibration?.active !== true);
   const pending = state.pending.has(device.id);
-  const available = device.status === 'online' && servoReady && (!isServo || speed > 0);
+  const available = device.status === 'online' && servoReady && tenstarReady && (!isServo || speed > 0);
   const enabled = available && !pending;
   const reason = device.status !== 'online' ? 'Fuera de línea' : isServo && servos.some((servo) => servo.position_recovery_required === true) ? 'Recupera referencia y reaplica calibración' : isServo && servos.some((servo) => servo.blind_calibrated !== true) ? 'Aplica calibración geométrica' : isServo && servos.some((servo) => servo.blind_calibration_in_progress === true) ? 'Calibración en curso' : isServo && !servos.length ? 'Esperando telemetría Servo' : '';
   const pendingAttrs = pending ? ' disabled aria-disabled="true" data-command-pending-disabled="true"' : '';
@@ -1945,7 +1946,7 @@ function configureDeviceCommands() {
   const isTenstarDevice = targetModel === 'tenstar' || (!targetModel && /tenstar/i.test(selectedIdentity));
   const tuyaCommands = isTuyaDevice ? tuyaCommandOptions(selectedDevice) : [];
   commandSelect.id = 'command-name';
-  commandSelect.innerHTML = tuyaCommands.length ? tuyaCommands.map((item) => `<option value="${escapeTelemetryHtml(item.value)}">${escapeTelemetryHtml(item.label)}</option>`).join('') : isTuyaDevice ? '<option value="">Tuya no expone controles para este equipo</option>' : isTenstarDevice ? '<option value="curtain.open">Abrir cortina</option><option value="curtain.close">Cerrar cortina</option><option value="curtain.stop">Detener cortina</option><option value="curtain.move">Mover a porcentaje</option><option value="tenstar.jog">Pulso manual temporizado</option>' : isGa25Device ? '<option value="curtain.open">Abrir cortina</option><option value="curtain.close">Cerrar cortina</option><option value="curtain.stop">Detener cortina</option><option value="curtain.move">Mover cortina</option>' : '<option value="curtain.open">Abrir cortina</option><option value="curtain.close">Cerrar cortina</option><option value="curtain.stop">Detener cortina</option><option value="curtain.move">Mover cortina</option><option value="servo.configure">Configurar servo</option><option value="motion.configure">Configurar movimiento</option><option value="servo.torque">Configurar torque</option><option value="servo.resetTurns">Reiniciar vueltas</option>';
+  commandSelect.innerHTML = tuyaCommands.length ? tuyaCommands.map((item) => `<option value="${escapeTelemetryHtml(item.value)}">${escapeTelemetryHtml(item.label)}</option>`).join('') : isTuyaDevice ? '<option value="">Tuya no expone controles para este equipo</option>' : isTenstarDevice ? '<option value="curtain.open">Abrir cortina</option><option value="curtain.close">Cerrar cortina</option><option value="curtain.stop">Detener cortina</option><option value="curtain.move">Mover a porcentaje</option>' : isGa25Device ? '<option value="curtain.open">Abrir cortina</option><option value="curtain.close">Cerrar cortina</option><option value="curtain.stop">Detener cortina</option><option value="curtain.move">Mover cortina</option>' : '<option value="curtain.open">Abrir cortina</option><option value="curtain.close">Cerrar cortina</option><option value="curtain.stop">Detener cortina</option><option value="curtain.move">Mover cortina</option><option value="servo.configure">Configurar servo</option><option value="motion.configure">Configurar movimiento</option><option value="servo.torque">Configurar torque</option><option value="servo.resetTurns">Reiniciar vueltas</option>';
   if (isTenstarDevice) commandSelect.querySelector('option[value="tenstar.zero"]')?.remove();
   payload.id = 'command-payload';
   let help = $('#command-payload-help');
@@ -1963,8 +1964,7 @@ function configureDeviceCommands() {
         'curtain.open': { speedPct: 70 },
         'curtain.close': { speedPct: 70 },
         'curtain.stop': {},
-        'curtain.move': { percent: 50, speedPct: 50 },
-        'tenstar.jog': { direction: 1, speedPct: 25, durationMs: 350 }
+        'curtain.move': { percent: 50, speedPct: 50 }
       };
       Object.assign(commandPayload, tenstarPayloads[commandSelect.value] || {});
     }

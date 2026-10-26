@@ -38,7 +38,7 @@ const servoCurtainDevice = {
 const tenstarCurtainDevice = {
   ...curtainDevice,
   name: 'Tenstar C3',
-  telemetry: { kind: 'curtain', firmwareTarget: 'tenstar', position: 24, positionValid: true, moving: false, pulsesPerRevolution: 1980 }
+  telemetry: { kind: 'curtain', firmwareTarget: 'tenstar', position: 24, positionValid: true, calibration: { calibrated: true }, moving: false, pulsesPerRevolution: 1980 }
 };
 
 function setup(folder, requestImpl = async () => ({ status: 'succeeded' }), configuredDevice = device) {
@@ -225,6 +225,19 @@ for (const folder of ['', 'public', 'public_html']) {
     assert.equal(slider.value, '24');
     assert.equal(slider.disabled, false);
     assert.equal(window.document.querySelector('[data-device-direction]'), null);
+  });
+
+  test(`${label}: Tenstar position slider is locked until calibrated and referenced`, (t) => {
+    const f = setup(folder, undefined, tenstarCurtainDevice); t.after(() => f.dom.window.close());
+    const { window, context } = f;
+    for (const [calibration, positionValid] of [
+      [{ calibrated: false, active: true }, true],
+      [{ calibrated: true }, false],
+    ]) {
+      Object.assign(window.devices[0].telemetry, { calibration, positionValid });
+      vm.runInContext('renderDeviceCards()', context);
+      assert.equal(window.document.querySelector('[data-curtain-position]').disabled, true);
+    }
   });
 
   test(`${label}: curtain position slider is disabled until Servo calibration is ready`, (t) => {

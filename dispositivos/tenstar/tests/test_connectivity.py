@@ -77,10 +77,13 @@ class FirmwareTest(unittest.TestCase):
         self.led = self.load('board_led')
         self.portal = self.load('captive_portal')
         self.http = self.load('tenstar_http')
+        self.calibration = self.load('tenstar_calibration')
         sys.modules['board_led'] = self.led
         sys.modules['captive_portal'] = self.portal
         sys.modules['tenstar_http'] = self.http
+        sys.modules['tenstar_calibration'] = self.calibration
         self.addCleanup(lambda: sys.modules.pop('tenstar_http', None))
+        self.addCleanup(lambda: sys.modules.pop('tenstar_calibration', None))
         self.main = types.ModuleType('tenstar_test_main')
         source = (ROOT / 'main.py').read_text(encoding='utf-8')
         exec(compile(source, str(ROOT / 'main.py'), 'exec'), self.main.__dict__)

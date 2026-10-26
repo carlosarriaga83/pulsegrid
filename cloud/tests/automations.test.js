@@ -412,20 +412,32 @@ test('backend requires an explicit valid Servo motor mounting side for geometric
   assert.throws(() => b.validateCloudBlindCalibration({ provider: 'pulsegrid' }, 'blind.cloudCalibrationConfigure', legacyPayload));
 });
 
-test('Tenstar backend restricts calibration transitions, JOG bounds, and movement to a valid reference', () => {
+test('Tenstar backend restricts open-first transitions, turn steps, and movement to a valid reference', () => {
   const b = backend();
-  const initial = { firmwareTarget: 'tenstar', calibration: {}, positionValid: false, moving: false };
-  assert.doesNotThrow(() => b.validateTenstarCommand('tenstar.calibration.setClosed', {}, initial));
-  assert.throws(() => b.validateTenstarCommand('tenstar.calibration.setOpen', {}, initial), /Marca primero/);
+  const initial = { firmwareTarget: 'tenstar', calibrationMode: 'open-first-v1', calibration: {}, positionValid: false, moving: false };
+  assert.doesNotThrow(() => b.validateTenstarCommand('tenstar.calibration.begin', { atOpen: true }, initial));
+  assert.throws(() => b.validateTenstarCommand('tenstar.calibration.begin', { atOpen: false }, initial), /abierta/);
+  assert.throws(() => b.validateTenstarCommand('tenstar.calibration.begin', { atOpen: true }, { ...initial, calibrationMode: undefined }), /r5/);
+  assert.throws(() => b.validateTenstarCommand('tenstar.calibration.setClosed', {}, initial), /Inicia primero/);
   assert.throws(() => b.validateTenstarCommand('curtain.open', { speedPct: 70 }, initial), /Calibra ambos/);
-  const closed = { ...initial, calibration: { closed_marked: true }, positionValid: true };
-  assert.doesNotThrow(() => b.validateTenstarCommand('tenstar.jog', { direction: -1, speedPct: 25, durationMs: 350 }, closed));
-  assert.throws(() => b.validateTenstarCommand('tenstar.jog', { direction: 1, speedPct: 50, durationMs: 350 }, closed), /JOG Tenstar/);
-  assert.throws(() => b.validateTenstarCommand('tenstar.jog', { direction: 1, speedPct: 25, durationMs: 1000 }, closed), /JOG Tenstar/);
-  assert.doesNotThrow(() => b.validateTenstarCommand('tenstar.calibration.setOpen', {}, closed));
+  const opened = { ...initial, calibration: { active: true, open_marked: true }, positionValid: true, pulsesPerRevolution: 1980, positionPulses: 99 };
+  assert.doesNotThrow(() => b.validateTenstarCommand('tenstar.calibration.testDirection', {}, opened));
+  assert.throws(() => b.validateTenstarCommand('tenstar.calibration.step', { direction: 'down', turns: 1 }, opened), /Confirma primero/);
+  const tested = { ...opened, calibration: { ...opened.calibration, test_started: true } };
+  assert.doesNotThrow(() => b.validateTenstarCommand('tenstar.calibration.confirmDirection', { movement: 'down' }, tested));
+  const confirmed = { ...tested, calibration: { ...tested.calibration, direction_confirmed: true, close_direction: 1 } };
+  assert.doesNotThrow(() => b.validateTenstarCommand('tenstar.calibration.step', { direction: 'down', turns: 1.5 }, confirmed));
+  for (const turns of [NaN, Infinity, 0, 20.1]) assert.throws(() => b.validateTenstarCommand('tenstar.calibration.step', { direction: 'down', turns }, confirmed));
+  assert.throws(() => b.validateTenstarCommand('tenstar.calibration.step', { direction: 'up', turns: 1 }, confirmed), /referencia abierta/);
+  const upwardTest = { ...confirmed, calibration: { ...confirmed.calibration, close_direction: -1 } };
+  assert.doesNotThrow(() => b.validateTenstarCommand('tenstar.calibration.step', { direction: 'down', turns: 0.01 }, upwardTest));
+  assert.throws(() => b.validateTenstarCommand('tenstar.calibration.step', { direction: 'up', turns: 0.01 }, upwardTest), /referencia abierta/);
+  assert.doesNotThrow(() => b.validateTenstarCommand('tenstar.calibration.setClosed', {}, confirmed));
   assert.throws(() => b.validateTenstarCommand('tenstar.calibration.referenceClosed', {}, initial), /Completa primero/);
-  assert.doesNotThrow(() => b.validateTenstarCommand('tenstar.calibration.referenceClosed', {}, { ...closed, calibration: { calibrated: true } }));
-  assert.throws(() => b.validateTenstarCommand('tenstar.calibration.reset', {}, { ...closed, moving: true }), /Detén el motor/);
+  assert.doesNotThrow(() => b.validateTenstarCommand('tenstar.calibration.referenceOpen', {}, { ...initial, calibration: { calibrated: true } }));
+  assert.throws(() => b.validateTenstarCommand('tenstar.calibration.reset', {}, { ...opened, moving: true }), /Detén el motor/);
+  assert.throws(() => b.validateTenstarCommand('tenstar.jog', {}, initial), /no compatible/);
+  assert.throws(() => b.validateTenstarCommand('tenstar.calibration.setOpen', {}, initial), /no compatible/);
   assert.throws(() => b.validateTenstarCommand('tenstar.zero', {}, initial), /no compatible/);
   assert.doesNotThrow(() => b.validateTenstarCommand('curtain.stop', {}, { ...initial, moving: true }));
 });
@@ -433,7 +445,7 @@ test('Tenstar backend restricts calibration transitions, JOG bounds, and movemen
 test('Tenstar online gate uses authenticated heartbeat even when deduplicated telemetry is old', async () => {
   const b = backend();
   const row = {
-    payload: { firmwareTarget: 'tenstar', online: true, calibration: {}, positionValid: false, moving: false },
+    payload: { firmwareTarget: 'tenstar', calibrationMode: 'open-first-v1', online: true, calibration: {}, positionValid: false, moving: false },
     createdAt: new Date(Date.now() - 3600000),
     lastSeen: new Date()
   };
@@ -444,15 +456,15 @@ test('Tenstar online gate uses authenticated heartbeat even when deduplicated te
     throw new Error(sql);
   } };
   const device = { id: 4, provider: 'pulsegrid' };
-  const result = await b.dispatchDeviceCommand(db, device, 'tenstar.calibration.setClosed', {});
+  const result = await b.dispatchDeviceCommand(db, device, 'tenstar.calibration.begin', { atOpen: true });
   assert.equal(result.status, 'queued');
   for (const lastSeen of [null, 'invalid-date', new Date(Date.now() - 16000)]) {
     row.lastSeen = lastSeen;
-    await assert.rejects(b.dispatchDeviceCommand(db, device, 'tenstar.calibration.setClosed', {}), /Tenstar debe estar en línea/);
+    await assert.rejects(b.dispatchDeviceCommand(db, device, 'tenstar.calibration.begin', { atOpen: true }), /Tenstar debe estar en línea/);
   }
   assert.equal(inserted, 1);
   assert.equal((await b.dispatchDeviceCommand(db, device, 'tenstar.stop', {})).status, 'queued');
   row.lastSeen = new Date();
   row.payload.online = false;
-  await assert.rejects(b.dispatchDeviceCommand(db, device, 'tenstar.calibration.setClosed', {}), /Tenstar debe estar en línea/);
+  await assert.rejects(b.dispatchDeviceCommand(db, device, 'tenstar.calibration.begin', { atOpen: true }), /Tenstar debe estar en línea/);
 });
