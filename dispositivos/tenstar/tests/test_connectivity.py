@@ -1,4 +1,3 @@
-import ast
 import contextlib
 import importlib.util
 import io
@@ -77,12 +76,14 @@ class FirmwareTest(unittest.TestCase):
         self.addCleanup(lambda: sys.modules.pop('captive_portal', None))
         self.led = self.load('board_led')
         self.portal = self.load('captive_portal')
+        self.http = self.load('tenstar_http')
         sys.modules['board_led'] = self.led
         sys.modules['captive_portal'] = self.portal
-        tree = ast.parse((ROOT / 'main.py').read_text(encoding='utf-8'))
-        tree.body = tree.body[:-1]
+        sys.modules['tenstar_http'] = self.http
+        self.addCleanup(lambda: sys.modules.pop('tenstar_http', None))
         self.main = types.ModuleType('tenstar_test_main')
-        exec(compile(tree, str(ROOT / 'main.py'), 'exec'), self.main.__dict__)
+        source = (ROOT / 'main.py').read_text(encoding='utf-8')
+        exec(compile(source, str(ROOT / 'main.py'), 'exec'), self.main.__dict__)
 
     @staticmethod
     def load(name):
@@ -93,19 +94,19 @@ class FirmwareTest(unittest.TestCase):
 
     def test_ssl_response_uses_stream_read_and_content_length(self):
         stream = SSLStream(b'HTTP/1.1 200 OK\r\nContent-Length: 16\r\n\r\n{"command":null}')
-        self.assertEqual(self.main._read_response(stream), {'command': None})
+        self.assertEqual(self.http._read_response(stream), {'command': None})
 
     def test_chunked_stream_without_recv(self):
         body = b'{"ok":true}'
         response = b'HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n'
         response += b'b;test=1\r\n' + body + b'\r\n0\r\n\r\n'
-        self.assertEqual(self.main._read_response(SSLStream(response)), {'ok': True})
+        self.assertEqual(self.http._read_response(SSLStream(response)), {'ok': True})
 
     def test_http_authentication_error_includes_cloud_detail(self):
         body = b'{"error":"Invalid device code"}'
         stream = SSLStream(b'HTTP/1.1 401 Unauthorized\r\nContent-Length: ' + str(len(body)).encode() + b'\r\n\r\n' + body)
         with self.assertRaisesRegex(ValueError, 'HTTP 401.*Invalid device code'):
-            self.main._read_response(stream)
+            self.http._read_response(stream)
 
     def test_missing_identity_is_not_silent(self):
         self.main.DEVICE_CODE = ''
@@ -121,7 +122,7 @@ class FirmwareTest(unittest.TestCase):
             SOCK_STREAM=1, socket=lambda: raw,
             getaddrinfo=lambda host, port, *args: [(0, 0, 0, '', (host, port))])
         tls = types.SimpleNamespace(wrap_socket=lambda client, server_hostname: stream)
-        self.main.socket = socket
+        self.http.socket = socket
         with patch.dict(sys.modules, {'ussl': tls}):
             result = self.main.request('GET', '/api/device-commands')
         self.assertEqual(result, {'command': None})
@@ -162,7 +163,7 @@ class FirmwareTest(unittest.TestCase):
         body = b'{"error":"Invalid device code"}'
         stream = SSLStream(b'HTTP/1.1 401 Unauthorized\r\nContent-Length: ' + str(len(body)).encode() + b'\r\n\r\n' + body)
         raw = types.SimpleNamespace(settimeout=lambda _: None, connect=lambda _: None)
-        self.main.socket = types.SimpleNamespace(
+        self.http.socket = types.SimpleNamespace(
             SOCK_STREAM=1, socket=lambda: raw,
             getaddrinfo=lambda *args: [(0, 0, 0, '', ('example.test', 443))])
         self.main.cloud_last_success = self.now

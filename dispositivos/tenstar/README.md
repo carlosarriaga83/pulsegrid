@@ -1,6 +1,6 @@
 # Tenstar C3 Super Mini + DRV8871
 
-Firmware MicroPython para controlar un motor de cortina con encoder incremental desde Pulsegrid. El quemador carga `boot.py`, `main.py`, `tenstar_motor.py`, `board_led.py`, `captive_portal.py` y los módulos compartidos `ota_boot.py`, `pulsegrid_ota.py` y `wifi_recovery.py`; genera `config.py` para la placa.
+Firmware MicroPython para controlar un motor de cortina con encoder incremental desde Pulsegrid. El quemador carga `boot.py`, `main.py`, `tenstar_motor.py`, `tenstar_http.py`, `board_led.py`, `captive_portal.py` y los módulos compartidos `ota_boot.py`, `pulsegrid_ota.py` y `wifi_recovery.py`; genera `config.py` para la placa.
 
 ## Cableado
 
@@ -38,6 +38,16 @@ Cloud comprueba la presencia reciente mediante `last_seen`, actualizado al recib
 | Motor en movimiento | 80 ms encendido / 80 ms apagado |
 
 El LED integrado de la C3 Super Mini se configura con `LED_PIN = 8` y `LED_ACTIVE_LOW = True`. Para una variante de placa con polaridad distinta, cambia `LED_ACTIVE_LOW` en `config.py`. Los estados se actualizan en el bucle local, sin esperar las llamadas de red.
+
+### Memoria TLS en ESP32-C3
+
+La r4 separa el transporte HTTP en `tenstar_http.py` para reducir el pico de memoria al compilar los archivos Python durante el arranque. No vuelvas a unir este módulo con `main.py`: en MicroPython el heap Python puede crecer tomando memoria del heap interno ESP-IDF, y `gc.collect()` no devuelve necesariamente esa región a TLS.
+
+Probado en COM11 con MicroPython v1.28.0, build `LOLIN_C3_MINI`, ESP32-C3FH4: antes de la separación, cargar la aplicación dejaba aproximadamente 35 KB internos libres y el hilo con portal unos 18 KB; el handshake fallaba con `ENOMEM` aunque `gc.mem_free()` superaba 100 KB. Con el transporte separado quedaron aproximadamente 102 KB internos antes del hilo y 85 KB con hilo/portal, manteniendo un bloque libre de 64 KB. Se verificaron telemetrías HTTPS autenticadas repetidas, un reinicio normal observado durante 45 segundos sin `ENOMEM` y respuesta HTTP 200 del portal por LAN, sin movimiento del motor ni borrado de flash.
+
+Carga también `tenstar_http.py` al actualizar por USB, y reinicia para liberar los heaps del firmware anterior. Quemador y la lista OTA incluyen este nuevo módulo; el servidor Cloud debe permitirlo en las releases.
+
+La descarga/activación OTA completa no fue validada en esa prueba. Importar adicionalmente el módulo compartido `pulsegrid_ota` durante una prueba aislada volvió a reducir el heap interno y a provocar `ENOMEM`; esa ruta requiere validación y optimización adicional antes de considerarla comprobada en este build. No es necesario cambiar MicroPython para la telemetría y el portal verificados con r4.
 
 ## Carga con el quemador
 

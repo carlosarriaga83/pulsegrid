@@ -74,7 +74,7 @@ function createApiKey() {
   return `pg_live_${crypto.randomBytes(24).toString('base64url')}`;
 }
 
-const firmwareFiles = new Set(['main.py', 'cloud_client.py', 'board_led.py', 'servo_calibration.py', 'cloud_loop.py', 'pulsegrid.py', 'pulsegrid_min.py', 'pulsegrid_commands.py', 'pulsegrid_ota.py', 'pulsegrid_bootstrap.py', 'webserver.py', 'webserver_min.py', 'webserver_portal.py', 'cortina.py', 'stservo.py', 'ssd1306.py', 'captive_portal.py', 'motor_curtain.py', 'tenstar_motor.py', 'boot.py', 'ota_boot.py', 'wifi_recovery.py']);
+const firmwareFiles = new Set(['main.py', 'cloud_client.py', 'board_led.py', 'servo_calibration.py', 'cloud_loop.py', 'pulsegrid.py', 'pulsegrid_min.py', 'pulsegrid_commands.py', 'pulsegrid_ota.py', 'pulsegrid_bootstrap.py', 'webserver.py', 'webserver_min.py', 'webserver_portal.py', 'cortina.py', 'stservo.py', 'ssd1306.py', 'captive_portal.py', 'motor_curtain.py', 'tenstar_motor.py', 'tenstar_http.py', 'boot.py', 'ota_boot.py', 'wifi_recovery.py']);
 
 function firmwareVersion(version) {
   if (!/^[A-Za-z0-9._-]{1,40}$/.test(String(version || ''))) throw new Error('Invalid firmware version');

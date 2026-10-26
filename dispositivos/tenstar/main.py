@@ -2,7 +2,6 @@ import gc
 import json
 import machine
 import network
-import socket
 import time
 import _thread
 
@@ -10,6 +9,7 @@ from tenstar_motor import TenstarMotor
 import board_led
 import captive_portal
 import wifi_recovery
+import tenstar_http
 
 captive_portal.recover_config_file()
 
@@ -37,12 +37,12 @@ except ImportError:
     LED_ACTIVE_LOW = True
 
 FIRMWARE_TARGET = 'tenstar'
-FIRMWARE_VERSION = '2026.10.25.tenstar-r3'
+FIRMWARE_VERSION = '2026.10.25.tenstar-r4'
 try:
     from pulsegrid_firmware import VERSION as FIRMWARE_VERSION
 except (ImportError, AttributeError):
     pass
-FIRMWARE_FILES = ('boot.py', 'main.py', 'tenstar_motor.py', 'ota_boot.py', 'pulsegrid_ota.py', 'board_led.py', 'captive_portal.py', 'wifi_recovery.py')
+FIRMWARE_FILES = ('boot.py', 'main.py', 'tenstar_motor.py', 'ota_boot.py', 'pulsegrid_ota.py', 'board_led.py', 'captive_portal.py', 'wifi_recovery.py', 'tenstar_http.py')
 CALIBRATION_FILE = 'tenstar_calibration.json'
 COMMAND_POLL_MS = 1000
 TELEMETRY_MS = 2000
@@ -106,91 +106,6 @@ def save_calibration():
         os.rename(temporary, CALIBRATION_FILE)
 
 
-def _recv(client, size):
-    reader = getattr(client, 'read', None)
-    return reader(size) if reader else client.recv(size)
-
-
-def _send_all(client, data):
-    sent = 0
-    while sent < len(data):
-        writer = getattr(client, 'write', None)
-        count = writer(data[sent:]) if writer else client.send(data[sent:])
-        if count is None or count <= 0:
-            raise OSError('Envio HTTP incompleto')
-        sent += count
-
-
-def _read_until(client, buffer, marker, limit):
-    while marker not in buffer:
-        chunk = _recv(client, 256)
-        if not chunk:
-            raise ValueError('Respuesta HTTP incompleta')
-        buffer += chunk
-        if marker not in buffer and len(buffer) > limit:
-            raise ValueError('Respuesta HTTP demasiado grande')
-    index = buffer.find(marker)
-    if index > limit:
-        raise ValueError('Encabezado HTTP demasiado grande')
-    return buffer[:index], buffer[index + len(marker):]
-
-
-def _read_response(client):
-    header, body = _read_until(client, b'', b'\r\n\r\n', 4096)
-    lines = header.split(b'\r\n')
-    status = int(lines[0].split(b' ', 2)[1])
-    headers = {}
-    for line in lines[1:]:
-        if b':' in line:
-            key, value = line.split(b':', 1)
-            headers[key.strip().lower()] = value.strip().lower()
-    if b'chunked' in headers.get(b'transfer-encoding', b''):
-        decoded = bytearray()
-        while True:
-            line, body = _read_until(client, body, b'\r\n', 128)
-            size = int(line.split(b';', 1)[0].strip(), 16)
-            if size < 0 or len(decoded) + size > 20000:
-                raise ValueError('Respuesta HTTP demasiado grande')
-            if size == 0:
-                while True:
-                    trailer, body = _read_until(client, body, b'\r\n', 1024)
-                    if not trailer:
-                        break
-                break
-            while len(body) < size + 2:
-                part = _recv(client, min(512, size + 2 - len(body)))
-                if not part:
-                    raise ValueError('Respuesta chunked incompleta')
-                body += part
-            if body[size:size + 2] != b'\r\n':
-                raise ValueError('Separador chunked invalido')
-            decoded.extend(body[:size])
-            body = body[size + 2:]
-        body = bytes(decoded)
-    elif b'content-length' in headers:
-        length = int(headers[b'content-length'])
-        if length < 0 or length > 20000:
-            raise ValueError('Longitud HTTP fuera de rango')
-        while len(body) < length:
-            part = _recv(client, min(512, length - len(body)))
-            if not part:
-                raise ValueError('Respuesta HTTP incompleta')
-            body += part
-        body = body[:length]
-    elif status != 204:
-        while True:
-            part = _recv(client, 512)
-            if not part:
-                break
-            body += part
-            if len(body) > 20000:
-                raise ValueError('Respuesta HTTP demasiado grande')
-    if status < 200 or status >= 300:
-        detail = body[:200].decode()
-        raise ValueError('HTTP {}: {}'.format(status, detail))
-    return json.loads(body.decode()) if body else {}
-
-
 def cloud_online():
     return wlan.isconnected() and cloud_last_success is not None and time.ticks_diff(time.ticks_ms(), cloud_last_success) < 15000
 
@@ -200,40 +115,11 @@ def request(method, path, payload=None):
     now = time.ticks_ms()
     if next_request_at and time.ticks_diff(now, next_request_at) < 0:
         return None
-    client = None
-    phase = 'configuracion'
     try:
-        if not API_URL.startswith('https://'):
-            raise ValueError('API_URL debe usar HTTPS; revisar config.py con Quemador')
         if not DEVICE_CODE or not DEVICE_ID:
             raise ValueError('Falta DEVICE_CODE o DEVICE_ID; generar identidad con Quemador y registrar en Cloud')
         gc.collect()
-        authority, _, prefix = API_URL.split('://', 1)[1].partition('/')
-        parts = authority.split(':', 1)
-        host = parts[0]
-        port = int(parts[1]) if len(parts) > 1 else 443
-        path = ('/' + prefix.rstrip('/') if prefix else '') + path
-        phase = 'DNS'
-        address = socket.getaddrinfo(host, port, 0, socket.SOCK_STREAM)[0][-1]
-        client = socket.socket()
-        client.settimeout(REQUEST_TIMEOUT)
-        phase = 'TCP'
-        client.connect(address)
-        phase = 'TLS'
-        try:
-            import ussl as tls
-        except ImportError:
-            import ssl as tls
-        gc.collect()
-        client = tls.wrap_socket(client, server_hostname=host)
-        body = json.dumps(payload) if payload is not None else ''
-        headers = 'Connection: close\r\nX-Device-Code: {}\r\n'.format(DEVICE_CODE)
-        if body:
-            headers += 'Content-Type: application/json\r\nContent-Length: {}\r\n'.format(len(body.encode()))
-        message = '{} {} HTTP/1.1\r\nHost: {}\r\n{}\r\n{}'.format(method, path, authority, headers, body)
-        phase = 'HTTP'
-        _send_all(client, message.encode())
-        result = _read_response(client)
+        result = tenstar_http.request(API_URL, DEVICE_CODE, method, path, payload, REQUEST_TIMEOUT)
         if cloud_last_success is None or cloud_error:
             print('Cloud conectado: {} · {}'.format(DEVICE_ID, API_URL))
         cloud_last_success = time.ticks_ms()
@@ -242,17 +128,10 @@ def request(method, path, payload=None):
         return result
     except Exception as error:
         cloud_last_success = None
-        cloud_error = '{}: {}'.format(phase, error)
+        cloud_error = str(error)
         print('Cloud {} {} fallo en {}'.format(method, path.split('?', 1)[0], cloud_error))
         next_request_at = time.ticks_add(time.ticks_ms(), RETRY_MS)
         return None
-    finally:
-        if client:
-            try:
-                client.close()
-            except OSError as error:
-                print('Cloud cierre de conexion:', error)
-        gc.collect()
 
 
 def acknowledge(command_id, status, error=None):
@@ -614,4 +493,5 @@ def main():
         time.sleep_ms(10)
 
 
-main()
+if __name__ == '__main__':
+    main()
