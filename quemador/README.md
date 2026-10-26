@@ -76,9 +76,9 @@ El `Device ID` se asigna como `PULSE_` seguido de los 12 dígitos hexadecimales 
 
 ### Tenstar C3 Super Mini
 
-Carga `boot.py`, `main.py` y `tenstar_motor.py` desde `dispositivos/tenstar` y genera `config.py` con Wi-Fi, identidad y ajustes de encoder. El perfil selecciona ESP32-C3 y permite configurar pulsos por vuelta (inicialmente 1980), recorrido calibrado en vueltas, PWM mínimo y sentido de apertura. No ofrece OTA: usa el quemador por USB para instalar firmware.
+Carga `boot.py`, `main.py` y `tenstar_motor.py` desde `dispositivos/tenstar`, además de los módulos OTA compartidos, y genera `config.py` con Wi-Fi, identidad y ajustes de encoder. El perfil selecciona ESP32-C3 y permite configurar pulsos por vuelta (inicialmente 1980) y PWM mínimo de calibración (20–35%). El recorrido y el sentido de apertura se aprenden marcando los extremos físicos desde Pulsegrid Cloud; el quemador no estima esos valores. Las futuras versiones se pueden instalar desde Cloud por OTA; usa el quemador por USB para instalar MicroPython inicialmente o recuperar la placa.
 
-Consulta `dispositivos/tenstar/README.md` antes de energizar el motor. No hay finales de carrera: primero fija manualmente la posición cerrada con `tenstar.zero` y prueba desplazamientos pequeños con una forma de cortar la alimentación accesible.
+Consulta `dispositivos/tenstar/README.md` antes de energizar el motor. No hay finales de carrera: calibra desde Pulsegrid Cloud con pulsos breves y supervisados, sin buscar los topes mecánicos.
 
 ### Otros
 

@@ -233,7 +233,7 @@ test('HTML loads automation helpers before app and mirrors are synchronized', ()
     const html = fs.readFileSync(path.join(root, folder, 'index.html'), 'utf8');
     assert.ok(html.indexOf('automation-model.js?v=47') >= 0);
     assert.ok(html.indexOf('automation-ui.js?v=56') >= 0);
-    assert.ok(html.indexOf('app.js?v=72') >= 0);
+    assert.ok(html.indexOf('app.js?v=73') >= 0);
     assert.ok(html.indexOf('blind-calibration-model.js?v=2') >= 0);
     assert.ok(html.indexOf('blind-calibration-ui.js?v=8') >= 0);
     assert.ok(html.indexOf('cloud-blind-calibration-ui.js?v=5') >= 0);
@@ -242,7 +242,7 @@ test('HTML loads automation helpers before app and mirrors are synchronized', ()
     assert.ok(html.indexOf('automation-ui.js?v=56') < html.indexOf('blind-calibration-model.js?v=2'));
     assert.ok(html.indexOf('blind-calibration-model.js?v=2') < html.indexOf('blind-calibration-ui.js?v=8'));
     assert.ok(html.indexOf('blind-calibration-ui.js?v=8') < html.indexOf('cloud-blind-calibration-ui.js?v=5'));
-    assert.ok(html.indexOf('cloud-blind-calibration-ui.js?v=5') < html.indexOf('app.js?v=72'));
+    assert.ok(html.indexOf('cloud-blind-calibration-ui.js?v=5') < html.indexOf('app.js?v=73'));
     assert.match(html, /automations.css\?v=48/);
     const app = fs.readFileSync(path.join(root, folder, 'app.js'), 'utf8');
     assert.match(app, /\$\('#automation-speed'\)\.value = '1800'/);
@@ -410,4 +410,22 @@ test('backend requires an explicit valid Servo motor mounting side for geometric
   assert.throws(() => b.validateCloudBlindCalibration({ provider: 'pulsegrid' }, 'blind.cloudCalibrationConfigure', { ...calibration, motorSide: 'invalid' }));
   const { motorSide, ...legacyPayload } = calibration;
   assert.throws(() => b.validateCloudBlindCalibration({ provider: 'pulsegrid' }, 'blind.cloudCalibrationConfigure', legacyPayload));
+});
+
+test('Tenstar backend restricts calibration transitions, JOG bounds, and movement to a valid reference', () => {
+  const b = backend();
+  const initial = { firmwareTarget: 'tenstar', calibration: {}, positionValid: false, moving: false };
+  assert.doesNotThrow(() => b.validateTenstarCommand('tenstar.calibration.setClosed', {}, initial));
+  assert.throws(() => b.validateTenstarCommand('tenstar.calibration.setOpen', {}, initial), /Marca primero/);
+  assert.throws(() => b.validateTenstarCommand('curtain.open', { speedPct: 70 }, initial), /Calibra ambos/);
+  const closed = { ...initial, calibration: { closed_marked: true }, positionValid: true };
+  assert.doesNotThrow(() => b.validateTenstarCommand('tenstar.jog', { direction: -1, speedPct: 25, durationMs: 350 }, closed));
+  assert.throws(() => b.validateTenstarCommand('tenstar.jog', { direction: 1, speedPct: 50, durationMs: 350 }, closed), /JOG Tenstar/);
+  assert.throws(() => b.validateTenstarCommand('tenstar.jog', { direction: 1, speedPct: 25, durationMs: 1000 }, closed), /JOG Tenstar/);
+  assert.doesNotThrow(() => b.validateTenstarCommand('tenstar.calibration.setOpen', {}, closed));
+  assert.throws(() => b.validateTenstarCommand('tenstar.calibration.referenceClosed', {}, initial), /Completa primero/);
+  assert.doesNotThrow(() => b.validateTenstarCommand('tenstar.calibration.referenceClosed', {}, { ...closed, calibration: { calibrated: true } }));
+  assert.throws(() => b.validateTenstarCommand('tenstar.calibration.reset', {}, { ...closed, moving: true }), /Detén el motor/);
+  assert.throws(() => b.validateTenstarCommand('tenstar.zero', {}, initial), /no compatible/);
+  assert.doesNotThrow(() => b.validateTenstarCommand('curtain.stop', {}, { ...initial, moving: true }));
 });

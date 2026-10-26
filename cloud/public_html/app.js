@@ -1742,7 +1742,12 @@ function renderCalibrationWizard() {
   const identity = `${selectedDevice?.name || ''} ${selectedDevice?.type || ''} ${selectedDevice?.id || ''}`;
   const supportsServo = targetModel === 'servo' || (!targetModel && !/ga25|tenstar/i.test(identity));
   const supportsGa25 = targetModel === 'ga25' || (!targetModel && /ga25/i.test(identity));
-  if (!supportsServo && !supportsGa25) { $('#calibration-wizard')?.remove(); return; }
+  const supportsTenstar = targetModel === 'tenstar' || (!targetModel && /tenstar/i.test(identity));
+  if (!supportsServo && !supportsGa25 && !supportsTenstar) { $('#calibration-wizard')?.remove(); return; }
+  if (supportsTenstar && typeof window.mountTenstarCalibrationWizard === 'function') {
+    window.mountTenstarCalibrationWizard({ $, apiRequest, loadDevices, waitForCalibrationCommand, showToast, renderIcons, devices: () => devices, parseTelemetry });
+    return;
+  }
   if (supportsServo && typeof window.mountCloudBlindCalibrationWizard === 'function') {
     window.mountCloudBlindCalibrationWizard({ $, apiRequest, loadDevices, waitForCalibrationCommand, showToast, renderIcons, devices: () => devices, parseTelemetry });
     return;
@@ -1842,6 +1847,7 @@ function configureDeviceCommands() {
   const tuyaCommands = isTuyaDevice ? tuyaCommandOptions(selectedDevice) : [];
   commandSelect.id = 'command-name';
   commandSelect.innerHTML = tuyaCommands.length ? tuyaCommands.map((item) => `<option value="${escapeTelemetryHtml(item.value)}">${escapeTelemetryHtml(item.label)}</option>`).join('') : isTuyaDevice ? '<option value="">Tuya no expone controles para este equipo</option>' : isTenstarDevice ? '<option value="curtain.open">Abrir cortina</option><option value="curtain.close">Cerrar cortina</option><option value="curtain.stop">Detener cortina</option><option value="curtain.move">Mover a porcentaje</option><option value="tenstar.zero">Fijar cero (cortina cerrada)</option><option value="tenstar.jog">Pulso manual temporizado</option>' : isGa25Device ? '<option value="curtain.open">Abrir cortina</option><option value="curtain.close">Cerrar cortina</option><option value="curtain.stop">Detener cortina</option><option value="curtain.move">Mover cortina</option>' : '<option value="curtain.open">Abrir cortina</option><option value="curtain.close">Cerrar cortina</option><option value="curtain.stop">Detener cortina</option><option value="curtain.move">Mover cortina</option><option value="servo.configure">Configurar servo</option><option value="motion.configure">Configurar movimiento</option><option value="servo.torque">Configurar torque</option><option value="servo.resetTurns">Reiniciar vueltas</option>';
+  if (isTenstarDevice) commandSelect.querySelector('option[value="tenstar.zero"]')?.remove();
   payload.id = 'command-payload';
   let help = $('#command-payload-help');
   if (!help) {

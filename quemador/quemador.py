@@ -52,8 +52,9 @@ MODEL_PROFILES = {
     "tenstar": {
         "label": "Tenstar C3 Super Mini",
         "directory": TENSTAR_DIR,
-        "files": ("boot.py", "main.py", "tenstar_motor.py"),
-        "remove": ("cortina.py", "stservo.py", "servo_calibration.py", "motor_curtain.py", "captive_portal.py", "pulsegrid_ota.py", "ota_boot.py"),
+        "files": ("boot.py", "main.py", "tenstar_motor.py", "ota_boot.py", "pulsegrid_ota.py"),
+        "sources": {"ota_boot.py": SERVO_DIR / "ota_boot.py", "pulsegrid_ota.py": SERVO_DIR / "pulsegrid_ota.py"},
+        "remove": ("cortina.py", "stservo.py", "servo_calibration.py", "motor_curtain.py", "captive_portal.py", "pulsegrid_firmware.py"),
         "config": "config.py",
     },
 }
@@ -100,9 +101,7 @@ class BurnerApp(tk.Tk):
         self.wifi_password = tk.StringVar()
         self.full_travel = tk.IntVar(value=15000)
         self.pulses_per_revolution = tk.IntVar(value=1980)
-        self.tenstar_travel_turns = tk.DoubleVar(value=1.0)
         self.tenstar_minimum_speed = tk.IntVar(value=20)
-        self.tenstar_open_direction = tk.IntVar(value=1)
         self.reversed = tk.BooleanVar(value=False)
         self.commands = tk.BooleanVar(value=True)
         self.flash_micropython = tk.BooleanVar(value=True)
@@ -178,21 +177,11 @@ class BurnerApp(tk.Tk):
         pulses_widget = ttk.Spinbox(config, from_=1, to=100000, textvariable=self.pulses_per_revolution, width=12)
         pulses_widget.grid(row=6, column=1, sticky="w", padx=(5, 0), pady=4)
         self.tenstar_widgets.append(pulses_widget)
-        ttk.Label(config, text="Recorrido seguro (vueltas)").grid(row=7, column=0, sticky="w", pady=4)
-        self.tenstar_widgets.extend([config.grid_slaves(row=7, column=0)[0]])
-        travel_widget = ttk.Spinbox(config, from_=0.01, to=20, increment=0.1, textvariable=self.tenstar_travel_turns, width=12)
-        travel_widget.grid(row=7, column=1, sticky="w", padx=(5, 0), pady=4)
-        self.tenstar_widgets.append(travel_widget)
         ttk.Label(config, text="PWM minimo % (Tenstar)").grid(row=6, column=2, sticky="w", padx=(18, 0), pady=4)
         self.tenstar_widgets.extend([config.grid_slaves(row=6, column=2)[0]])
-        speed_widget = ttk.Spinbox(config, from_=1, to=100, textvariable=self.tenstar_minimum_speed, width=12)
+        speed_widget = ttk.Spinbox(config, from_=20, to=35, textvariable=self.tenstar_minimum_speed, width=12)
         speed_widget.grid(row=6, column=3, sticky="w", padx=(5, 0), pady=4)
         self.tenstar_widgets.append(speed_widget)
-        ttk.Label(config, text="Sentido apertura ±1").grid(row=7, column=2, sticky="w", padx=(18, 0), pady=4)
-        self.tenstar_widgets.extend([config.grid_slaves(row=7, column=2)[0]])
-        direction_widget = ttk.Spinbox(config, values=(-1, 1), textvariable=self.tenstar_open_direction, width=12)
-        direction_widget.grid(row=7, column=3, sticky="w", padx=(5, 0), pady=4)
-        self.tenstar_widgets.append(direction_widget)
         for column in (1, 3):
             config.columnconfigure(column, weight=1)
 
@@ -381,9 +370,7 @@ class BurnerApp(tk.Tk):
             "password": self.wifi_password.get(),
             "full_travel": self.full_travel.get(),
             "pulses_per_revolution": self.pulses_per_revolution.get(),
-            "tenstar_travel_turns": self.tenstar_travel_turns.get(),
             "tenstar_minimum_speed": self.tenstar_minimum_speed.get(),
-            "tenstar_open_direction": self.tenstar_open_direction.get(),
             "reversed": self.reversed.get(),
             "commands": self.commands.get(),
         }
@@ -402,10 +389,12 @@ class BurnerApp(tk.Tk):
                 raise BurnerError("Selecciona una carpeta válida para el modelo 'otros'")
             return [(path.name, path) for path in sorted(directory.glob("*.py")) if path.name not in {"config.py", "wifi_config.py", "pulsegrid_config.py"}]
         profile = MODEL_PROFILES[model]
-        missing = [name for name in profile["files"] if not (profile["directory"] / name).is_file()]
+        sources = profile.get("sources", {})
+        paths = [(name, sources.get(name, profile["directory"] / name)) for name in profile["files"]]
+        missing = [name for name, path in paths if not path.is_file()]
         if missing:
             raise BurnerError("Faltan archivos del perfil {}: {}".format(profile["label"], ", ".join(missing)))
-        return [(name, profile["directory"] / name) for name in profile["files"]]
+        return paths
 
     def _verify_worker(self, port):
         self._log("Verificando chip en {}...".format(port))
@@ -529,15 +518,13 @@ class BurnerApp(tk.Tk):
             return [("config.py", temporary)]
         if model == "tenstar":
             pulses = int(settings["pulses_per_revolution"])
-            travel = float(settings["tenstar_travel_turns"])
             minimum_speed = int(settings["tenstar_minimum_speed"])
-            open_direction = int(settings["tenstar_open_direction"])
-            if pulses <= 0 or not 0 < travel <= 20 or not 1 <= minimum_speed <= 100 or open_direction not in (-1, 1):
-                raise BurnerError("Tenstar requiere pulsos por vuelta > 0, recorrido entre 0 y 20 vueltas, PWM minimo 1-100% y sentido ±1")
+            if pulses <= 0 or not 20 <= minimum_speed <= 35:
+                raise BurnerError("Tenstar requiere pulsos por vuelta > 0 y PWM minimo entre 20 y 35%")
             content = ("WIFI_SSID = {!r}\nWIFI_PASSWORD = {!r}\nAPI_URL = {!r}\nDEVICE_CODE = {!r}\n"
-                       "DEVICE_ID = {!r}\nPULSES_PER_REVOLUTION = {}\nTRAVEL_TURNS = {}\nOPEN_DIRECTION = {}\nMINIMUM_SPEED_PCT = {}\nCOMMANDS_ENABLED = {!r}\n").format(
+                       "DEVICE_ID = {!r}\nPULSES_PER_REVOLUTION = {}\nMINIMUM_SPEED_PCT = {}\nCOMMANDS_ENABLED = {!r}\n").format(
                            values["ssid"], values["password"], values["api_url"], values["device_code"],
-                           values["device_id"], pulses, travel, open_direction, minimum_speed, settings["commands"])
+                           values["device_id"], pulses, minimum_speed, settings["commands"])
             temporary.write_text(content, encoding="ascii")
             return [("config.py", temporary)]
         content = ("WIFI_SSID = {!r}\nWIFI_PASSWORD = {!r}\nAPI_URL = {!r}\nDEVICE_CODE = {!r}\n"

@@ -37,6 +37,8 @@
 .calibration-safety-note { margin: 14px 0 0; padding: 12px; border-left: 3px solid var(--lime); background: rgba(200,247,107,.07); }
 .calibration-progress { color: var(--muted, #a3adbb); font-size: .9rem; }
 .calibration-stage-actions .calibration-stop { border-color: #ff8c76; color: #ffad9d; }
+.calibration-jog-controls { display: grid; grid-template-columns: auto minmax(100px, 1fr) auto; gap: 8px; align-items: center; grid-column: 1 / -1; }
+.calibration-jog-controls span { color: var(--muted, #a3adbb); font-size: .82rem; text-align: center; }
 
 @media (max-width: 700px) {
   .calibration-settings,

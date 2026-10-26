@@ -74,7 +74,7 @@ function createApiKey() {
   return `pg_live_${crypto.randomBytes(24).toString('base64url')}`;
 }
 
-const firmwareFiles = new Set(['main.py', 'cloud_client.py', 'board_led.py', 'servo_calibration.py', 'cloud_loop.py', 'pulsegrid.py', 'pulsegrid_min.py', 'pulsegrid_commands.py', 'pulsegrid_ota.py', 'pulsegrid_bootstrap.py', 'webserver.py', 'webserver_min.py', 'webserver_portal.py', 'cortina.py', 'stservo.py', 'ssd1306.py', 'captive_portal.py', 'motor_curtain.py', 'boot.py', 'ota_boot.py', 'wifi_recovery.py']);
+const firmwareFiles = new Set(['main.py', 'cloud_client.py', 'board_led.py', 'servo_calibration.py', 'cloud_loop.py', 'pulsegrid.py', 'pulsegrid_min.py', 'pulsegrid_commands.py', 'pulsegrid_ota.py', 'pulsegrid_bootstrap.py', 'webserver.py', 'webserver_min.py', 'webserver_portal.py', 'cortina.py', 'stservo.py', 'ssd1306.py', 'captive_portal.py', 'motor_curtain.py', 'tenstar_motor.py', 'boot.py', 'ota_boot.py', 'wifi_recovery.py']);
 
 function firmwareVersion(version) {
   if (!/^[A-Za-z0-9._-]{1,40}$/.test(String(version || ''))) throw new Error('Invalid firmware version');
@@ -648,6 +648,17 @@ async function validateAutomationDevices(db, email, target, rule) {
 
 async function dispatchDeviceCommand(db, device, command, payload, context = {}) {
   if (device.provider !== 'tuya') {
+    if (String(command).startsWith('tenstar.') || ['curtain.open', 'curtain.close', 'curtain.move'].includes(command)) {
+      const [readings] = await db.execute('SELECT payload, created_at AS createdAt FROM telemetry WHERE device_id = ? ORDER BY created_at DESC, id DESC LIMIT 1', [device.id]);
+      const rawTelemetry = readings[0]?.payload;
+      const telemetry = typeof rawTelemetry === 'string' ? JSON.parse(rawTelemetry) : rawTelemetry;
+      if (String(telemetry?.firmwareTarget || '').toLowerCase() === 'tenstar') {
+        if (!['tenstar.stop', 'curtain.stop'].includes(command) && (!telemetry.online || !readings[0]?.createdAt || Date.now() - new Date(readings[0].createdAt).getTime() > 15000)) {
+          throw new Error('Tenstar debe estar en línea y reportar telemetría reciente para calibrar o mover');
+        }
+        validateTenstarCommand(command, payload, telemetry);
+      }
+    }
     if (['blind.configure', 'blind.jog', 'blind.markDeployed', 'blind.markRolled', 'blind.setMotorSide', 'blind.beginCalibration'].includes(command)) {
       throw new Error('Usa el asistente de calibracion segura para configurar el recorrido');
     }
@@ -701,6 +712,46 @@ async function dispatchDeviceCommand(db, device, command, payload, context = {})
     recordAutomationTroubleshooting(device.userId, troubleshooting);
     error.troubleshooting = troubleshooting;
     throw error;
+  }
+}
+
+function validateTenstarCommand(command, payload, telemetry) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('Payload Tenstar invalido');
+  const fields = {
+    'tenstar.calibration.reset': [],
+    'tenstar.calibration.setClosed': [],
+    'tenstar.calibration.referenceClosed': [],
+    'tenstar.calibration.setOpen': [],
+    'tenstar.stop': [],
+    'curtain.stop': [],
+    'tenstar.jog': ['direction', 'speedPct', 'durationMs'],
+    'tenstar.moveTurns': ['turns', 'direction', 'speedPct'],
+    'curtain.open': ['speedPct', 'speed', 'acceleration'],
+    'curtain.close': ['speedPct', 'speed', 'acceleration'],
+    'curtain.move': ['percent', 'speedPct', 'speed', 'acceleration', 'servoId', 'allServos'],
+  };
+  const allowed = fields[command];
+  if (!allowed) throw new Error('Comando no compatible con Tenstar');
+  if (Object.keys(payload).some((key) => !allowed.includes(key))) throw new Error('Payload Tenstar contiene campos no permitidos');
+  if (telemetry.moving === true && !['tenstar.stop', 'curtain.stop'].includes(command)) throw new Error('Detén el motor antes de cambiar la calibración o iniciar otro movimiento');
+  if (command === 'tenstar.calibration.setClosed' && telemetry.calibration?.calibrated === true) throw new Error('Borra primero la calibración actual antes de marcar cerrado');
+  if (command === 'tenstar.calibration.referenceClosed' && telemetry.calibration?.calibrated !== true) throw new Error('Completa primero la calibración de ambos extremos');
+  if (command === 'tenstar.calibration.setOpen' && (telemetry.calibration?.calibrated === true || telemetry.calibration?.closed_marked !== true || telemetry.positionValid !== true)) throw new Error('Marca primero el extremo cerrado en esta sesión y reinicia la calibración si ya estaba completa');
+  if (command === 'tenstar.jog') {
+    const { direction, speedPct, durationMs } = payload;
+    if (![-1, 1].includes(direction) || !Number.isInteger(speedPct) || speedPct < 20 || speedPct > 35 || !Number.isInteger(durationMs) || durationMs < 100 || durationMs > 750) throw new Error('JOG Tenstar debe ser ±1, PWM 20-35% y 100-750 ms');
+    if (speedPct < (Number(telemetry.minimumSpeedPct) || 20)) throw new Error('JOG Tenstar no puede ser inferior al PWM mínimo configurado');
+    if (telemetry.calibration?.calibrated || !telemetry.calibration?.closed_marked || telemetry.positionValid !== true) throw new Error('JOG solo está disponible después de marcar cerrado y antes de completar la calibración');
+  }
+  if (command === 'tenstar.moveTurns') {
+    if (typeof payload.turns !== 'number' || payload.turns <= 0 || payload.turns > 20 || ![-1, 1].includes(payload.direction) || !Number.isInteger(payload.speedPct) || payload.speedPct < 20 || payload.speedPct > 100) throw new Error('Movimiento Tenstar fuera de rango');
+  }
+  if (command === 'curtain.move' && (typeof payload.percent !== 'number' || payload.percent < 0 || payload.percent > 100)) throw new Error('percent debe estar entre 0 y 100');
+  if (['curtain.open', 'curtain.close', 'curtain.move'].includes(command)) {
+    const speedPct = payload.speedPct ?? (payload.speed == null ? 70 : Math.round(Number(payload.speed) / 18));
+    if (!Number.isFinite(speedPct) || speedPct < 20 || speedPct > 100) throw new Error('Velocidad Tenstar fuera de rango');
+    if (speedPct < (Number(telemetry.minimumSpeedPct) || 20)) throw new Error('Velocidad inferior al PWM mínimo configurado para Tenstar');
+    if (!telemetry.calibration?.calibrated || telemetry.positionValid !== true) throw new Error('Calibra ambos extremos y referencia el extremo cerrado antes de mover la cortina');
   }
 }
 
