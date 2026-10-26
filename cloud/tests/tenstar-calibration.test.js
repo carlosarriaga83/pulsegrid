@@ -38,7 +38,7 @@ test('Tenstar wizard is loaded and mounted only through the dedicated cloud path
     const html = fs.readFileSync(path.join(base, 'index.html'), 'utf8');
     const app = fs.readFileSync(path.join(base, 'app.js'), 'utf8');
     const wizard = fs.readFileSync(path.join(base, 'tenstar-calibration-ui.js'), 'utf8');
-    assert.match(html, /tenstar-calibration-ui\.js\?v=2/);
+    assert.match(html, /tenstar-calibration-ui\.js\?v=3/);
     assert.match(app, /mountTenstarCalibrationWizard/);
     assert.match(wizard, /tenstar\.calibration\.setClosed/);
     assert.match(wizard, /tenstar\.calibration\.begin/);
@@ -147,4 +147,14 @@ test('Tenstar offline actions are disabled and API errors remain visible', async
   $('#command-device').dispatchEvent(new f.window.Event('change'));
   assert.equal($('#tenstar-calibration-begin').disabled, true);
   assert.equal($('#tenstar-stop').disabled, true);
+});
+
+test('Tenstar with motion-isolated networking explicitly disables remote stop', (t) => {
+  const f = makeWizard({ remoteStopDuringMotion: false });
+  t.after(() => f.dom.window.close());
+  const $ = (selector) => f.window.document.querySelector(selector);
+  assert.equal($('#tenstar-stop').disabled, true);
+  assert.match($('#tenstar-stop').textContent, /no disponible/);
+  assert.match($('#calibration-status').textContent, /corte físico/);
+  assert.match($('#calibration-status').textContent, /HTTPS y portal se pausan/);
 });

@@ -118,6 +118,66 @@ class FirmwareTest(unittest.TestCase):
             self.assertIsNone(self.main.request('GET', '/api/device-commands'))
         self.assertIn('DEVICE_CODE', output.getvalue())
 
+    def test_https_is_explicitly_rejected_while_motor_is_moving(self):
+        self.motor.moving = True
+        with self.assertRaisesRegex(RuntimeError, 'HTTPS suspendido'):
+            self.main.request('POST', '/api/telemetry', {})
+
+    def test_worker_skips_all_network_work_during_motion_and_after_starting_it(self):
+        class EndIteration(BaseException):
+            pass
+
+        for already_moving in (True, False):
+            with self.subTest(already_moving=already_moving):
+                events = []
+                self.motor.moving = already_moving
+                self.main.last_poll = 0
+                self.main.last_telemetry = 0
+                self.main.ack_queue = []
+                self.main.captive_portal.Portal = lambda *_args: types.SimpleNamespace(
+                    poll=lambda **_kwargs: events.append('portal'))
+                self.main.connect_wifi = lambda: True
+                self.main.send_telemetry = lambda: self.fail('Telemetry must not run during motion')
+
+                def start_motion():
+                    events.append('command')
+                    self.motor.moving = True
+
+                def end_iteration(_milliseconds):
+                    raise EndIteration()
+
+                self.main.poll_command = start_motion
+                self.time.sleep_ms = end_iteration
+                with self.assertRaises(EndIteration):
+                    self.main.network_loop()
+                self.assertEqual(events, [] if already_moving else ['portal', 'command'])
+
+    def test_worker_resumes_telemetry_after_motion_stops(self):
+        class EndTest(BaseException):
+            pass
+
+        events = []
+        self.motor.moving = True
+        self.main.last_poll = self.now
+        self.main.last_telemetry = 0
+        self.main.captive_portal.Portal = lambda *_args: types.SimpleNamespace(
+            poll=lambda **_kwargs: events.append('portal'))
+        self.main.connect_wifi = lambda: True
+
+        def finish_motion(_milliseconds):
+            self.assertEqual(events, [])
+            self.motor.moving = False
+
+        def telemetry():
+            events.append('telemetry')
+            raise EndTest()
+
+        self.time.sleep_ms = finish_motion
+        self.main.send_telemetry = telemetry
+        with self.assertRaises(EndTest):
+            self.main.network_loop()
+        self.assertEqual(events, ['portal', 'telemetry'])
+
     def test_https_request_handles_short_writes_port_and_url_prefix(self):
         stream = SSLStream(b'HTTP/1.1 200 OK\r\nContent-Length: 16\r\n\r\n{"command":null}')
         raw = types.SimpleNamespace(settimeout=lambda _: None, connect=lambda _: None)

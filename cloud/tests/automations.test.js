@@ -415,6 +415,8 @@ test('backend requires an explicit valid Servo motor mounting side for geometric
 test('Tenstar backend restricts open-first transitions, turn steps, and movement to a valid reference', () => {
   const b = backend();
   const initial = { firmwareTarget: 'tenstar', calibrationMode: 'open-first-v1', calibration: {}, positionValid: false, moving: false };
+  assert.throws(() => b.validateTenstarCommand('curtain.stop', {}, { ...initial, remoteStopDuringMotion: false }), /corte físico/);
+  assert.throws(() => b.validateTenstarCommand('tenstar.stop', {}, { ...initial, remoteStopDuringMotion: false }), /corte físico/);
   assert.doesNotThrow(() => b.validateTenstarCommand('tenstar.calibration.begin', { atOpen: true }, initial));
   assert.throws(() => b.validateTenstarCommand('tenstar.calibration.begin', { atOpen: false }, initial), /abierta/);
   assert.throws(() => b.validateTenstarCommand('tenstar.calibration.begin', { atOpen: true }, { ...initial, calibrationMode: undefined }), /r5/);

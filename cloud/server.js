@@ -648,7 +648,7 @@ async function validateAutomationDevices(db, email, target, rule) {
 
 async function dispatchDeviceCommand(db, device, command, payload, context = {}) {
   if (device.provider !== 'tuya') {
-    if (String(command).startsWith('tenstar.') || ['curtain.open', 'curtain.close', 'curtain.move'].includes(command)) {
+    if (String(command).startsWith('tenstar.') || ['curtain.open', 'curtain.close', 'curtain.move', 'curtain.stop'].includes(command)) {
       const [readings] = await db.execute('SELECT telemetry.payload, devices.last_seen AS lastSeen FROM telemetry JOIN devices ON devices.id = telemetry.device_id WHERE telemetry.device_id = ? ORDER BY telemetry.created_at DESC, telemetry.id DESC LIMIT 1', [device.id]);
       const rawTelemetry = readings[0]?.payload;
       const telemetry = typeof rawTelemetry === 'string' ? JSON.parse(rawTelemetry) : rawTelemetry;
@@ -736,6 +736,7 @@ function validateTenstarCommand(command, payload, telemetry) {
   };
   const allowed = fields[command];
   if (!allowed) throw new Error('Comando no compatible con Tenstar');
+  if (['tenstar.stop', 'curtain.stop'].includes(command) && telemetry.remoteStopDuringMotion === false) throw new Error('Este Tenstar suspende HTTPS al girar: la parada Cloud no está disponible; usa el corte físico de alimentación');
   if (Object.keys(payload).some((key) => !allowed.includes(key))) throw new Error('Payload Tenstar contiene campos no permitidos');
   if (telemetry.moving === true && !['tenstar.stop', 'curtain.stop'].includes(command)) throw new Error('Detén el motor antes de cambiar la calibración o iniciar otro movimiento');
   const state = telemetry.calibration || {};

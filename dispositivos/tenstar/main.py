@@ -38,7 +38,7 @@ except ImportError:
     LED_ACTIVE_LOW = True
 
 FIRMWARE_TARGET = 'tenstar'
-FIRMWARE_VERSION = '2026.10.25.tenstar-r5'
+FIRMWARE_VERSION = '2026.10.25.tenstar-r6'
 try:
     from pulsegrid_firmware import VERSION as FIRMWARE_VERSION
 except (ImportError, AttributeError):
@@ -112,6 +112,8 @@ def cloud_online():
 
 def request(method, path, payload=None):
     global next_request_at, cloud_last_success, cloud_error
+    if motor.moving:
+        raise RuntimeError('HTTPS suspendido durante movimiento para no perder pulsos del encoder')
     now = time.ticks_ms()
     if next_request_at and time.ticks_diff(now, next_request_at) < 0:
         return None
@@ -152,6 +154,8 @@ def send_telemetry():
         'firmwareTarget': FIRMWARE_TARGET,
         'firmwareVersion': FIRMWARE_VERSION,
         'calibrationMode': 'open-first-v1',
+        'networkDuringMotion': False,
+        'remoteStopDuringMotion': False,
         'online': True,
         'positionPulses': pulses,
         'positionTurns': round(pulses / float(PULSES_PER_REVOLUTION), 4),
@@ -337,6 +341,10 @@ def network_loop():
     while True:
         now = time.ticks_ms()
         try:
+            # ESP32-C3 soft encoder IRQs lose edges while TLS holds the interpreter.
+            if motor.moving:
+                time.sleep_ms(10)
+                continue
             portal.poll(allow_save=not motor.moving and not restart_requested)
             if not connect_wifi():
                 time.sleep_ms(100)
@@ -353,18 +361,13 @@ def network_loop():
                             ack_queue.pop(0)
                 else:
                     break
-            with motor_lock:
-                moving = motor.moving
-            if COMMANDS_ENABLED and moving and time.ticks_diff(now, last_poll) >= COMMAND_POLL_MS:
-                result = request('GET', '/api/device-commands?deviceId={}&priorityOnly=1'.format(DEVICE_ID))
-                command = result.get('command') if result else None
-                if command:
-                    execute(command)
-                last_poll = time.ticks_ms()
-            elif not moving and time.ticks_diff(now, last_poll) >= COMMAND_POLL_MS:
+            if time.ticks_diff(now, last_poll) >= COMMAND_POLL_MS:
                 if not ack_queue:
                     poll_command()
                 last_poll = time.ticks_ms()
+            if motor.moving:
+                time.sleep_ms(10)
+                continue
             if restart_requested:
                 time.sleep_ms(250)
                 machine.reset()

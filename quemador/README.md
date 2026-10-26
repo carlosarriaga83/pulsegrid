@@ -82,6 +82,8 @@ Sin conexión Wi-Fi, Tenstar ofrece la red abierta `Pulsegrid-Tenstar-XXXX` y el
 
 Consulta `dispositivos/tenstar/README.md` antes de energizar el motor. No hay finales de carrera: calibra desde Pulsegrid Cloud con movimientos supervisados, sin buscar los topes mecánicos. Actualiza también servidor y archivos web de Cloud para el asistente desde abierto. Tras reiniciar, coloca manualmente en abierto y recupera la referencia; el recorrido guardado se conserva. La instalación OTA completa aún requiere validación en el build C3: consulta la limitación de memoria documentada antes de depender de ella.
 
+Desde Tenstar r6, la red HTTPS y el portal se pausan durante los movimientos para no perder pulsos del encoder software. **La parada remota Cloud no está disponible durante el giro**; mantén un corte físico accesible y usa pasos cortos. Los pulsos por vuelta siguen en 1980; no se compensan pérdidas de conteo cambiando la escala. Actualiza también el servidor y la interfaz para mostrar esta limitación.
+
 ### Otros
 
 Selecciona una carpeta propia. La herramienta carga todos sus archivos `.py`, excepto archivos de configuración conocidos. Para este perfil debes incluir manualmente el archivo de configuración que tu firmware necesite.

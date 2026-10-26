@@ -211,13 +211,14 @@ class CalibrationTest(unittest.TestCase):
             IN = PULL_UP = IRQ_RISING = IRQ_FALLING = 1
 
             def __init__(self, *_args):
-                pass
+                self.level = 0
+                self.irq_options = None
 
             def value(self):
-                return 0
+                return self.level
 
-            def irq(self, **_kwargs):
-                pass
+            def irq(self, **kwargs):
+                self.irq_options = kwargs
 
         irq_calls = []
         self.machine.Pin = Pin
@@ -226,6 +227,16 @@ class CalibrationTest(unittest.TestCase):
         self.machine.enable_irq = lambda state: irq_calls.append(state)
         with patch.dict(sys.modules, {'micropython': types.SimpleNamespace(alloc_emergency_exception_buf=lambda _size: None)}):
             driver = self.load('tenstar_motor').TenstarMotor()
+            for pin in (driver.pin_a, driver.pin_b):
+                self.assertEqual(pin.irq_options['handler'], driver._encoder_irq)
+            for a, b in [(0, 1), (1, 1), (1, 0), (0, 0)]:
+                driver.pin_a.level, driver.pin_b.level = a, b
+                driver._encoder_irq(None)
+            self.assertEqual(driver.position, 4)
+            for a, b in [(1, 0), (1, 1), (0, 1), (0, 0)]:
+                driver.pin_a.level, driver.pin_b.level = a, b
+                driver._encoder_irq(None)
+            self.assertEqual(driver.position, 0)
             driver.set_position(-300)
             self.assertEqual(irq_calls, ['disable', 7])
             self.assertEqual(driver.snapshot(), -300)

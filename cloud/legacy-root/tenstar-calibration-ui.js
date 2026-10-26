@@ -59,6 +59,7 @@
       const state = telemetry.calibration || {};
       const online = device?.status === 'online' && telemetry.firmwareTarget === 'tenstar';
       const supported = telemetry.calibrationMode === 'open-first-v1';
+      const remoteStop = telemetry.remoteStopDuringMotion !== false;
       const moving = telemetry.moving === true;
       const idle = online && supported && !pending && !moving;
       const active = state.active === true && telemetry.positionValid === true && !state.calibrated;
@@ -67,13 +68,15 @@
       const relative = Number(telemetry.positionTurns);
       const span = Number(state.open_span_pulses) || 0;
       get('#tenstar-calibration-detail').textContent = state.calibrated ? `Recorrido: ${(span / (Number(telemetry.pulsesPerRevolution) || 1980)).toFixed(3)} vueltas · ${span} pulsos` : `Desde abierto: ${Number.isFinite(relative) ? relative.toFixed(3) : '—'} vueltas · ${Number(telemetry.positionPulses) || 0} pulsos`;
-      status.textContent = message || 'Sigue los cuatro pasos. El motor no se mueve al iniciar ni al guardar los extremos.';
+      const safety = remoteStop ? '' : ' HTTPS y portal se pausan al girar. No hay parada remota durante el movimiento: mantén accesible el corte físico de alimentación.';
+      status.textContent = (message || 'Sigue los cuatro pasos. El motor no se mueve al iniciar ni al guardar los extremos.') + safety;
       get('#tenstar-calibration-begin').disabled = !idle;
       get('#tenstar-test-direction').disabled = !idle || !active || state.test_started === true;
       for (const selector of ['#tenstar-test-up', '#tenstar-test-down']) get(selector).disabled = !idle || !active || !state.test_started || confirmed;
       for (const selector of ['#tenstar-step-up', '#tenstar-step-down', '#tenstar-calibration-turns', '#tenstar-mark-closed']) get(selector).disabled = !idle || !active || !confirmed;
       get('#tenstar-reference-open').disabled = !idle || !state.calibrated;
-      get('#tenstar-stop').disabled = !online;
+      get('#tenstar-stop').disabled = !online || !remoteStop;
+      get('#tenstar-stop').textContent = remoteStop ? 'Detener motor' : 'Parada remota no disponible · usa corte físico';
     }
     function bind(selector, name, payload = () => ({}), prompt = '') {
       get(selector).addEventListener('click', async () => {
@@ -83,7 +86,7 @@
       });
     }
     bind('#tenstar-calibration-begin', 'tenstar.calibration.begin', () => ({ atOpen: true }), 'Confirma que la cortina está completamente abierta. Se borra el recorrido anterior y se fija este origen sin mover el motor.');
-    bind('#tenstar-test-direction', 'tenstar.calibration.testDirection', () => ({}), 'Se moverá 0,05 vueltas para comprobar el sentido. Vigila el mecanismo y detén si se acerca al tope.');
+    bind('#tenstar-test-direction', 'tenstar.calibration.testDirection', () => ({}), 'Se moverá 0,05 vueltas para comprobar el sentido. Vigila el mecanismo y mantén accesible el corte físico de alimentación.');
     bind('#tenstar-test-up', 'tenstar.calibration.confirmDirection', () => ({ movement: 'up' }));
     bind('#tenstar-test-down', 'tenstar.calibration.confirmDirection', () => ({ movement: 'down' }));
     for (const [selector, direction] of [['#tenstar-step-up', 'up'], ['#tenstar-step-down', 'down']]) {

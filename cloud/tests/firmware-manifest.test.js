@@ -46,7 +46,9 @@ test('Tenstar firmware limits calibrated travel and uses Pulsegrid device comman
   assert.match(calibration, /state\['open_direction'\] = -state\['close_direction'\]/);
   assert.match(calibration, /motor\.move_turns\(0\.05, 1/);
   assert.doesNotMatch(main, /TRAVEL_TURNS|OPEN_DIRECTION|tenstar\.zero/);
-  assert.match(main, /priorityOnly=1/);
+  assert.match(main, /'networkDuringMotion': False/);
+  assert.match(main, /'remoteStopDuringMotion': False/);
+  assert.match(main, /HTTPS suspendido durante movimiento/);
   assert.match(main, /ack_queue.append\(\(pending_motion_command, 'succeeded', None\)\)/);
   assert.match(motor, /motion_timeout_ms/);
   assert.match(motor, /Pin\(in1_pin\), freq=1000/);
