@@ -39,12 +39,12 @@ except ImportError:
     LED_ACTIVE_LOW = True
 
 FIRMWARE_TARGET = 'tenstar'
-FIRMWARE_VERSION = '2026.10.26.tenstar-r7'
+FIRMWARE_VERSION = '2026.10.26.tenstar-r8'
 try:
     from pulsegrid_firmware import VERSION as FIRMWARE_VERSION
 except (ImportError, AttributeError):
     pass
-FIRMWARE_FILES = ('boot.py', 'main.py', 'tenstar_motor.py', 'ota_boot.py', 'pulsegrid_ota.py', 'board_led.py', 'captive_portal.py', 'wifi_recovery.py', 'tenstar_http.py', 'tenstar_calibration.py', 'tenstar_state.py')
+FIRMWARE_FILES = ('boot.py', 'main.py', 'tenstar_motor.py', 'ota_boot.py', 'pulsegrid_ota.py', 'board_led.py', 'captive_portal.py', 'wifi_recovery.py', 'tenstar_http.py', 'tenstar_calibration.py', 'tenstar_state.py', 'tenstar_loop.py')
 CALIBRATION_FILE = 'tenstar_calibration.json'
 COMMAND_POLL_MS = 1000
 TELEMETRY_MS = 2000
@@ -62,6 +62,9 @@ wifi_connect_started = None
 wifi_was_connected = False
 cloud_last_success = None
 cloud_error = None
+cloud_requests_ok = 0
+cloud_requests_failed = 0
+cloud_report_at = time.ticks_ms()
 recovery_mode = False
 worker_started = False
 boot_started_at = time.ticks_ms()
@@ -125,6 +128,7 @@ def cloud_online():
 
 def request(method, path, payload=None):
     global next_request_at, cloud_last_success, cloud_error
+    global cloud_requests_ok, cloud_requests_failed, cloud_report_at
     if motor.moving:
         raise RuntimeError('HTTPS suspendido durante movimiento para no perder pulsos del encoder')
     now = time.ticks_ms()
@@ -135,13 +139,18 @@ def request(method, path, payload=None):
             raise ValueError('Falta DEVICE_CODE o DEVICE_ID; generar identidad con Quemador y registrar en Cloud')
         gc.collect()
         result = tenstar_http.request(API_URL, DEVICE_CODE, method, path, payload, REQUEST_TIMEOUT)
+        cloud_requests_ok += 1
         if cloud_last_success is None or cloud_error:
             print('Cloud conectado: {} · {}'.format(DEVICE_ID, API_URL))
         cloud_last_success = time.ticks_ms()
         cloud_error = None
         next_request_at = 0
+        if time.ticks_diff(cloud_last_success, cloud_report_at) >= 60000:
+            print('Cloud diagnostico: {} solicitudes OK, {} fallos'.format(cloud_requests_ok, cloud_requests_failed))
+            cloud_report_at = cloud_last_success
         return result
     except Exception as error:
+        cloud_requests_failed += 1
         cloud_last_success = None
         cloud_error = str(error)
         print('Cloud {} {} fallo en {}'.format(method, path.split('?', 1)[0], cloud_error))
@@ -157,11 +166,15 @@ def acknowledge(command_id, status, error=None):
     return bool(result and result.get('ok'))
 
 
+def queue_ack(command_id, status, error=None):
+    ack_queue.append((command_id, status, str(error) if error is not None else None))
+
+
 def send_telemetry():
     pulses = motor.snapshot()
     span = calibration['open_span_pulses']
     position = max(0, min(100, round((pulses * calibration['open_direction'] / float(span)) * 100))) if span > 0 else None
-    request('POST', '/api/telemetry', {
+    return request('POST', '/api/telemetry', {
         'deviceId': DEVICE_ID,
         'kind': 'curtain',
         'firmwareTarget': FIRMWARE_TARGET,
@@ -211,8 +224,8 @@ def execute(command):
             except OSError:
                 board_led.set_enabled(previous)
                 raise
-            send_telemetry()
-            acknowledge(command_id, 'succeeded')
+            last_telemetry = 0
+            queue_ack(command_id, 'succeeded')
         elif name in ('tenstar.stop', 'curtain.stop'):
             if payload:
                 raise ValueError('El comando stop no recibe payload')
@@ -222,9 +235,9 @@ def execute(command):
                 pending_motion_command = None
                 save_calibration()
             if interrupted is not None:
-                acknowledge(interrupted, 'failed', 'Movimiento detenido por comando de parada')
-            send_telemetry()
-            acknowledge(command_id, 'succeeded')
+                queue_ack(interrupted, 'failed', 'Movimiento detenido por comando de parada')
+            last_telemetry = 0
+            queue_ack(command_id, 'succeeded')
         elif str(name).startswith('tenstar.calibration.'):
             with motor_lock:
                 position_valid = tenstar_calibration.handle(name, payload, motor, calibration, PULSES_PER_REVOLUTION, MINIMUM_SPEED_PCT, position_valid, prepare_motion)
@@ -240,8 +253,7 @@ def execute(command):
                         raise
                 last_telemetry = 0
             if not started_motion:
-                send_telemetry()
-                acknowledge(command_id, 'succeeded')
+                queue_ack(command_id, 'succeeded')
         elif name == 'tenstar.moveTurns':
             if set(payload) - {'turns', 'direction', 'speedPct'}:
                 raise ValueError('Payload tenstar.moveTurns contiene campos desconocidos')
@@ -284,7 +296,7 @@ def execute(command):
             target_pulses = int(round(percent * calibration['open_span_pulses'] / 100.0)) * calibration['open_direction']
             delta_pulses = target_pulses - current_pulses
             if abs(delta_pulses) <= 3:
-                acknowledge(command_id, 'succeeded')
+                queue_ack(command_id, 'succeeded')
             else:
                 turns = abs(delta_pulses) / float(PULSES_PER_REVOLUTION)
                 direction = 1 if delta_pulses > 0 else -1
@@ -311,12 +323,12 @@ def execute(command):
                     raise ValueError('Deten el motor antes de actualizar el firmware')
             import pulsegrid_ota
             pulsegrid_ota.update(API_URL, DEVICE_CODE, DEVICE_ID, version, FIRMWARE_TARGET, FIRMWARE_FILES)
-            acknowledge(command_id, 'succeeded')
+            queue_ack(command_id, 'succeeded')
             restart_requested = True
         else:
             raise ValueError('Comando no compatible con Tenstar: ' + str(name))
     except Exception as error:
-        acknowledge(command_id, 'failed', error)
+        queue_ack(command_id, 'failed', error)
 
 
 def poll_command():
@@ -363,125 +375,48 @@ def connect_wifi():
     return False
 
 
-def network_loop():
-    global last_poll, last_telemetry, worker_started
-    print('Tenstar: worker de red iniciado')
+def start_network():
+    global worker_started
+    print('Tenstar: worker de red iniciado en hilo principal')
     try:
         portal = captive_portal.Portal(wlan, recovery_mode)
     except Exception as error:
         print('ERROR: no se pudo iniciar el portal Tenstar:', error)
         raise
     worker_started = True
-    while True:
-        now = time.ticks_ms()
-        try:
-            # ESP32-C3 soft encoder IRQs lose edges while TLS holds the interpreter.
-            if motor.moving:
-                time.sleep_ms(10)
-                continue
-            portal.poll(allow_save=not motor.moving and not restart_requested)
-            if not connect_wifi():
-                time.sleep_ms(100)
-                continue
-            if ack_queue and last_telemetry == 0:
-                send_telemetry()
-                last_telemetry = time.ticks_ms()
-            while ack_queue:
-                with motor_lock:
-                    command_id, status, error = ack_queue[0]
-                if acknowledge(command_id, status, error):
-                    with motor_lock:
-                        if ack_queue and ack_queue[0][0] == command_id:
-                            ack_queue.pop(0)
-                else:
-                    break
-            if time.ticks_diff(now, last_poll) >= COMMAND_POLL_MS:
-                if not ack_queue:
-                    poll_command()
-                last_poll = time.ticks_ms()
-            if motor.moving:
-                time.sleep_ms(10)
-                continue
-            if restart_requested:
-                time.sleep_ms(250)
-                machine.reset()
-            if time.ticks_diff(now, last_telemetry) >= TELEMETRY_MS:
-                send_telemetry()
-                last_telemetry = time.ticks_ms()
-        except Exception as error:
-            print('Pulsegrid worker:', error)
-        time.sleep_ms(50)
+    return portal
+
+
+def network_step(portal):
+    global last_poll, last_telemetry
+    # TLS runs on the main thread, and never while the encoder is tracking motion.
+    if motor.moving:
+        return
+    portal.poll(allow_save=not restart_requested)
+    if not connect_wifi():
+        return
+    if last_telemetry == 0 or time.ticks_diff(time.ticks_ms(), last_telemetry) >= TELEMETRY_MS:
+        if send_telemetry():
+            last_telemetry = time.ticks_ms()
+        else:
+            return
+    while ack_queue:
+        command_id, status, error = ack_queue[0]
+        if not acknowledge(command_id, status, error):
+            return
+        ack_queue.pop(0)
+    if restart_requested:
+        time.sleep_ms(250)
+        machine.reset()
+        return
+    if time.ticks_diff(time.ticks_ms(), last_poll) >= COMMAND_POLL_MS:
+        poll_command()
+        last_poll = time.ticks_ms()
 
 
 def main():
-    global pending_motion_command, position_valid, recovery_mode, last_telemetry
-    board_led.init(LED_PIN, LED_ACTIVE_LOW)
-    load_calibration()
-    reset_cause = machine.reset_cause()
-    count_reset = reset_cause in (getattr(machine, 'PWRON_RESET', 1), getattr(machine, 'HARD_RESET', 2))
-    recovery_mode = wifi_recovery.register_boot(count_reset)
-    print('Tenstar: reset {} · recuperacion Wi-Fi {}'.format(reset_cause, recovery_mode))
-    if recovery_mode or not WIFI_SSID:
-        wlan.active(False)
-    else:
-        connect_wifi()
-    if not WIFI_SSID:
-        print('Wi-Fi sin configurar: usa el portal Tenstar en http://192.168.4.1/')
-    if not DEVICE_ID or not DEVICE_CODE:
-        print('Cloud pendiente: falta DEVICE_ID o DEVICE_CODE; generar con Quemador y registrar en Cloud')
-    if not COMMANDS_ENABLED:
-        print('Cloud: comandos deshabilitados; solo se enviara telemetria')
-    try:
-        import ota_boot
-        ota_boot.confirm()
-    except ImportError:
-        ota_boot = None
-    print('Tenstar Pulsegrid iniciado · {} · firmware {}'.format(DEVICE_ID, FIRMWARE_VERSION))
-    print('Cloud destino: {} · LED GPIO{} activo {}'.format(API_URL, LED_PIN, 'bajo' if LED_ACTIVE_LOW else 'alto'))
-    _thread.stack_size(16384)
-    _thread.start_new_thread(network_loop, ())
-    recovery_counter_cleared = False
-    worker_warning = False
-    while True:
-        try:
-            if not recovery_mode and not recovery_counter_cleared and time.ticks_diff(time.ticks_ms(), boot_started_at) >= wifi_recovery.STABLE_BOOT_MS:
-                wifi_recovery.clear_counter()
-                recovery_counter_cleared = True
-            if not worker_started and not worker_warning and time.ticks_diff(time.ticks_ms(), boot_started_at) >= 5000:
-                print('ERROR: worker de red no inicio; revisa los errores de portal/firmware en Thonny')
-                worker_warning = True
-            if recovery_mode:
-                board_led.set_status('recovery')
-            elif motor.moving:
-                board_led.set_status('moving')
-            elif not WIFI_SSID or not DEVICE_CODE or not DEVICE_ID:
-                board_led.set_status('provisioning')
-            elif cloud_online():
-                board_led.set_status('online')
-            elif not wlan.isconnected():
-                board_led.set_status('connecting')
-            else:
-                board_led.set_status('offline')
-            if ota_boot:
-                ota_boot.feed()
-            with motor_lock:
-                completed = motor.update()
-                if completed is True and pending_motion_command is not None:
-                    save_calibration()
-                    ack_queue.append((pending_motion_command, 'succeeded', None))
-                    pending_motion_command = None
-                    last_telemetry = 0
-        except Exception as error:
-            print('Tenstar control local:', error)
-            with motor_lock:
-                motor.stop()
-                position_valid = False
-                failed_command = pending_motion_command
-                pending_motion_command = None
-            if failed_command is not None:
-                with motor_lock:
-                    ack_queue.append((failed_command, 'failed', str(error)))
-        time.sleep_ms(10)
+    import tenstar_loop
+    tenstar_loop.run(globals())
 
 
 if __name__ == '__main__':

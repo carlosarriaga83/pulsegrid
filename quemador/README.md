@@ -86,6 +86,8 @@ Desde Tenstar r6, la red HTTPS y el portal se pausan durante los movimientos par
 
 Tenstar r7 incluye `tenstar_state.py`: conserva recorrido, posición detenida y preferencia de LED con dos registros verificados. Tras un corte durante el movimiento conserva la calibración pero solicita confirmar un extremo manualmente. No borres `tenstar_calibration.json`, `.0`, `.1` ni `.moving` al actualizar. El asistente vertical muestra pasos completados y termina cerrado; el siguiente movimiento debe ser abrir o mover. El LED GPIO8 puede habilitarse/deshabilitarse desde Cloud.
 
+Tenstar r8 añade `tenstar_loop.py` al perfil USB y OTA para ejecutar HTTPS en el hilo principal, solo con el motor detenido. No actualices únicamente `main.py`. Las confirmaciones fallidas se reintentan antes de consultar nuevas órdenes y después de publicar la posición actualizada. El asistente conserva su columna original del layout, mantiene los pasos internos verticales e indica cuándo espera la confirmación del movimiento.
+
 ### Otros
 
 Selecciona una carpeta propia. La herramienta carga todos sus archivos `.py`, excepto archivos de configuración conocidos. Para este perfil debes incluir manualmente el archivo de configuración que tu firmware necesite.

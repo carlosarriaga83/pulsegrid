@@ -26,6 +26,7 @@
             <div class="calibration-jog-controls"><button class="secondary-button" id="tenstar-test-up" type="button">El paso subió ↑</button><button class="secondary-button" id="tenstar-test-down" type="button">El paso bajó ↓</button></div>
           </li>
           <li data-tenstar-step="3"><h3>3. Llevar hasta cerrado <span class="tenstar-step-check" role="status"></span></h3>
+            <p id="tenstar-step-help" role="status"></p>
             <label>Vueltas por movimiento<input id="tenstar-calibration-turns" type="number" min="0.01" max="20" step="0.01" value="0.25" inputmode="decimal"></label>
             <div class="calibration-jog-controls"><button class="secondary-button" id="tenstar-step-up" type="button">Subir ↑</button><button class="secondary-button" id="tenstar-step-down" type="button">Bajar ↓</button></div>
           </li>
@@ -66,7 +67,7 @@
       update();
       try {
         const result = await apiRequest('commands', { method: 'POST', body: JSON.stringify({ deviceId: device.id, command: name, payload }) });
-        await waitForCalibrationCommand(result.commandId);
+        await waitForCalibrationCommand(result.commandId, 75000);
         await loadDevices();
         message = 'Comando confirmado. La posición se actualizará con la telemetría.';
         showToast('Calibración Tenstar actualizada');
@@ -86,6 +87,7 @@
       const active = state.active === true && telemetry.positionValid === true && !state.calibrated;
       const confirmed = state.direction_confirmed === true;
       const calibrated = state.calibrated === true;
+      get('#tenstar-step-help').textContent = pending ? 'Orden enviada: esperando fin del movimiento y confirmación del ESP. No pulses de nuevo.' : !online ? 'Conecta el Tenstar para mover.' : !supported ? 'Actualiza el firmware Tenstar para calibrar desde abierto.' : calibrated ? (telemetry.positionValid === true ? 'Recorrido guardado; usa Abrir o Mover.' : 'Recorrido guardado; recupera la referencia con los botones de abajo.') : !active ? 'Completa primero el paso 1 para fijar el origen abierto.' : !confirmed ? 'Completa el paso 2 e indica si la prueba subió o bajó.' : moving ? 'Movimiento en curso; espera a que termine.' : 'Introduce las vueltas y pulsa Subir o Bajar. La posición se publica al terminar.';
       const ready = calibrated && telemetry.positionValid === true;
       const done = [state.open_marked === true, confirmed, calibrated, calibrated];
       for (let index = 0; index < done.length; index += 1) {

@@ -33,6 +33,7 @@ test('Tenstar firmware limits calibrated travel and uses Pulsegrid device comman
   const main = fs.readFileSync(path.join(root, 'dispositivos/tenstar/main.py'), 'utf8');
   const motor = fs.readFileSync(path.join(root, 'dispositivos/tenstar/tenstar_motor.py'), 'utf8');
   const calibration = fs.readFileSync(path.join(root, 'dispositivos/tenstar/tenstar_calibration.py'), 'utf8');
+  const loop = fs.readFileSync(path.join(root, 'dispositivos/tenstar/tenstar_loop.py'), 'utf8');
   const burnerProfile = burner.slice(burner.indexOf('"tenstar": {'));
   assert.match(burnerProfile, /"sources": \{"ota_boot\.py": SERVO_DIR \/ "ota_boot\.py", "pulsegrid_ota\.py": SERVO_DIR \/ "pulsegrid_ota\.py", "wifi_recovery\.py": SERVO_DIR \/ "wifi_recovery\.py"\}/);
   assert.match(burner, /sources\.get\(name, profile\["directory"\] \/ name\)/);
@@ -49,15 +50,15 @@ test('Tenstar firmware limits calibrated travel and uses Pulsegrid device comman
   assert.match(main, /'networkDuringMotion': False/);
   assert.match(main, /'remoteStopDuringMotion': False/);
   assert.match(main, /HTTPS suspendido durante movimiento/);
-  assert.match(main, /ack_queue.append\(\(pending_motion_command, 'succeeded', None\)\)/);
+  assert.match(loop, /app\['queue_ack'\]\(app\['pending_motion_command'\], 'succeeded'\)/);
   assert.match(motor, /motion_timeout_ms/);
   assert.match(motor, /Pin\(in1_pin\), freq=1000/);
-  assert.match(burnerProfile, /"files": \("boot.py", "main.py", "tenstar_motor.py", "ota_boot.py", "pulsegrid_ota.py", "board_led.py", "captive_portal.py", "wifi_recovery.py", "tenstar_http.py", "tenstar_calibration.py", "tenstar_state.py"\)/);
+  assert.match(burnerProfile, /"files": \("boot.py", "main.py", "tenstar_motor.py", "ota_boot.py", "pulsegrid_ota.py", "board_led.py", "captive_portal.py", "wifi_recovery.py", "tenstar_http.py", "tenstar_calibration.py", "tenstar_state.py", "tenstar_loop.py"\)/);
   assert.match(main, /import tenstar_http/);
   assert.match(main, /tenstar_http\.request\(API_URL, DEVICE_CODE, method, path, payload, REQUEST_TIMEOUT\)/);
   assert.match(main, /pulsegrid_ota\.update\(API_URL, DEVICE_CODE, DEVICE_ID, version, FIRMWARE_TARGET, FIRMWARE_FILES\)/);
-  assert.match(main, /ota_boot\.confirm\(\)/);
-  assert.match(main, /ota_boot\.feed\(\)/);
+  assert.match(loop, /ota_boot\.confirm\(\)/);
+  assert.match(loop, /ota_boot\.feed\(\)/);
   const boot = fs.readFileSync(path.join(root, 'dispositivos/tenstar/boot.py'), 'utf8');
   assert.match(boot, /ota_boot\.run\(\)/);
   const server = fs.readFileSync(path.join(root, 'cloud/server.js'), 'utf8');
@@ -65,6 +66,7 @@ test('Tenstar firmware limits calibrated travel and uses Pulsegrid device comman
   assert.match(server, /'tenstar_http\.py'/);
   assert.match(server, /'tenstar_calibration\.py'/);
   assert.match(server, /'tenstar_state\.py'/);
+  assert.match(server, /'tenstar_loop\.py'/);
 });
 
 test('persistent calibration/state files are never OTA payloads or burner cleanup targets', () => {

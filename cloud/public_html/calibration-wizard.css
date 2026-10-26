@@ -71,7 +71,6 @@
 
 .history-row .history-details { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; line-height: 1.45; overflow-wrap: anywhere; }
 .tenstar-calibration-steps { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; padding: 0; list-style: none; }
-.command-calibration-layout > [data-calibration-model="tenstar"] { grid-column: 1 / -1; }
 .tenstar-calibration-steps > li { display: grid; gap: 10px; padding: 16px; border: 1px solid var(--line, #52606d); border-radius: 12px; }
 .tenstar-calibration-steps > li[data-complete="true"] { border-color: var(--lime, #c8f76b); }
 .tenstar-calibration-steps h3 { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin: 0; }

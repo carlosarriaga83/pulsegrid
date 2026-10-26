@@ -12,6 +12,7 @@ function makeWizard(telemetry = {}) {
   const { window } = dom;
   const device = { id: 'T1', status: 'online', telemetry };
   const requests = [];
+  const waits = [];
   const context = {
     $: (selector, parent = window.document) => parent.querySelector(selector),
     apiRequest: async (endpoint, options) => {
@@ -19,7 +20,7 @@ function makeWizard(telemetry = {}) {
       return { commandId: requests.length };
     },
     loadDevices: async () => {},
-    waitForCalibrationCommand: async () => {},
+    waitForCalibrationCommand: async (...args) => { waits.push(args); },
     showToast: () => {},
     renderIcons: () => {},
     devices: () => [device],
@@ -29,7 +30,7 @@ function makeWizard(telemetry = {}) {
   const source = fs.readFileSync(path.join(root, 'public/tenstar-calibration-ui.js'), 'utf8');
   vm.runInContext(source, dom.getInternalVMContext());
   window.mountTenstarCalibrationWizard(context);
-  return { dom, window, requests, device, context };
+  return { dom, window, requests, waits, device, context };
 }
 
 test('Tenstar wizard is loaded and mounted only through the dedicated cloud path', () => {
@@ -38,7 +39,10 @@ test('Tenstar wizard is loaded and mounted only through the dedicated cloud path
     const html = fs.readFileSync(path.join(base, 'index.html'), 'utf8');
     const app = fs.readFileSync(path.join(base, 'app.js'), 'utf8');
     const wizard = fs.readFileSync(path.join(base, 'tenstar-calibration-ui.js'), 'utf8');
-    assert.match(html, /tenstar-calibration-ui\.js\?v=4/);
+    assert.match(html, /tenstar-calibration-ui\.js\?v=5/);
+    assert.match(html, /calibration-wizard\.css\?v=7/);
+    const css = fs.readFileSync(path.join(base, 'calibration-wizard.css'), 'utf8');
+    assert.doesNotMatch(css, /\.command-calibration-layout\s*>\s*\[data-calibration-model="tenstar"\]\s*\{\s*grid-column:\s*1\s*\/\s*-1/);
     assert.match(app, /mountTenstarCalibrationWizard/);
     assert.match(wizard, /tenstar\.calibration\.setClosed/);
     assert.match(wizard, /tenstar\.calibration\.begin/);
@@ -67,6 +71,7 @@ test('Tenstar wizard starts in open and gates test, direction confirmation, step
   $('#command-device').dispatchEvent(new f.window.Event('change'));
   assert.equal($('#tenstar-step-down').disabled, false);
   assert.equal($('#tenstar-mark-closed').disabled, false);
+  assert.match($('#tenstar-step-help').textContent, /Introduce las vueltas/);
 });
 
 test('Tenstar calibration actions dispatch exact turn counts and physical direction', async (t) => {
@@ -81,6 +86,7 @@ test('Tenstar calibration actions dispatch exact turn counts and physical direct
   $('#tenstar-step-up').click();
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(f.requests[1].options.body.payload, { direction: 'up', turns: 1.75 });
+  assert.deepEqual(f.waits, [[1, 75000], [2, 75000]]);
 });
 
 test('Tenstar begin confirms open, reset requires confirmation and old firmware is gated', async (t) => {

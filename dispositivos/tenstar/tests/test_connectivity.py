@@ -88,6 +88,8 @@ class FirmwareTest(unittest.TestCase):
         self.addCleanup(lambda: sys.modules.pop('tenstar_http', None))
         self.addCleanup(lambda: sys.modules.pop('tenstar_calibration', None))
         self.main = types.ModuleType('tenstar_test_main')
+        sys.modules['tenstar_loop'] = self.load('tenstar_loop')
+        self.addCleanup(lambda: sys.modules.pop('tenstar_loop', None))
         source = (ROOT / 'main.py').read_text(encoding='utf-8')
         exec(compile(source, str(ROOT / 'main.py'), 'exec'), self.main.__dict__)
 
@@ -126,19 +128,15 @@ class FirmwareTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'HTTPS suspendido'):
             self.main.request('POST', '/api/telemetry', {})
 
-    def test_worker_skips_all_network_work_during_motion_and_after_starting_it(self):
-        class EndIteration(BaseException):
-            pass
-
+    def test_network_step_skips_all_network_work_during_motion_and_after_starting_it(self):
         for already_moving in (True, False):
             with self.subTest(already_moving=already_moving):
                 events = []
                 self.motor.moving = already_moving
                 self.main.last_poll = 0
-                self.main.last_telemetry = 0
+                self.main.last_telemetry = self.now
                 self.main.ack_queue = []
-                self.main.captive_portal.Portal = lambda *_args: types.SimpleNamespace(
-                    poll=lambda **_kwargs: events.append('portal'))
+                portal = types.SimpleNamespace(poll=lambda **_kwargs: events.append('portal'))
                 self.main.connect_wifi = lambda: True
                 self.main.send_telemetry = lambda: self.fail('Telemetry must not run during motion')
 
@@ -146,40 +144,55 @@ class FirmwareTest(unittest.TestCase):
                     events.append('command')
                     self.motor.moving = True
 
-                def end_iteration(_milliseconds):
-                    raise EndIteration()
-
                 self.main.poll_command = start_motion
-                self.time.sleep_ms = end_iteration
-                with self.assertRaises(EndIteration):
-                    self.main.network_loop()
+                self.main.network_step(portal)
                 self.assertEqual(events, [] if already_moving else ['portal', 'command'])
 
-    def test_worker_resumes_telemetry_after_motion_stops(self):
-        class EndTest(BaseException):
-            pass
-
+    def test_network_step_resumes_telemetry_after_motion_stops(self):
         events = []
         self.motor.moving = True
         self.main.last_poll = self.now
         self.main.last_telemetry = 0
-        self.main.captive_portal.Portal = lambda *_args: types.SimpleNamespace(
-            poll=lambda **_kwargs: events.append('portal'))
+        portal = types.SimpleNamespace(poll=lambda **_kwargs: events.append('portal'))
         self.main.connect_wifi = lambda: True
-
-        def finish_motion(_milliseconds):
-            self.assertEqual(events, [])
-            self.motor.moving = False
 
         def telemetry():
             events.append('telemetry')
-            raise EndTest()
+            return {'ok': True}
 
-        self.time.sleep_ms = finish_motion
         self.main.send_telemetry = telemetry
-        with self.assertRaises(EndTest):
-            self.main.network_loop()
+        self.main.network_step(portal)
+        self.assertEqual(events, [])
+        self.motor.moving = False
+        self.main.network_step(portal)
         self.assertEqual(events, ['portal', 'telemetry'])
+
+    def test_ack_is_retried_without_reexecuting_command_and_after_fresh_telemetry(self):
+        events = []
+        portal = types.SimpleNamespace(poll=lambda **_kwargs: None)
+        self.main.connect_wifi = lambda: True
+        self.main.poll_command = lambda: events.append('poll')
+        self.main.send_telemetry = lambda: events.append('telemetry') or {'ok': True}
+        outcomes = iter([False, True])
+        self.main.acknowledge = lambda *_args: events.append('ack') or next(outcomes)
+        self.main.queue_ack(45, 'succeeded')
+        self.main.network_step(portal)
+        self.assertEqual(events, ['telemetry', 'ack'])
+        self.assertEqual(self.main.ack_queue, [(45, 'succeeded', None)])
+        self.main.network_step(portal)
+        self.assertEqual(events, ['telemetry', 'ack', 'ack', 'poll'])
+        self.assertEqual(self.main.ack_queue, [])
+
+    def test_failed_state_publish_keeps_ack_and_does_not_fetch_next_command(self):
+        portal = types.SimpleNamespace(poll=lambda **_kwargs: None)
+        self.main.connect_wifi = lambda: True
+        self.main.send_telemetry = lambda: None
+        self.main.acknowledge = lambda *_args: self.fail('ACK before publishing state')
+        self.main.poll_command = lambda: self.fail('Fetch before confirming command')
+        self.main.queue_ack(45, 'succeeded')
+        self.main.network_step(portal)
+        self.assertEqual(self.main.last_telemetry, 0)
+        self.assertEqual(len(self.main.ack_queue), 1)
 
     def test_https_request_handles_short_writes_port_and_url_prefix(self):
         stream = SSLStream(b'HTTP/1.1 200 OK\r\nContent-Length: 16\r\n\r\n{"command":null}')
@@ -365,7 +378,7 @@ class FirmwareTest(unittest.TestCase):
             self.assertEqual(saved['WIFI_SSID'], 'New Wi-Fi')
             self.assertEqual(saved['DEVICE_ID'], 'keep-id')
 
-    def test_startup_without_wifi_keeps_motor_loop_and_launches_portal_worker(self):
+    def test_startup_without_wifi_keeps_cooperative_control_and_portal(self):
         class EndLoop(BaseException):
             pass
 
@@ -375,9 +388,9 @@ class FirmwareTest(unittest.TestCase):
         self.machine.reset_cause = lambda: 1
         self.main.wifi_recovery = types.SimpleNamespace(register_boot=lambda _: False, STABLE_BOOT_MS=30000)
         self.time.sleep_ms = lambda _: (_ for _ in ()).throw(EndLoop())
-        workers = []
-        self.main._thread = types.SimpleNamespace(
-            stack_size=lambda _: None, start_new_thread=lambda function, args: workers.append(function))
+        portal_polls = []
+        self.main.captive_portal.Portal = lambda *_args: types.SimpleNamespace(
+            poll=lambda **_kwargs: portal_polls.append(True))
         updates = []
         self.motor.update = lambda: updates.append(True)
         output = io.StringIO()
@@ -385,7 +398,7 @@ class FirmwareTest(unittest.TestCase):
             with contextlib.redirect_stdout(output):
                 with self.assertRaises(EndLoop):
                     self.main.main()
-        self.assertEqual(workers, [self.main.network_loop])
+        self.assertEqual(portal_polls, [True])
         self.assertEqual(updates, [True])
         self.assertEqual(self.led._status, 'provisioning')
         self.assertIn('http://192.168.4.1/', output.getvalue())

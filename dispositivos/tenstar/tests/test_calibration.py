@@ -54,16 +54,23 @@ class CalibrationTest(unittest.TestCase):
         self.motor = Motor()
         self.main.motor = self.motor
         self.acks = []
-        self.main.acknowledge = lambda *args: self.acks.append(args)
+        self.main.acknowledge = lambda *args: self.acks.append(args) or True
         self.telemetry = []
-        self.main.send_telemetry = lambda: self.telemetry.append(dict(self.main.calibration))
+        self.main.send_telemetry = lambda: self.telemetry.append(dict(self.main.calibration)) or {'ok': True}
+        self.main.connect_wifi = lambda: True
+        self.main.poll_command = lambda: None
+        self.portal_stub = types.SimpleNamespace(poll=lambda **_kwargs: None)
         self.sequence = 0
 
     def command(self, name, payload=None, success=True):
         self.sequence += 1
         self.main.execute({'id': self.sequence, 'name': name, 'payload': payload or {}})
+        if not self.motor.moving:
+            self.main.network_step(self.portal_stub)
         if success and self.motor.moving:
             self.assertEqual(self.main.pending_motion_command, self.sequence)
+        elif self.motor.moving:
+            self.assertEqual(self.main.ack_queue[-1][1], 'failed')
         else:
             self.assertEqual(self.acks[-1][1], 'succeeded' if success else 'failed', self.acks[-1])
 
@@ -123,6 +130,40 @@ class CalibrationTest(unittest.TestCase):
         self.assertEqual(self.motor.target_position, 100)
         self.command('curtain.close')
         self.assertEqual(self.motor.target, 0)
+
+    def test_step_both_directions_saves_completed_position_before_sending_ack(self):
+        self.begin()
+        self.direction('down')
+        loop = sys.modules['tenstar_loop']
+        for direction, expected in [('down', 594), ('up', 99)]:
+            with self.subTest(direction=direction):
+                self.command('tenstar.calibration.step', {'turns': 0.25, 'direction': direction})
+                command_id = self.sequence
+                def finish():
+                    self.motor.complete()
+                    return True
+                self.motor.update = finish
+                loop.control_step(vars(self.main))
+                saved, trusted = self.main.tenstar_state.load(self.main.CALIBRATION_FILE)
+                self.assertTrue(trusted)
+                self.assertEqual(saved['position_pulses'], expected)
+                self.assertEqual(self.main.ack_queue[-1], (command_id, 'succeeded', None))
+                self.main.network_step(self.portal_stub)
+                self.assertEqual(self.acks[-1], (command_id, 'succeeded', None))
+                self.assertIsNone(self.main.pending_motion_command)
+
+    def test_failed_completion_save_does_not_queue_success(self):
+        self.begin()
+        self.direction('down')
+        self.command('tenstar.calibration.step', {'turns': 0.25, 'direction': 'down'})
+        self.motor.update = lambda: self.motor.complete() or True
+        def fail_save():
+            raise OSError('disk full')
+        self.main.save_calibration = fail_save
+        with self.assertRaises(OSError):
+            sys.modules['tenstar_loop'].control_step(vars(self.main))
+        self.assertFalse(any(ack[0] == self.sequence for ack in self.main.ack_queue))
+        self.assertTrue(self.main.tenstar_state.exists(self.main.CALIBRATION_FILE + '.moving'))
 
     def test_cut_during_motion_preserves_span_but_requires_manual_reference(self):
         span = self.calibrated('up')
