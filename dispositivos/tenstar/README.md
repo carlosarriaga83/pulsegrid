@@ -73,6 +73,8 @@ Carga también `tenstar_http.py` al actualizar por USB, y reinicia para liberar 
 
 La descarga/activación OTA completa no fue validada en esa prueba. Importar adicionalmente el módulo compartido `pulsegrid_ota` durante una prueba aislada volvió a reducir el heap interno y a provocar `ENOMEM`; esa ruta requiere validación y optimización adicional antes de considerarla comprobada en este build. No es necesario cambiar MicroPython para la telemetría y el portal verificados con r4.
 
+Cloud permite publicar releases con modelo `tenstar` y solicitarlas desde **Dispositivos → menú del Tenstar → Actualizar firmware**, sin COM/USB. La interfaz selecciona la release Tenstar activa, bloquea solicitudes durante movimiento/calibración y espera telemetría con la nueva versión después del ACK/reinicio. Consulta los [pasos de publicación y límites de verificación](../../cloud/README.md#tenstar-ota). No se ha ejecutado una actualización real sobre la cortina montada; esta opción no elimina por sí sola la limitación TLS pendiente de validar.
+
 La r5 con el nuevo módulo de calibración también se cargó por COM11: aproximadamente 103 KB internos libres tras importar la aplicación, arranque normal con hilo de red, conexión Cloud autenticada, 45 segundos sin `ENOMEM` y portal LAN HTTP 200. Esta comprobación no movió el motor ni marcó extremos; el recorrido físico debe confirmarlo el usuario.
 
 ## Carga con el quemador

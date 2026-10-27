@@ -39,7 +39,7 @@ except ImportError:
     LED_ACTIVE_LOW = True
 
 FIRMWARE_TARGET = 'tenstar'
-FIRMWARE_VERSION = '2026.10.26.tenstar-r8'
+FIRMWARE_VERSION = '2026.10.26.tenstar-r9'
 try:
     from pulsegrid_firmware import VERSION as FIRMWARE_VERSION
 except (ImportError, AttributeError):

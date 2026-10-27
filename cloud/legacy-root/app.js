@@ -161,7 +161,27 @@ function ensureFirmwareBypass(form) {
   label.className = 'firmware-bypass';
   label.innerHTML = '<input id="firmware-release-bypass" type="checkbox"> Bypass: permitir nombres de archivo fuera de la lista OTA';
   input.insertAdjacentElement('afterend', label);
-  return label.querySelector('#firmware-release-bypass');
+  const bypass = label.querySelector('#firmware-release-bypass');
+  const target = form.querySelector('#firmware-release-target');
+  const help = document.createElement('p');
+  help.className = 'form-status';
+  help.dataset.firmwareHelp = '';
+  form.append(help);
+  const update = () => {
+    const tenstar = target.value === 'tenstar';
+    bypass.disabled = tenstar;
+    if (tenstar) {
+      bypass.checked = false;
+      input.accept = '.py,text/x-python';
+    }
+    help.textContent = tenstar
+      ? 'OTA Tenstar por Wi-Fi, sin COM ni USB. Sube solo archivos .py del perfil Tenstar (incluye tenstar_loop.py al actualizar main.py desde r8). No subas config.py ni el estado de calibración. Publicar no instala: después ve a Dispositivos → menú del Tenstar → Actualizar firmware. Mantén la cortina detenida y alimentación estable.'
+      : 'Publica los archivos del modelo seleccionado. Después instala desde el menú del dispositivo.';
+  };
+  target.addEventListener('change', update);
+  form.addEventListener('reset', () => window.setTimeout(update, 0));
+  update();
+  return bypass;
 }
 
 function bindFirmwareReleaseControls() {
@@ -185,7 +205,7 @@ function bindFirmwareReleaseControls() {
 }
 
 function firmwareViewMarkup() {
-  return `<section class="view" id="view-firmware"><div class="page-heading"><div><p class="eyebrow">CICLO DE VIDA</p><h1>Firmware<span class="accent-dot">.</span></h1><p class="heading-copy">Publica, inspecciona y administra las versiones MicroPython de tus dispositivos.</p></div><button class="secondary-button" id="firmware-refresh"><i data-lucide="refresh-cw"></i> Actualizar</button></div><div class="panel firmware-publish-panel"><div class="panel-heading"><div><h2>Nueva publicacion</h2><p>Los archivos permitidos se almacenan y quedan disponibles para OTA.</p></div><span class="secure-badge"><i data-lucide="shield-check"></i> Verificado</span></div><form id="firmware-release-form" class="firmware-form"><label>Version<input id="firmware-release-version" required pattern="\d{4}\.\d{2}\.\d{2}\.[A-Za-z0-9_-]+" placeholder="2026.10.11.servo-ota"></label><label>Modelo objetivo<select id="firmware-release-target"><option value="servo">Servo ESP32 (COM6)</option><option value="ga25">Motor GA25 (COM8)</option></select></label><label>What's new<input id="firmware-release-whats-new" required maxlength="280" placeholder="Protege los extremos y mejora la parada"></label><label>Archivos .py<input id="firmware-release-files" type="file" accept=".py,text/x-python" multiple required></label><button class="primary-button" type="submit"><i data-lucide="upload-cloud"></i> Publicar version</button></form><p id="firmware-release-status" class="form-status">Ninguna publicacion nueva en esta sesion.</p></div><div class="panel firmware-table-panel"><div class="panel-heading"><div><h2>Versiones publicadas</h2><p id="firmware-release-count">Consulta el historial de releases y sus archivos.</p></div></div><div class="firmware-table-wrap"><table class="firmware-table"><thead><tr><th>Version</th><th>Modelo objetivo</th><th>Tamano / checksum</th><th>Notas</th><th>Fecha</th><th>Estado</th><th aria-label="Acciones"></th></tr></thead><tbody id="firmware-release-rows"><tr><td colspan="7" class="empty-state">Cargando versiones...</td></tr></tbody></table></div></div></section>`;
+  return `<section class="view" id="view-firmware"><div class="page-heading"><div><p class="eyebrow">CICLO DE VIDA</p><h1>Firmware<span class="accent-dot">.</span></h1><p class="heading-copy">Publica, inspecciona y administra las versiones MicroPython de tus dispositivos.</p></div><button class="secondary-button" id="firmware-refresh"><i data-lucide="refresh-cw"></i> Actualizar</button></div><div class="panel firmware-publish-panel"><div class="panel-heading"><div><h2>Nueva publicacion</h2><p>Los archivos permitidos se almacenan y quedan disponibles para OTA.</p></div><span class="secure-badge"><i data-lucide="shield-check"></i> Verificado</span></div><form id="firmware-release-form" class="firmware-form"><label>Version<input id="firmware-release-version" required pattern="\\d{4}\\.\\d{2}\\.\\d{2}\\.[A-Za-z0-9_\\-]+" placeholder="2026.10.11.servo-ota"></label><label>Modelo objetivo<select id="firmware-release-target"><option value="servo">Servo ESP32 (COM6)</option><option value="ga25">Motor GA25 (COM8)</option><option value="tenstar">Tenstar ESP32-C3 · OTA Wi-Fi</option></select></label><label>What's new<input id="firmware-release-whats-new" required maxlength="280" placeholder="Protege los extremos y mejora la parada"></label><label>Archivos .py<input id="firmware-release-files" type="file" accept=".py,text/x-python" multiple required></label><button class="primary-button" type="submit"><i data-lucide="upload-cloud"></i> Publicar version</button></form><p id="firmware-release-status" class="form-status">Ninguna publicacion nueva en esta sesion.</p></div><div class="panel firmware-table-panel"><div class="panel-heading"><div><h2>Versiones publicadas</h2><p id="firmware-release-count">Consulta el historial de releases y sus archivos.</p></div></div><div class="firmware-table-wrap"><table class="firmware-table"><thead><tr><th>Version</th><th>Modelo objetivo</th><th>Tamano / checksum</th><th>Notas</th><th>Fecha</th><th>Estado</th><th aria-label="Acciones"></th></tr></thead><tbody id="firmware-release-rows"><tr><td colspan="7" class="empty-state">Cargando versiones...</td></tr></tbody></table></div></div></section>`;
 }
 
 function automationsViewMarkup() {
@@ -520,7 +540,7 @@ function setupWikiNavigation() {
     const apiView = document.createElement('section');
     apiView.className = 'view';
     apiView.id = 'view-api';
-    apiView.innerHTML = `<div class="page-heading"><div><p class="eyebrow">INTEGRACION</p><h1>API<span class="accent-dot">.</span></h1><p class="heading-copy">Credenciales, ejemplos y referencia para conectar tus dispositivos.</p></div></div><article class="wiki-article">${languageExamplesMarkup()}<div class="docs-section"><span class="step-number">05</span><div class="wiki-guide"><h2>Publicar firmware MicroPython</h2><p>Selecciona los archivos .py del dispositivo para crear una version OTA. El dispositivo verificara cada archivo antes de reiniciar.</p><form id="firmware-release-form" class="api-key-panel"><label>Version<input id="firmware-release-version" required pattern="\d{4}\.\d{2}\.\d{2}\.[A-Za-z0-9_-]+" placeholder="2026.10.11.servo-ota"></label><label>Modelo objetivo<select id="firmware-release-target"><option value="servo">Servo ESP32 (COM6)</option><option value="ga25">Motor GA25 (COM8)</option></select></label><label>What's new<input id="firmware-release-whats-new" required maxlength="280" placeholder="Describe los cambios de esta OTA"></label><label>Archivos .py<input id="firmware-release-files" type="file" accept=".py,text/x-python" multiple required></label><button class="secondary-button" type="submit"><i data-lucide="upload-cloud"></i> Publicar version</button><p id="firmware-release-status">Ninguna version publicada desde esta sesion.</p></form></div></div></article>`;
+    apiView.innerHTML = `<div class="page-heading"><div><p class="eyebrow">INTEGRACION</p><h1>API<span class="accent-dot">.</span></h1><p class="heading-copy">Credenciales, ejemplos y referencia para conectar tus dispositivos.</p></div></div><article class="wiki-article">${languageExamplesMarkup()}<div class="docs-section"><span class="step-number">05</span><div class="wiki-guide"><h2>Publicar firmware MicroPython</h2><p>Selecciona los archivos .py del dispositivo para crear una version OTA. El dispositivo verificara cada archivo antes de reiniciar.</p><form id="firmware-release-form" class="api-key-panel"><label>Version<input id="firmware-release-version" required pattern="\\d{4}\\.\\d{2}\\.\\d{2}\\.[A-Za-z0-9_\\-]+" placeholder="2026.10.11.servo-ota"></label><label>Modelo objetivo<select id="firmware-release-target"><option value="servo">Servo ESP32 (COM6)</option><option value="ga25">Motor GA25 (COM8)</option><option value="tenstar">Tenstar ESP32-C3 · OTA Wi-Fi</option></select></label><label>What's new<input id="firmware-release-whats-new" required maxlength="280" placeholder="Describe los cambios de esta OTA"></label><label>Archivos .py<input id="firmware-release-files" type="file" accept=".py,text/x-python" multiple required></label><button class="secondary-button" type="submit"><i data-lucide="upload-cloud"></i> Publicar version</button><p id="firmware-release-status">Ninguna version publicada desde esta sesion.</p></form></div></div></article>`;
     $('.view-container').append(apiView);
     bindWikiApiControls();
     bindFirmwareReleaseControls();
@@ -1026,15 +1046,42 @@ function openDeviceConfiguration(device) {
   renderIcons();
 }
 
+async function waitForTenstarFirmware(deviceId, version) {
+  const deadline = Date.now() + 90000;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => window.setTimeout(resolve, 2000));
+    const result = await apiRequest('devices');
+    const updated = result.devices?.find((item) => item.id === deviceId);
+    if (updated?.status === 'online' && parseTelemetry(updated.telemetry).firmwareVersion === version) return;
+  }
+  throw new Error('OTA descargada, pero Tenstar no confirmó la nueva versión tras reiniciar. Revisa su estado antes de reintentar.');
+}
+
 async function queueFirmwareUpdate(device) {
+  const telemetry = parseTelemetry(device.telemetry);
+  const targetModel = String(telemetry.firmwareTarget || (/tenstar/i.test(`${device.name || ''} ${device.type || ''}`) ? 'tenstar' : String(device.type || '').toLowerCase().includes('ga25') ? 'ga25' : 'servo')).toLowerCase();
+  if (targetModel === 'tenstar') {
+    if (device.status !== 'online') throw new Error('Tenstar debe estar en línea para actualizar por OTA');
+    if (telemetry.moving !== false || telemetry.calibration?.active === true) throw new Error('Espera a que Tenstar esté detenido y termina la calibración antes de actualizar por OTA');
+  }
   const result = await apiRequest('firmware/releases');
-  const targetModel = parseTelemetry(device.telemetry).firmwareTarget || (String(device.type || '').toLowerCase().includes('ga25') ? 'ga25' : 'servo');
-  const release = result.releases?.find((item) => item.isActive && (item.targetModel === targetModel || item.targetModel === 'Todos los dispositivos')) || result.releases?.find((item) => item.targetModel === targetModel);
+  const release = targetModel === 'tenstar'
+    ? result.releases?.find((item) => item.isActive && item.targetModel === 'tenstar')
+    : result.releases?.find((item) => item.isActive && (item.targetModel === targetModel || item.targetModel === 'Todos los dispositivos')) || result.releases?.find((item) => item.targetModel === targetModel);
   if (!release) throw new Error('No hay una version de firmware publicada');
-  if (!window.confirm(`Actualizar ${device.name} a ${release.version}? El dispositivo se reiniciara.`)) return;
-  await apiRequest('commands', { method: 'POST', body: JSON.stringify({ deviceId: device.id, command: 'firmware.update', payload: { version: release.version, targetModel } }) });
-  await loadCommandHistory();
-  showToast(`Actualizacion ${release.version} enviada`);
+  if (!window.confirm(`Actualizar ${device.name} a ${release.version}? El dispositivo se reiniciara.${targetModel === 'tenstar' ? ' Mantén la cortina detenida y la alimentación estable. No se ordenará ningún movimiento; se conserva la calibración.' : ''}`)) return;
+  const record = await executeTrackedDeviceCommand(device.id, 'firmware.update', { version: release.version, targetModel }, { timeoutMs: targetModel === 'tenstar' ? 600000 : 120000 });
+  if (record?.status === 'succeeded') {
+    if (targetModel === 'tenstar') {
+      showToast('Firmware descargado y verificado. Esperando reinicio del Tenstar…');
+      await waitForTenstarFirmware(device.id, release.version);
+      await loadDevices();
+    }
+    await loadCommandHistory();
+    showToast(`Actualización de firmware ${release.version} completada`);
+  } else {
+    showToast(trackedCommandMessage(record));
+  }
 }
 
 function openDeviceMenu(button, device) {

@@ -81,7 +81,7 @@ test('cloud exposes confirmed clean calibration reset only for online Servo r32+
     assert.ok(renderWizard.indexOf('mountCloudBlindCalibrationWizard') < renderWizard.indexOf("if ($('#calibration-wizard')) return;"), `${folder || 'cloud root'} calls reset injector before returning for an existing wizard`);
     assert.match(html, /cloud-blind-calibration-ui\.js\?v=5/);
     assert.match(html, /tenstar-calibration-ui\.js\?v=5/);
-    assert.match(html, /app\.js\?v=74/);
+    assert.match(html, /app\.js\?v=75/);
   }
   const server = fs.readFileSync(path.join(root, 'server.js'), 'utf8');
   assert.match(server, /function validateServoEncoderReference\(/);

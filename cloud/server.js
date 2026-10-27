@@ -75,6 +75,14 @@ function createApiKey() {
 }
 
 const firmwareFiles = new Set(['main.py', 'cloud_client.py', 'board_led.py', 'servo_calibration.py', 'cloud_loop.py', 'pulsegrid.py', 'pulsegrid_min.py', 'pulsegrid_commands.py', 'pulsegrid_ota.py', 'pulsegrid_bootstrap.py', 'webserver.py', 'webserver_min.py', 'webserver_portal.py', 'cortina.py', 'stservo.py', 'ssd1306.py', 'captive_portal.py', 'motor_curtain.py', 'tenstar_motor.py', 'tenstar_http.py', 'tenstar_calibration.py', 'tenstar_state.py', 'tenstar_loop.py', 'boot.py', 'ota_boot.py', 'wifi_recovery.py']);
+const tenstarFirmwareFiles = new Set(['boot.py', 'main.py', 'tenstar_motor.py', 'ota_boot.py', 'pulsegrid_ota.py', 'board_led.py', 'captive_portal.py', 'wifi_recovery.py', 'tenstar_http.py', 'tenstar_calibration.py', 'tenstar_state.py', 'tenstar_loop.py']);
+
+function validateTenstarFirmwareFiles(files) {
+  if (!Array.isArray(files) || !files.length) throw new Error('La release Tenstar debe contener archivos de firmware');
+  for (const file of files) {
+    if (!tenstarFirmwareFiles.has(file.name)) throw new Error(`Archivo no compatible con OTA Tenstar: ${file.name}`);
+  }
+}
 
 function firmwareVersion(version) {
   if (!/^[A-Za-z0-9._-]{1,40}$/.test(String(version || ''))) throw new Error('Invalid firmware version');
@@ -648,6 +656,21 @@ async function validateAutomationDevices(db, email, target, rule) {
 
 async function dispatchDeviceCommand(db, device, command, payload, context = {}) {
   if (device.provider !== 'tuya') {
+    if (command === 'firmware.update') {
+      const [readings] = await db.execute('SELECT telemetry.payload, devices.last_seen AS lastSeen FROM telemetry JOIN devices ON devices.id = telemetry.device_id WHERE telemetry.device_id = ? ORDER BY telemetry.created_at DESC, telemetry.id DESC LIMIT 1', [device.id]);
+      const raw = readings[0]?.payload;
+      const telemetry = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      if (String(telemetry?.firmwareTarget || '').toLowerCase() === 'tenstar') {
+        const lastSeen = new Date(readings[0]?.lastSeen || 0).getTime();
+        if (telemetry.online !== true || !lastSeen || !Number.isFinite(lastSeen) || Date.now() - lastSeen > 15000) throw new Error('Tenstar debe estar en línea y tener comunicación reciente para actualizar por OTA');
+        if (telemetry.moving !== false || telemetry.calibration?.active === true) throw new Error('Espera a que Tenstar esté detenido y termina la calibración antes de actualizar por OTA');
+        if (!payload || typeof payload !== 'object' || Array.isArray(payload) || Object.keys(payload).some((key) => !['version', 'targetModel'].includes(key)) || payload.targetModel !== 'tenstar') throw new Error('Payload OTA Tenstar inválido');
+        const version = firmwareVersion(payload.version);
+        const manifest = await readFirmwareManifest(device.userId, version, 'tenstar');
+        if (!manifest || !manifest.isActive) throw new Error('No hay una release activa compatible con Tenstar para esa versión');
+        validateTenstarFirmwareFiles(manifest.files);
+      }
+    }
     if (String(command).startsWith('tenstar.') || ['curtain.open', 'curtain.close', 'curtain.move', 'curtain.stop'].includes(command)) {
       const [readings] = await db.execute('SELECT telemetry.payload, devices.last_seen AS lastSeen FROM telemetry JOIN devices ON devices.id = telemetry.device_id WHERE telemetry.device_id = ? ORDER BY telemetry.created_at DESC, telemetry.id DESC LIMIT 1', [device.id]);
       const rawTelemetry = readings[0]?.payload;
@@ -1393,6 +1416,7 @@ app.post('/api/firmware/releases', requireSession, apiReady, async (request, res
       return { name, content, size: content.length, sha256: crypto.createHash('sha256').update(content).digest('hex') };
     });
     if (new Set(preparedFiles.map((file) => file.name)).size !== preparedFiles.length) return fail(response, 422, 'No repitas archivos en una version');
+    if (safeTargetModel === 'tenstar') validateTenstarFirmwareFiles(preparedFiles);
     const connection = await database().getConnection();
     try {
       await connection.beginTransaction();

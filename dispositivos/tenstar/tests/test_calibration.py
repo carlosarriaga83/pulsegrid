@@ -165,6 +165,38 @@ class CalibrationTest(unittest.TestCase):
         self.assertFalse(any(ack[0] == self.sequence for ack in self.main.ack_queue))
         self.assertTrue(self.main.tenstar_state.exists(self.main.CALIBRATION_FILE + '.moving'))
 
+    def test_ota_dispatch_stages_then_acknowledges_and_requests_restart_without_motion(self):
+        span = 11880
+        self.main.calibration.update({'calibrated': True, 'open_marked': True, 'closed_marked': True, 'open_span_pulses': span})
+        self.main.position_valid = True
+        self.main.save_calibration()
+        saved_before, _ = self.main.tenstar_state.load(self.main.CALIBRATION_FILE)
+        calls = []
+        updater = types.SimpleNamespace(update=lambda *args: calls.append(args))
+        with patch.dict(sys.modules, {'pulsegrid_ota': updater}):
+            self.command('firmware.update', {'version': '2026.10.26.tenstar-r9', 'targetModel': 'tenstar'})
+        self.assertTrue(self.main.restart_requested)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][3:5], ('2026.10.26.tenstar-r9', 'tenstar'))
+        self.assertIn('tenstar_loop.py', calls[0][5])
+        self.assertFalse(self.motor.moving)
+        self.assertEqual(self.main.calibration['open_span_pulses'], span)
+        self.assertEqual(self.main.tenstar_state.load(self.main.CALIBRATION_FILE)[0], saved_before)
+
+    def test_ota_download_error_is_reported_without_restart_or_calibration_changes(self):
+        self.main.calibration.update({'calibrated': True, 'open_marked': True, 'closed_marked': True, 'open_span_pulses': 11880})
+        self.main.position_valid = True
+        self.main.save_calibration()
+        saved_before, _ = self.main.tenstar_state.load(self.main.CALIBRATION_FILE)
+        def fail_update(*_args):
+            raise OSError('TLS ENOMEM')
+        with patch.dict(sys.modules, {'pulsegrid_ota': types.SimpleNamespace(update=fail_update)}):
+            self.command('firmware.update', {'version': '2026.10.26.tenstar-r9', 'targetModel': 'tenstar'}, success=False)
+        self.assertFalse(self.main.restart_requested)
+        self.assertIn('ENOMEM', self.acks[-1][2])
+        self.assertFalse(self.motor.moving)
+        self.assertEqual(self.main.tenstar_state.load(self.main.CALIBRATION_FILE)[0], saved_before)
+
     def test_cut_during_motion_preserves_span_but_requires_manual_reference(self):
         span = self.calibrated('up')
         self.command('curtain.open')
