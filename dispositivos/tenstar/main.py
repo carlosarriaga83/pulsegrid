@@ -33,13 +33,13 @@ except ImportError:
     API_URL = 'https://pulse.2api2.com'
     PULSES_PER_REVOLUTION = 11880
     KP = 0.3
-    MINIMUM_SPEED_PCT = 20
+    MINIMUM_SPEED_PCT = 90
     COMMANDS_ENABLED = True
     LED_PIN = 8
     LED_ACTIVE_LOW = True
 
 FIRMWARE_TARGET = 'tenstar'
-FIRMWARE_VERSION = '2026.10.26.tenstar-r9'
+FIRMWARE_VERSION = '2026.10.26.tenstar-r10'
 try:
     from pulsegrid_firmware import VERSION as FIRMWARE_VERSION
 except (ImportError, AttributeError):

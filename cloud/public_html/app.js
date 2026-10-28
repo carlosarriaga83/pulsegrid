@@ -14,6 +14,13 @@ const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const API_URL = '/api';
 
+// quiero colocar un icono pulsegrid-icon.svg para el tab en el browser
+const link = document.createElement('link');
+link.rel = 'icon';
+link.href = 'pulsegrid-icon.svg';
+document.head.appendChild(link);
+
+
 function formatDateTime(value) {
   const date = value instanceof Date ? value : new Date(value);
   if (!Number.isFinite(date.getTime())) return '';
