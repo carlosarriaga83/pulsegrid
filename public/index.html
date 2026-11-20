@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="es" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PulseGrid — Estado del Sistema (Fase 2)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/socket.io/socket.io.js"></script>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen antialiased">
+  <div class="max-w-5xl mx-auto px-4 py-10">
+    <header class="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-6 mb-8">
+      <div>
+        <div class="flex items-center gap-3">
+          <span class="inline-flex h-3 w-3 rounded-full bg-emerald-400 animate-pulse"></span>
+          <h1 class="text-2xl font-bold tracking-tight">PulseGrid</h1>
+          <span class="text-xs font-medium px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">Fase 2 · Core Backend</span>
+        </div>
+        <p class="text-sm text-slate-400 mt-1">Monitor en vivo de infraestructura: Express, Socket.io, MySQL, Tuya Cloud y Open-Meteo.</p>
+      </div>
+      <div class="flex items-center gap-3">
+        <span id="socket-badge" class="inline-flex items-center gap-2 text-xs font-medium px-3 py-1.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30">
+          <span class="h-2 w-2 rounded-full bg-amber-400"></span>
+          Socket.io: Conectando...
+        </span>
+        <button id="refresh-btn" class="px-3.5 py-1.5 text-xs font-medium rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 transition">
+          Actualizar
+        </button>
+      </div>
+    </header>
+
+    <section class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+      <div class="rounded-xl bg-slate-900 border border-slate-800 p-5">
+        <p class="text-xs uppercase tracking-wider text-slate-400">Base de Datos MySQL</p>
+        <p id="db-status" class="text-lg font-semibold mt-2 text-slate-200">Verificando...</p>
+        <p id="db-meta" class="text-xs text-slate-400 mt-1">—</p>
+      </div>
+
+      <div class="rounded-xl bg-slate-900 border border-slate-800 p-5">
+        <p class="text-xs uppercase tracking-wider text-slate-400">Tuya Cloud API</p>
+        <p id="tuya-status" class="text-lg font-semibold mt-2 text-slate-200">Verificando...</p>
+        <p id="tuya-meta" class="text-xs text-slate-400 mt-1">—</p>
+      </div>
+
+      <div class="rounded-xl bg-slate-900 border border-slate-800 p-5">
+        <p class="text-xs uppercase tracking-wider text-slate-400">Entorno (Open-Meteo)</p>
+        <p id="weather-status" class="text-lg font-semibold mt-2 text-slate-200">Verificando...</p>
+        <p id="weather-meta" class="text-xs text-slate-400 mt-1">—</p>
+      </div>
+    </section>
+
+    <section class="rounded-xl bg-slate-900 border border-slate-800 p-5">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-sm font-semibold text-slate-200">Respuesta en vivo de <code class="text-indigo-300">/api/health</code></h2>
+        <span id="last-updated" class="text-xs text-slate-500">—</span>
+      </div>
+      <pre id="health-json" class="text-xs bg-slate-950 border border-slate-800 rounded-lg p-4 overflow-x-auto text-emerald-300">Cargando...</pre>
+    </section>
+  </div>
+
+  <script>
+    const socketBadge = document.getElementById('socket-badge');
+    const dbStatus = document.getElementById('db-status');
+    const dbMeta = document.getElementById('db-meta');
+    const tuyaStatus = document.getElementById('tuya-status');
+    const tuyaMeta = document.getElementById('tuya-meta');
+    const weatherStatus = document.getElementById('weather-status');
+    const weatherMeta = document.getElementById('weather-meta');
+    const healthJson = document.getElementById('health-json');
+    const lastUpdated = document.getElementById('last-updated');
+
+    async function loadHealth() {
+      try {
+        const res = await fetch('/api/health');
+        const data = await res.json();
+        healthJson.textContent = JSON.stringify(data, null, 2);
+        lastUpdated.textContent = new Date().toLocaleTimeString();
+
+        if (data.database?.connected) {
+          dbStatus.textContent = 'Conectada';
+          dbStatus.className = 'text-lg font-semibold mt-2 text-emerald-400';
+          dbMeta.textContent = `${data.database.version} · ${data.database.latencyMs} ms`;
+        } else {
+          dbStatus.textContent = 'Sin conexión';
+          dbStatus.className = 'text-lg font-semibold mt-2 text-rose-400';
+          dbMeta.textContent = data.database?.error || 'Revisa variables DB_*';
+        }
+
+        if (data.tuya?.configured) {
+          tuyaStatus.textContent = 'Configurada';
+          tuyaStatus.className = 'text-lg font-semibold mt-2 text-emerald-400';
+          tuyaMeta.textContent = `${data.tuya.cachedDevices} dispositivo(s) en caché`;
+        } else {
+          tuyaStatus.textContent = 'Pendiente de claves';
+          tuyaStatus.className = 'text-lg font-semibold mt-2 text-amber-400';
+          tuyaMeta.textContent = 'Agrega TUYA_ACCESS_KEY y TUYA_SECRET_KEY';
+        }
+
+        if (data.weather?.ok) {
+          weatherStatus.textContent = `${data.weather.temperature}°C · ${data.weather.condition}`;
+          weatherStatus.className = 'text-lg font-semibold mt-2 text-sky-400';
+          const sr = data.weather.sunrise ? data.weather.sunrise.slice(11, 16) : '--:--';
+          const ss = data.weather.sunset ? data.weather.sunset.slice(11, 16) : '--:--';
+          weatherMeta.textContent = `${data.weather.location} · ☀ ${sr} / ☾ ${ss}`;
+        } else {
+          weatherStatus.textContent = 'Error Open-Meteo';
+          weatherStatus.className = 'text-lg font-semibold mt-2 text-rose-400';
+          weatherMeta.textContent = data.weather?.error || '—';
+        }
+      } catch (err) {
+        healthJson.textContent = 'Error consultando /api/health: ' + err.message;
+      }
+    }
+
+    const socket = io();
+    socket.on('connect', () => {
+      socketBadge.innerHTML = '<span class="h-2 w-2 rounded-full bg-emerald-400"></span>Socket.io: Online';
+      socketBadge.className = 'inline-flex items-center gap-2 text-xs font-medium px-3 py-1.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30';
+    });
+    socket.on('disconnect', () => {
+      socketBadge.innerHTML = '<span class="h-2 w-2 rounded-full bg-rose-400"></span>Socket.io: Desconectado';
+      socketBadge.className = 'inline-flex items-center gap-2 text-xs font-medium px-3 py-1.5 rounded-full bg-rose-500/15 text-rose-300 border border-rose-500/30';
+    });
+
+    document.getElementById('refresh-btn').addEventListener('click', loadHealth);
+    loadHealth();
+  </script>
+</body>
+</html>

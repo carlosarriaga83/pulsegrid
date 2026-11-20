@@ -1,7 +1,20 @@
+# Dependencias y builds
 node_modules/
 dist/
 build/
+
+# Variables de entorno y secretos
 .env
 .env.local
+.env.*.local
+
+# Logs y temporales
+logs/
+*.log
+npm-debug.log*
+
+# Sistema operativo e IDE
 .DS_Store
 Thumbs.db
+.vscode/
+.idea/

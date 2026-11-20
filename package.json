@@ -1,0 +1,37 @@
+{
+  "name": "pulsegrid",
+  "version": "1.0.0",
+  "description": "PulseGrid - Plataforma IoT y domótica para monitoreo, control y automatización de dispositivos Tuya Cloud",
+  "main": "src/server.js",
+  "type": "module",
+  "engines": {
+    "node": ">=18.18.0"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "db:init": "node database/init.js"
+  },
+  "keywords": [
+    "iot",
+    "tuya",
+    "domotica",
+    "smart-home",
+    "socketio",
+    "express",
+    "mysql"
+  ],
+  "author": "PulseGrid",
+  "license": "MIT",
+  "dependencies": {
+    "@tuya/tuya-connector-nodejs": "^2.1.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "helmet": "^8.0.0",
+    "mysql2": "^3.12.0",
+    "node-cron": "^3.0.3",
+    "nodemailer": "^6.9.16",
+    "socket.io": "^4.8.1"
+  }
+}
