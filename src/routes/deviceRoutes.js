@@ -5,6 +5,8 @@ const router = Router();
 
 router.get('/', deviceController.listDevices);
 router.post('/sync', deviceController.syncDevices);
+router.post('/demo', deviceController.seedDemo);
+router.delete('/demo', deviceController.clearDemo);
 router.get('/:id', deviceController.getDevice);
 router.post('/:id/commands', deviceController.sendCommands);
 router.patch('/:id', deviceController.updateDevice);

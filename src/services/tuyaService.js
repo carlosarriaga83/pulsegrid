@@ -402,17 +402,20 @@ export async function sendDeviceCommands(deviceId, commands) {
     value: coerceCommandValue(cmd.code, cmd.value, dpSchema),
   }));
 
-  const client = getClient();
-  const res = await client.request({
-    path: `/v1.0/iot-03/devices/${deviceId}/commands`,
-    method: 'POST',
-    body: { commands: serializedCommands },
-  });
+  // Los dispositivos demo_* se ejecutan localmente para pruebas de UI y WebSockets sin requerir claves Tuya
+  if (!String(deviceId).startsWith('demo_')) {
+    const client = getClient();
+    const res = await client.request({
+      path: `/v1.0/iot-03/devices/${deviceId}/commands`,
+      method: 'POST',
+      body: { commands: serializedCommands },
+    });
 
-  if (!res.success) {
-    const err = new Error(`Tuya rechazó el comando (${res.code}): ${res.msg}`);
-    err.statusCode = 502;
-    throw err;
+    if (!res.success) {
+      const err = new Error(`Tuya rechazó el comando (${res.code}): ${res.msg}`);
+      err.statusCode = 502;
+      throw err;
+    }
   }
 
   // Actualización optimista inmediata en caché y MySQL para feedback instantáneo
@@ -481,6 +484,138 @@ export function getCacheStats() {
   };
 }
 
+/**
+ * Inserta dispositivos Tuya simulados (demo_*) para probar controles dinámicos y Socket.io.
+ */
+export async function seedDemoDevices() {
+  const demoDevices = [
+    {
+      id: 'demo_thermostat_01',
+      name: 'Termostato Inteligente Sala',
+      category: 'wk',
+      product_id: 'demo_prod_wk',
+      product_name: 'Smart Thermostat Pro',
+      room: 'Sala',
+      is_online: 1,
+      dp_schema: {
+        category: 'wk',
+        functions: [
+          { code: 'switch', name: 'Encendido', type: 'Boolean', values: '{}', parsedValues: {} },
+          { code: 'temp_set', name: 'Temperatura Objetivo', type: 'Integer', values: '{"min":160,"max":300,"scale":1,"step":5,"unit":"°C"}', parsedValues: { min: 160, max: 300, scale: 1, step: 5, unit: '°C' } },
+          { code: 'mode', name: 'Modo', type: 'Enum', values: '{"range":["auto","cool","heat","eco"]}', parsedValues: { range: ['auto', 'cool', 'heat', 'eco'] } },
+        ],
+        status: [
+          { code: 'switch', name: 'Encendido', type: 'Boolean', parsedValues: {} },
+          { code: 'temp_current', name: 'Temperatura Actual', type: 'Integer', parsedValues: { min: 0, max: 500, scale: 1, unit: '°C' } },
+          { code: 'humidity_value', name: 'Humedad', type: 'Integer', parsedValues: { min: 0, max: 100, scale: 0, unit: '%' } },
+          { code: 'temp_set', name: 'Temperatura Objetivo', type: 'Integer', parsedValues: { min: 160, max: 300, scale: 1, step: 5, unit: '°C' } },
+          { code: 'mode', name: 'Modo', type: 'Enum', parsedValues: { range: ['auto', 'cool', 'heat', 'eco'] } },
+        ],
+      },
+      last_status: { switch: true, temp_current: 234, humidity_value: 48, temp_set: 220, mode: 'cool' },
+    },
+    {
+      id: 'demo_light_02',
+      name: 'Lámpara Ambiental Estudio',
+      category: 'dj',
+      product_id: 'demo_prod_dj',
+      product_name: 'Smart LED Bulb CCT',
+      room: 'Estudio',
+      is_online: 1,
+      dp_schema: {
+        category: 'dj',
+        functions: [
+          { code: 'switch_led', name: 'Luz', type: 'Boolean', values: '{}', parsedValues: {} },
+          { code: 'bright_value', name: 'Brillo', type: 'Integer', values: '{"min":10,"max":1000,"scale":0,"step":10,"unit":"lm"}', parsedValues: { min: 10, max: 1000, scale: 0, step: 10, unit: 'lm' } },
+          { code: 'temp_value', name: 'Temperatura Color', type: 'Integer', values: '{"min":0,"max":1000,"scale":0,"step":20,"unit":"K"}', parsedValues: { min: 0, max: 1000, scale: 0, step: 20, unit: 'K' } },
+          { code: 'work_mode', name: 'Escena', type: 'Enum', values: '{"range":["white","colour","scene","music"]}', parsedValues: { range: ['white', 'colour', 'scene', 'music'] } },
+        ],
+        status: [
+          { code: 'switch_led', name: 'Luz', type: 'Boolean', parsedValues: {} },
+          { code: 'bright_value', name: 'Brillo', type: 'Integer', parsedValues: { min: 10, max: 1000, scale: 0, unit: 'lm' } },
+          { code: 'temp_value', name: 'Temperatura Color', type: 'Integer', parsedValues: { min: 0, max: 1000, scale: 0, unit: 'K' } },
+          { code: 'work_mode', name: 'Escena', type: 'Enum', parsedValues: { range: ['white', 'colour', 'scene', 'music'] } },
+        ],
+      },
+      last_status: { switch_led: true, bright_value: 720, temp_value: 450, work_mode: 'white' },
+    },
+    {
+      id: 'demo_plug_03',
+      name: 'Enchufe Monitor Consumo',
+      category: 'cz',
+      product_id: 'demo_prod_cz',
+      product_name: 'WiFi Smart Plug 16A',
+      room: 'Oficina',
+      is_online: 1,
+      dp_schema: {
+        category: 'cz',
+        functions: [
+          { code: 'switch_1', name: 'Interruptor', type: 'Boolean', values: '{}', parsedValues: {} },
+          { code: 'relay_status', name: 'Estado tras corte', type: 'Enum', values: '{"range":["off","on","memory"]}', parsedValues: { range: ['off', 'on', 'memory'] } },
+        ],
+        status: [
+          { code: 'switch_1', name: 'Interruptor', type: 'Boolean', parsedValues: {} },
+          { code: 'cur_power', name: 'Potencia', type: 'Integer', parsedValues: { min: 0, max: 35000, scale: 1, unit: 'W' } },
+          { code: 'cur_voltage', name: 'Voltaje', type: 'Integer', parsedValues: { min: 0, max: 2600, scale: 1, unit: 'V' } },
+          { code: 'cur_current', name: 'Corriente', type: 'Integer', parsedValues: { min: 0, max: 16000, scale: 0, unit: 'mA' } },
+          { code: 'relay_status', name: 'Estado tras corte', type: 'Enum', parsedValues: { range: ['off', 'on', 'memory'] } },
+        ],
+      },
+      last_status: { switch_1: true, cur_power: 1425, cur_voltage: 1214, cur_current: 1170, relay_status: 'memory' },
+    },
+    {
+      id: 'demo_sensor_04',
+      name: 'Sensor Exterior Jardín',
+      category: 'wsdcg',
+      product_id: 'demo_prod_wsdcg',
+      product_name: 'Temp & Humidity Sensor',
+      room: 'Exterior',
+      is_online: 0,
+      dp_schema: {
+        category: 'wsdcg',
+        functions: [],
+        status: [
+          { code: 'va_temperature', name: 'Temperatura', type: 'Integer', parsedValues: { min: -200, max: 600, scale: 1, unit: '°C' } },
+          { code: 'va_humidity', name: 'Humedad', type: 'Integer', parsedValues: { min: 0, max: 100, scale: 0, unit: '%' } },
+          { code: 'battery_percentage', name: 'Batería', type: 'Integer', parsedValues: { min: 0, max: 100, scale: 0, unit: '%' } },
+        ],
+      },
+      last_status: { va_temperature: 186, va_humidity: 64, battery_percentage: 22 },
+    },
+  ];
+
+  for (const d of demoDevices) {
+    await query(
+      `INSERT INTO devices (id, name, category, product_id, product_name, room, is_online, last_online_at, dp_schema, last_status, notify_on_offline)
+       VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, 1)
+       ON DUPLICATE KEY UPDATE
+         name = VALUES(name),
+         dp_schema = VALUES(dp_schema),
+         last_status = VALUES(last_status),
+         is_online = VALUES(is_online),
+         updated_at = CURRENT_TIMESTAMP`,
+      [
+        d.id,
+        d.name,
+        d.category,
+        d.product_id,
+        d.product_name,
+        d.room,
+        d.is_online,
+        JSON.stringify(d.dp_schema),
+        JSON.stringify(d.last_status),
+      ]
+    );
+  }
+
+  return loadDevicesFromDb();
+}
+
+export async function clearDemoDevices() {
+  await query("DELETE FROM devices WHERE id LIKE 'demo_%'");
+  return loadDevicesFromDb();
+}
+
 export default {
   isTuyaConfigured,
   getDevices,
@@ -491,4 +626,6 @@ export default {
   updateDeviceMetadata,
   loadDevicesFromDb,
   getCacheStats,
+  seedDemoDevices,
+  clearDemoDevices,
 };

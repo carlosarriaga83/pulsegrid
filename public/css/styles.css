@@ -1,0 +1,118 @@
+/* PulseGrid - Estilos personalizados complementarios a Tailwind CSS */
+
+:root {
+  color-scheme: dark;
+}
+
+/* Scrollbar sutil en modo oscuro */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #020617;
+}
+::-webkit-scrollbar-thumb {
+  background: #1e293b;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #334155;
+}
+
+/* Range slider táctil y preciso para controles numéricos Tuya */
+input[type="range"].pg-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  border-radius: 9999px;
+  background: #1e293b;
+  outline: none;
+  cursor: pointer;
+}
+
+input[type="range"].pg-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 9999px;
+  background: #38bdf8;
+  border: 2px solid #0f172a;
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.25);
+  transition: transform 0.12s ease, background-color 0.12s ease;
+}
+
+input[type="range"].pg-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.12);
+  background: #7dd3fc;
+}
+
+input[type="range"].pg-slider::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 9999px;
+  background: #38bdf8;
+  border: 2px solid #0f172a;
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.25);
+  transition: transform 0.12s ease;
+}
+
+input[type="range"].pg-slider:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Toggle Switch accesible */
+.pg-toggle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: 44px;
+  height: 24px;
+  border-radius: 9999px;
+  background: #334155;
+  transition: background-color 0.2s ease;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.pg-toggle[aria-checked="true"] {
+  background: #10b981;
+}
+
+.pg-toggle[disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.pg-toggle-thumb {
+  position: absolute;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 9999px;
+  background: #f8fafc;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.pg-toggle[aria-checked="true"] .pg-toggle-thumb {
+  transform: translateX(20px);
+}
+
+/* Animación sutil para toasts */
+@keyframes pg-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.pg-toast {
+  animation: pg-slide-in 0.18s ease-out;
+}

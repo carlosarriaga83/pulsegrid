@@ -3,127 +3,291 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>PulseGrid — Estado del Sistema (Fase 2)</title>
+  <title>PulseGrid — Control y Automatización IoT</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="/socket.io/socket.io.js"></script>
+  <link rel="stylesheet" href="/css/styles.css" />
 </head>
-<body class="bg-slate-950 text-slate-100 min-h-screen antialiased">
-  <div class="max-w-5xl mx-auto px-4 py-10">
-    <header class="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-6 mb-8">
-      <div>
-        <div class="flex items-center gap-3">
-          <span class="inline-flex h-3 w-3 rounded-full bg-emerald-400 animate-pulse"></span>
-          <h1 class="text-2xl font-bold tracking-tight">PulseGrid</h1>
-          <span class="text-xs font-medium px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">Fase 2 · Core Backend</span>
+<body class="bg-slate-950 text-slate-100 min-h-screen antialiased selection:bg-sky-500/30">
+  <!-- Barra superior fija -->
+  <header class="sticky top-0 z-30 border-b border-slate-800/80 bg-slate-950/85 backdrop-blur-md">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 py-3.5 flex flex-wrap items-center justify-between gap-3">
+      <div class="flex items-center gap-4">
+        <div class="flex items-center gap-2.5">
+          <div class="h-8 w-8 rounded-xl bg-gradient-to-br from-sky-500 to-emerald-500 flex items-center justify-center shadow-lg shadow-sky-500/20">
+            <svg class="w-4 h-4 text-slate-950" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+            </svg>
+          </div>
+          <div>
+            <h1 class="text-base font-bold tracking-tight leading-none">PulseGrid</h1>
+            <span class="text-[10px] text-slate-400">IoT Cloud Command</span>
+          </div>
         </div>
-        <p class="text-sm text-slate-400 mt-1">Monitor en vivo de infraestructura: Express, Socket.io, MySQL, Tuya Cloud y Open-Meteo.</p>
+
+        <!-- Navegación principal -->
+        <nav class="hidden md:flex items-center gap-1 ml-2">
+          <button type="button" data-tab-btn="devices" class="px-3.5 py-2 text-xs font-semibold rounded-lg bg-slate-800 text-slate-100 border border-slate-700 transition">
+            Dispositivos
+          </button>
+          <button type="button" data-tab-btn="automations" class="px-3.5 py-2 text-xs font-medium rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-900 border border-transparent transition">
+            Automatizaciones
+          </button>
+          <button type="button" data-tab-btn="analytics" class="px-3.5 py-2 text-xs font-medium rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-900 border border-transparent transition">
+            Analítica
+          </button>
+          <button type="button" data-tab-btn="alerts" class="px-3.5 py-2 text-xs font-medium rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-900 border border-transparent transition">
+            Alertas
+          </button>
+        </nav>
       </div>
-      <div class="flex items-center gap-3">
-        <span id="socket-badge" class="inline-flex items-center gap-2 text-xs font-medium px-3 py-1.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30">
+
+      <div class="flex items-center gap-2.5">
+        <!-- Widget de clima Open-Meteo (clic para editar ubicación) -->
+        <button
+          id="weather-pill"
+          type="button"
+          title="Configurar ubicación para Open-Meteo"
+          class="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full bg-slate-900 hover:bg-slate-800 border border-slate-800 transition"
+        >
+          <span class="text-slate-400">Cargando clima...</span>
+        </button>
+
+        <!-- Estado de Socket.io -->
+        <span id="socket-badge" class="inline-flex items-center gap-2 text-xs font-medium px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-300 border border-amber-500/30">
           <span class="h-2 w-2 rounded-full bg-amber-400"></span>
-          Socket.io: Conectando...
+          <span>Conectando...</span>
         </span>
-        <button id="refresh-btn" class="px-3.5 py-1.5 text-xs font-medium rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 transition">
-          Actualizar
+      </div>
+    </div>
+
+    <!-- Navegación móvil -->
+    <div class="md:hidden border-t border-slate-800/80 px-4 py-2 flex items-center gap-1 overflow-x-auto">
+      <button type="button" data-tab-btn="devices" class="px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-800 text-slate-100 border border-slate-700">Dispositivos</button>
+      <button type="button" data-tab-btn="automations" class="px-3 py-1.5 text-xs font-medium rounded-lg text-slate-400">Automatizaciones</button>
+      <button type="button" data-tab-btn="analytics" class="px-3 py-1.5 text-xs font-medium rounded-lg text-slate-400">Analítica</button>
+      <button type="button" data-tab-btn="alerts" class="px-3 py-1.5 text-xs font-medium rounded-lg text-slate-400">Alertas</button>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 py-6">
+    <!-- ========================================================= -->
+    <!-- PESTAÑA 1: DISPOSITIVOS (FASE 3 ACTIVA)                   -->
+    <!-- ========================================================= -->
+    <section data-tab-panel="devices" class="space-y-6">
+      <!-- Banner informativo si faltan claves de Tuya Cloud -->
+      <div id="tuya-warning-banner" class="hidden rounded-2xl bg-amber-500/10 border border-amber-500/30 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+        <div class="flex items-center gap-3 text-xs text-amber-200">
+          <span class="h-2.5 w-2.5 rounded-full bg-amber-400 flex-shrink-0"></span>
+          <span>
+            <strong>Tuya Cloud pendiente de credenciales:</strong> agrega <code>TUYA_ACCESS_KEY</code> y <code>TUYA_SECRET_KEY</code> en Hostinger para sincronizar tus equipos reales, o carga dispositivos de ejemplo para probar controles en vivo.
+          </span>
+        </div>
+        <button id="btn-seed-demo" type="button" class="px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/40 text-xs font-semibold transition">
+          Cargar dispositivos de ejemplo
         </button>
       </div>
-    </header>
 
-    <section class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-      <div class="rounded-xl bg-slate-900 border border-slate-800 p-5">
-        <p class="text-xs uppercase tracking-wider text-slate-400">Base de Datos MySQL</p>
-        <p id="db-status" class="text-lg font-semibold mt-2 text-slate-200">Verificando...</p>
-        <p id="db-meta" class="text-xs text-slate-400 mt-1">—</p>
+      <!-- Resumen KPI (Baja carga cognitiva) -->
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div class="rounded-2xl bg-slate-900/90 border border-slate-800 px-4 py-3.5">
+          <p class="text-[11px] uppercase tracking-wider text-slate-400">Total Equipos</p>
+          <p id="kpi-total" class="text-2xl font-bold text-slate-100 mt-1">0</p>
+        </div>
+        <div class="rounded-2xl bg-slate-900/90 border border-slate-800 px-4 py-3.5">
+          <p class="text-[11px] uppercase tracking-wider text-slate-400">Online</p>
+          <p id="kpi-online" class="text-2xl font-bold text-emerald-400 mt-1">0</p>
+        </div>
+        <div class="rounded-2xl bg-slate-900/90 border border-slate-800 px-4 py-3.5">
+          <p class="text-[11px] uppercase tracking-wider text-slate-400">Offline</p>
+          <p id="kpi-offline" class="text-2xl font-bold text-rose-400 mt-1">0</p>
+        </div>
+        <div class="rounded-2xl bg-slate-900/90 border border-slate-800 px-4 py-3.5">
+          <p class="text-[11px] uppercase tracking-wider text-slate-400">Encendidos</p>
+          <p id="kpi-active" class="text-2xl font-bold text-sky-400 mt-1">0</p>
+        </div>
       </div>
 
-      <div class="rounded-xl bg-slate-900 border border-slate-800 p-5">
-        <p class="text-xs uppercase tracking-wider text-slate-400">Tuya Cloud API</p>
-        <p id="tuya-status" class="text-lg font-semibold mt-2 text-slate-200">Verificando...</p>
-        <p id="tuya-meta" class="text-xs text-slate-400 mt-1">—</p>
+      <!-- Barra de herramientas y filtros -->
+      <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+        <div class="flex flex-wrap items-center gap-2 flex-1">
+          <div class="relative flex-1 min-w-[200px] max-w-sm">
+            <input
+              id="filter-search"
+              type="search"
+              placeholder="Buscar dispositivo, zona o categoría..."
+              class="w-full rounded-xl bg-slate-900 border border-slate-800 pl-9 pr-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-sky-500 transition"
+            />
+            <svg class="w-4 h-4 text-slate-500 absolute left-3 top-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z"/>
+            </svg>
+          </div>
+
+          <select
+            id="filter-status"
+            class="rounded-xl bg-slate-900 border border-slate-800 px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-sky-500"
+          >
+            <option value="all">Todos los estados</option>
+            <option value="online">Solo Online</option>
+            <option value="offline">Solo Offline</option>
+          </select>
+        </div>
+
+        <div class="flex items-center gap-2">
+          <button
+            id="btn-clear-demo"
+            type="button"
+            class="hidden px-3 py-2 rounded-xl bg-slate-900 hover:bg-rose-950/50 text-slate-300 hover:text-rose-300 border border-slate-800 hover:border-rose-500/40 text-xs font-medium transition"
+          >
+            Limpiar Demo
+          </button>
+          <button
+            id="btn-sync-tuya"
+            type="button"
+            class="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 text-xs font-semibold shadow-lg shadow-sky-500/20 transition"
+          >
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+            </svg>
+            Sincronizar Tuya
+          </button>
+        </div>
       </div>
 
-      <div class="rounded-xl bg-slate-900 border border-slate-800 p-5">
-        <p class="text-xs uppercase tracking-wider text-slate-400">Entorno (Open-Meteo)</p>
-        <p id="weather-status" class="text-lg font-semibold mt-2 text-slate-200">Verificando...</p>
-        <p id="weather-meta" class="text-xs text-slate-400 mt-1">—</p>
+      <!-- Filtros rápidos por zona / habitación -->
+      <div id="room-pills" class="flex flex-wrap items-center gap-2"></div>
+
+      <!-- Grid de tarjetas dinámicas -->
+      <div id="devices-grid" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4"></div>
+
+      <!-- Estado vacío -->
+      <div id="devices-empty" class="hidden rounded-2xl border border-dashed border-slate-800 bg-slate-900/40 p-12 text-center">
+        <p class="text-base font-semibold text-slate-200">No hay dispositivos para mostrar</p>
+        <p class="text-xs text-slate-400 mt-1 max-w-md mx-auto">
+          Sincroniza tu cuenta de Tuya Cloud o carga un conjunto de dispositivos de ejemplo para probar los controles dinámicos y la sincronización en tiempo real.
+        </p>
+        <div class="mt-5 flex items-center justify-center gap-3">
+          <button id="btn-empty-demo" type="button" class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-100 text-xs font-semibold border border-slate-700 transition">
+            Cargar dispositivos de ejemplo
+          </button>
+        </div>
       </div>
     </section>
 
-    <section class="rounded-xl bg-slate-900 border border-slate-800 p-5">
-      <div class="flex items-center justify-between mb-3">
-        <h2 class="text-sm font-semibold text-slate-200">Respuesta en vivo de <code class="text-indigo-300">/api/health</code></h2>
-        <span id="last-updated" class="text-xs text-slate-500">—</span>
+    <!-- ========================================================= -->
+    <!-- PESTAÑA 2: AUTOMATIZACIONES (FASE 4)                      -->
+    <!-- ========================================================= -->
+    <section data-tab-panel="automations" class="hidden">
+      <div class="rounded-2xl bg-slate-900/70 border border-slate-800 p-8 text-center">
+        <span class="text-xs font-semibold px-2.5 py-1 rounded-full bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">Próxima Fase · Fase 4</span>
+        <h2 class="text-xl font-bold mt-3">Motor de Automatizaciones (SI / CUANDO / ENTONCES)</h2>
+        <p class="text-sm text-slate-400 mt-2 max-w-xl mx-auto">
+          Constructor visual en lenguaje natural con comparaciones entre dispositivos, horarios, amanecer/atardecer con offsets (Open-Meteo), acciones múltiples y vista de evaluación en vivo.
+        </p>
       </div>
-      <pre id="health-json" class="text-xs bg-slate-950 border border-slate-800 rounded-lg p-4 overflow-x-auto text-emerald-300">Cargando...</pre>
     </section>
+
+    <!-- ========================================================= -->
+    <!-- PESTAÑA 3: ANALÍTICA Y GRÁFICAS (FASE 5)                  -->
+    <!-- ========================================================= -->
+    <section data-tab-panel="analytics" class="hidden">
+      <div class="rounded-2xl bg-slate-900/70 border border-slate-800 p-8 text-center">
+        <span class="text-xs font-semibold px-2.5 py-1 rounded-full bg-sky-500/15 text-sky-300 border border-sky-500/30">Próxima Fase · Fase 5</span>
+        <h2 class="text-xl font-bold mt-3">Analítica Histórica Interactiva</h2>
+        <p class="text-sm text-slate-400 mt-2 max-w-xl mx-auto">
+          Gráficas de líneas y escalonadas con Chart.js + zoom por arrastre, zoom con rueda/pinch, desplazamiento horizontal (pan), botón Reset Zoom y crosshair sincronizado para múltiples dispositivos.
+        </p>
+      </div>
+    </section>
+
+    <!-- ========================================================= -->
+    <!-- PESTAÑA 4: ALERTAS SMTP (FASE 5)                          -->
+    <!-- ========================================================= -->
+    <section data-tab-panel="alerts" class="hidden">
+      <div class="rounded-2xl bg-slate-900/70 border border-slate-800 p-8 text-center">
+        <span class="text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">Próxima Fase · Fase 5</span>
+        <h2 class="text-xl font-bold mt-3">Alertas por Correo y Cooldown</h2>
+        <p class="text-sm text-slate-400 mt-2 max-w-xl mx-auto">
+          Gestión de destinatarios SMTP, pruebas de envío, alertas por desconexión offline y registro de envíos con enfriamiento configurable.
+        </p>
+      </div>
+    </section>
+  </main>
+
+  <!-- Modal: Configurar Dispositivo -->
+  <div id="device-modal" class="hidden fixed inset-0 z-50 items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
+    <div class="w-full max-w-md rounded-2xl bg-slate-900 border border-slate-800 shadow-2xl overflow-hidden">
+      <div class="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
+        <div>
+          <h3 class="text-sm font-semibold text-slate-100">Configurar dispositivo</h3>
+          <p id="device-modal-title" class="text-xs text-slate-400 mt-0.5">—</p>
+        </div>
+        <button type="button" data-close-device-modal class="text-slate-400 hover:text-slate-100 text-lg leading-none">&times;</button>
+      </div>
+      <form id="device-form" class="p-5 space-y-4">
+        <div>
+          <label class="block text-xs font-medium text-slate-300 mb-1">Nombre personalizado</label>
+          <input id="input-custom-name" type="text" placeholder="Ej. Termostato Principal" class="w-full rounded-xl bg-slate-950 border border-slate-800 px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-sky-500" />
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-300 mb-1">Zona / Habitación</label>
+          <input id="input-room" type="text" placeholder="Ej. Sala, Oficina, Exterior" class="w-full rounded-xl bg-slate-950 border border-slate-800 px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-sky-500" />
+        </div>
+        <div class="pt-2 border-t border-slate-800 space-y-3">
+          <label class="flex items-center justify-between gap-3 cursor-pointer">
+            <span class="text-xs text-slate-300">Alertar por email si se desconecta (Offline)</span>
+            <input id="input-notify-offline" type="checkbox" class="h-4 w-4 rounded accent-sky-500" />
+          </label>
+          <div>
+            <label class="block text-xs font-medium text-slate-400 mb-1">Cooldown alerta offline (minutos)</label>
+            <input id="input-offline-cooldown" type="number" min="1" max="1440" value="60" class="w-full rounded-xl bg-slate-950 border border-slate-800 px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-sky-500" />
+          </div>
+        </div>
+        <div class="flex items-center justify-end gap-2 pt-2">
+          <button type="button" data-close-device-modal class="px-3.5 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-slate-100">Cancelar</button>
+          <button type="submit" class="px-4 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 text-xs font-semibold transition">Guardar cambios</button>
+        </div>
+      </form>
+    </div>
   </div>
 
-  <script>
-    const socketBadge = document.getElementById('socket-badge');
-    const dbStatus = document.getElementById('db-status');
-    const dbMeta = document.getElementById('db-meta');
-    const tuyaStatus = document.getElementById('tuya-status');
-    const tuyaMeta = document.getElementById('tuya-meta');
-    const weatherStatus = document.getElementById('weather-status');
-    const weatherMeta = document.getElementById('weather-meta');
-    const healthJson = document.getElementById('health-json');
-    const lastUpdated = document.getElementById('last-updated');
+  <!-- Modal: Ubicación Open-Meteo -->
+  <div id="location-modal" class="hidden fixed inset-0 z-50 items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
+    <div class="w-full max-w-md rounded-2xl bg-slate-900 border border-slate-800 shadow-2xl overflow-hidden">
+      <div class="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
+        <h3 class="text-sm font-semibold text-slate-100">Ubicación para Clima y Sol (Open-Meteo)</h3>
+        <button type="button" data-close-location-modal class="text-slate-400 hover:text-slate-100 text-lg leading-none">&times;</button>
+      </div>
+      <form id="location-form" class="p-5 space-y-4">
+        <div>
+          <label class="block text-xs font-medium text-slate-300 mb-1">Etiqueta / Ciudad</label>
+          <input id="input-loc-label" type="text" placeholder="Ej. Ciudad de México" class="w-full rounded-xl bg-slate-950 border border-slate-800 px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-sky-500" />
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-medium text-slate-300 mb-1">Latitud</label>
+            <input id="input-loc-lat" type="number" step="0.0001" required class="w-full rounded-xl bg-slate-950 border border-slate-800 px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-sky-500" />
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-300 mb-1">Longitud</label>
+            <input id="input-loc-lon" type="number" step="0.0001" required class="w-full rounded-xl bg-slate-950 border border-slate-800 px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-sky-500" />
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-300 mb-1">Zona horaria (IANA)</label>
+          <input id="input-loc-tz" type="text" placeholder="America/Mexico_City" required class="w-full rounded-xl bg-slate-950 border border-slate-800 px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-sky-500" />
+        </div>
+        <div class="flex items-center justify-end gap-2 pt-2">
+          <button type="button" data-close-location-modal class="px-3.5 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-slate-100">Cancelar</button>
+          <button type="submit" class="px-4 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 text-xs font-semibold transition">Actualizar clima</button>
+        </div>
+      </form>
+    </div>
+  </div>
 
-    async function loadHealth() {
-      try {
-        const res = await fetch('/api/health');
-        const data = await res.json();
-        healthJson.textContent = JSON.stringify(data, null, 2);
-        lastUpdated.textContent = new Date().toLocaleTimeString();
+  <!-- Contenedor de Toasts -->
+  <div id="toast-container" class="fixed bottom-4 right-4 z-50 flex flex-col gap-2 max-w-sm"></div>
 
-        if (data.database?.connected) {
-          dbStatus.textContent = 'Conectada';
-          dbStatus.className = 'text-lg font-semibold mt-2 text-emerald-400';
-          dbMeta.textContent = `${data.database.version} · ${data.database.latencyMs} ms`;
-        } else {
-          dbStatus.textContent = 'Sin conexión';
-          dbStatus.className = 'text-lg font-semibold mt-2 text-rose-400';
-          dbMeta.textContent = data.database?.error || 'Revisa variables DB_*';
-        }
-
-        if (data.tuya?.configured) {
-          tuyaStatus.textContent = 'Configurada';
-          tuyaStatus.className = 'text-lg font-semibold mt-2 text-emerald-400';
-          tuyaMeta.textContent = `${data.tuya.cachedDevices} dispositivo(s) en caché`;
-        } else {
-          tuyaStatus.textContent = 'Pendiente de claves';
-          tuyaStatus.className = 'text-lg font-semibold mt-2 text-amber-400';
-          tuyaMeta.textContent = 'Agrega TUYA_ACCESS_KEY y TUYA_SECRET_KEY';
-        }
-
-        if (data.weather?.ok) {
-          weatherStatus.textContent = `${data.weather.temperature}°C · ${data.weather.condition}`;
-          weatherStatus.className = 'text-lg font-semibold mt-2 text-sky-400';
-          const sr = data.weather.sunrise ? data.weather.sunrise.slice(11, 16) : '--:--';
-          const ss = data.weather.sunset ? data.weather.sunset.slice(11, 16) : '--:--';
-          weatherMeta.textContent = `${data.weather.location} · ☀ ${sr} / ☾ ${ss}`;
-        } else {
-          weatherStatus.textContent = 'Error Open-Meteo';
-          weatherStatus.className = 'text-lg font-semibold mt-2 text-rose-400';
-          weatherMeta.textContent = data.weather?.error || '—';
-        }
-      } catch (err) {
-        healthJson.textContent = 'Error consultando /api/health: ' + err.message;
-      }
-    }
-
-    const socket = io();
-    socket.on('connect', () => {
-      socketBadge.innerHTML = '<span class="h-2 w-2 rounded-full bg-emerald-400"></span>Socket.io: Online';
-      socketBadge.className = 'inline-flex items-center gap-2 text-xs font-medium px-3 py-1.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30';
-    });
-    socket.on('disconnect', () => {
-      socketBadge.innerHTML = '<span class="h-2 w-2 rounded-full bg-rose-400"></span>Socket.io: Desconectado';
-      socketBadge.className = 'inline-flex items-center gap-2 text-xs font-medium px-3 py-1.5 rounded-full bg-rose-500/15 text-rose-300 border border-rose-500/30';
-    });
-
-    document.getElementById('refresh-btn').addEventListener('click', loadHealth);
-    loadHealth();
-  </script>
+  <script type="module" src="/js/app.js"></script>
 </body>
 </html>

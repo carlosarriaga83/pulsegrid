@@ -79,10 +79,32 @@ export async function updateDevice(req, res, next) {
   }
 }
 
+export async function seedDemo(_req, res, next) {
+  try {
+    const devices = await tuyaService.seedDemoDevices();
+    emitDevicesSnapshot(devices);
+    res.json({ ok: true, count: devices.length, data: devices });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function clearDemo(_req, res, next) {
+  try {
+    const devices = await tuyaService.clearDemoDevices();
+    emitDevicesSnapshot(devices);
+    res.json({ ok: true, count: devices.length, data: devices });
+  } catch (err) {
+    next(err);
+  }
+}
+
 export default {
   listDevices,
   syncDevices,
   getDevice,
   sendCommands,
   updateDevice,
+  seedDemo,
+  clearDemo,
 };
