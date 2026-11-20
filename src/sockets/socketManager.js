@@ -9,8 +9,9 @@ let io = null;
 export function initSocket(httpServer) {
   io = new Server(httpServer, {
     cors: {
-      origin: env.corsOrigin === '*' ? '*' : env.corsOrigin.split(',').map((s) => s.trim()),
+      origin: env.allowedOrigins === '*' ? '*' : env.allowedOrigins,
       methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE'],
+      credentials: true,
     },
     pingTimeout: 20000,
     pingInterval: 25000,

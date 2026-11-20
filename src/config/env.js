@@ -17,12 +17,40 @@ const toBool = (value, fallback = false) => {
   return String(value).toLowerCase() === 'true' || value === '1';
 };
 
+const DEFAULT_APP_URL = 'https://pulsegrid.2api2.com';
+
+function buildAllowedOrigins(appUrl, corsOriginRaw) {
+  if (corsOriginRaw === '*') return '*';
+
+  const set = new Set();
+  const addNormalized = (raw) => {
+    if (!raw) return;
+    const trimmed = String(raw).trim().replace(/\/+$/, '');
+    if (trimmed) set.add(trimmed);
+  };
+
+  addNormalized(appUrl);
+  addNormalized(DEFAULT_APP_URL);
+
+  if (corsOriginRaw) {
+    for (const part of String(corsOriginRaw).split(',')) {
+      addNormalized(part);
+    }
+  }
+
+  return Array.from(set);
+}
+
+const resolvedAppUrl = process.env.APP_URL || DEFAULT_APP_URL;
+const resolvedCorsOrigin = process.env.CORS_ORIGIN || '';
+
 export const env = {
   nodeEnv: process.env.NODE_ENV || 'development',
   isProd: (process.env.NODE_ENV || 'development') === 'production',
   port: toInt(process.env.PORT, 3000),
-  appUrl: process.env.APP_URL || 'http://localhost:3000',
-  corsOrigin: process.env.CORS_ORIGIN || '*',
+  appUrl: resolvedAppUrl,
+  corsOrigin: resolvedCorsOrigin || resolvedAppUrl,
+  allowedOrigins: buildAllowedOrigins(resolvedAppUrl, resolvedCorsOrigin),
   logLevel: (process.env.LOG_LEVEL || 'info').toLowerCase(),
 
   db: {

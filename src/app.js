@@ -33,9 +33,20 @@ app.use(
   })
 );
 
+const corsOriginConfig =
+  env.allowedOrigins === '*'
+    ? true
+    : (origin, callback) => {
+        // Permitir peticiones sin Origin (healthchecks, curl, mismo servidor) o de orígenes permitidos
+        if (!origin || env.allowedOrigins.includes(origin.replace(/\/+$/, ''))) {
+          return callback(null, true);
+        }
+        return callback(new Error(`Origen CORS no permitido: ${origin}`));
+      };
+
 app.use(
   cors({
-    origin: env.corsOrigin === '*' ? true : env.corsOrigin.split(',').map((s) => s.trim()),
+    origin: corsOriginConfig,
     credentials: true,
   })
 );
