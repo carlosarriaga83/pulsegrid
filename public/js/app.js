@@ -6,6 +6,8 @@ import {
   handleLiveEvaluation,
   handleLiveTrigger,
 } from './ui/automationBuilder.js';
+import { initAnalyticsModule, refreshAvailableSeries } from './ui/analyticsView.js';
+import { initAlertsModule, loadAlertsData } from './ui/alertsView.js';
 import { showToast } from './ui/toast.js';
 
 const state = {
@@ -288,6 +290,9 @@ function setupTabs() {
       document.querySelectorAll('[data-tab-panel]').forEach((panel) => {
         panel.classList.toggle('hidden', panel.dataset.tabPanel !== target);
       });
+
+      if (target === 'analytics') refreshAvailableSeries();
+      if (target === 'alerts') loadAlertsData();
     });
   });
 }
@@ -427,6 +432,10 @@ async function init() {
     handleLiveTrigger(payload);
   });
 
+  onSocketEvent('alert', () => {
+    loadAlertsData();
+  });
+
   // Carga inicial vía REST (fallback instantáneo mientras conecta Socket.io)
   try {
     const devRes = await api.getDevices(false);
@@ -437,10 +446,12 @@ async function init() {
 
   loadWeather(false);
 
-  // Inicializar módulo de automatizaciones (Fase 4)
+  // Inicializar módulos de Fases 4 y 5
   initAutomationsModule({
     getDevices: () => Array.from(state.devices.values()),
   });
+  initAnalyticsModule();
+  initAlertsModule();
 }
 
 init();

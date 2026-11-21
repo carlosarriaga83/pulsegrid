@@ -68,6 +68,50 @@ export const api = {
     request('/api/automations/evaluate-all', { method: 'POST' }),
   getAutomationLogs: (id, limit = 20) =>
     request(`/api/automations/${id}/logs?limit=${limit}`),
+
+  // Telemetría e Historial (Fase 5)
+  getTelemetrySeries: () => request('/api/telemetry/series'),
+  getTelemetryHistory: ({ series, range = '24h', from, to }) => {
+    const params = new URLSearchParams({
+      series: Array.isArray(series) ? series.join(',') : series,
+      range,
+    });
+    if (from) params.set('from', from);
+    if (to) params.set('to', to);
+    return request(`/api/telemetry/history?${params.toString()}`);
+  },
+  captureTelemetryNow: () => request('/api/telemetry/capture', { method: 'POST' }),
+  seedDemoTelemetry: (hours = 48) =>
+    request('/api/telemetry/seed-demo', {
+      method: 'POST',
+      body: JSON.stringify({ hours }),
+    }),
+
+  // Alertas SMTP y Destinatarios (Fase 5)
+  getAlertConfig: () => request('/api/alerts/config'),
+  saveSmtpConfig: (payload) =>
+    request('/api/alerts/smtp', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+  addAlertRecipient: (payload) =>
+    request('/api/alerts/recipients', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  updateAlertRecipient: (id, payload) =>
+    request(`/api/alerts/recipients/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
+  deleteAlertRecipient: (id) =>
+    request(`/api/alerts/recipients/${id}`, { method: 'DELETE' }),
+  sendTestAlert: (email) =>
+    request('/api/alerts/test', {
+      method: 'POST',
+      body: JSON.stringify(email ? { email } : {}),
+    }),
+  getAlertLogs: (limit = 40) => request(`/api/alerts/logs?limit=${limit}`),
 };
 
 export default api;

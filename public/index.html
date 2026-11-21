@@ -6,6 +6,10 @@
   <title>PulseGrid — Control y Automatización IoT</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="/socket.io/socket.io.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.2.0/dist/chartjs-plugin-zoom.min.js"></script>
   <link rel="stylesheet" href="/css/styles.css" />
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen antialiased selection:bg-sky-500/30">
@@ -210,28 +214,203 @@
     </section>
 
     <!-- ========================================================= -->
-    <!-- PESTAÑA 3: ANALÍTICA Y GRÁFICAS (FASE 5)                  -->
+    <!-- PESTAÑA 3: ANALÍTICA Y GRÁFICAS INTERACTIVAS (FASE 5)     -->
     <!-- ========================================================= -->
-    <section data-tab-panel="analytics" class="hidden">
-      <div class="rounded-2xl bg-slate-900/70 border border-slate-800 p-8 text-center">
-        <span class="text-xs font-semibold px-2.5 py-1 rounded-full bg-sky-500/15 text-sky-300 border border-sky-500/30">Próxima Fase · Fase 5</span>
-        <h2 class="text-xl font-bold mt-3">Analítica Histórica Interactiva</h2>
-        <p class="text-sm text-slate-400 mt-2 max-w-xl mx-auto">
-          Gráficas de líneas y escalonadas con Chart.js + zoom por arrastre, zoom con rueda/pinch, desplazamiento horizontal (pan), botón Reset Zoom y crosshair sincronizado para múltiples dispositivos.
-        </p>
+    <section data-tab-panel="analytics" class="hidden space-y-5">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 class="text-lg font-bold text-slate-100">Analítica e Historial Interactivo</h2>
+          <p class="text-xs text-slate-400 mt-0.5">
+            Compara múltiples dispositivos, arrastra para hacer zoom, usa la rueda/pinch o desplaza el eje temporal.
+          </p>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+          <button id="btn-seed-telemetry" type="button" class="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 text-xs font-medium transition">
+            Generar historial demo (48h)
+          </button>
+          <button id="btn-capture-telemetry" type="button" class="px-3.5 py-1.5 rounded-xl bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-500/40 text-xs font-semibold transition">
+            Capturar lectura ahora
+          </button>
+        </div>
       </div>
+
+      <!-- Selector de rango y controles de interacción de la gráfica -->
+      <div class="rounded-2xl bg-slate-900/90 border border-slate-800 p-4 space-y-4">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <!-- Rangos rápidos -->
+          <div class="flex flex-wrap items-center gap-1.5">
+            <button type="button" data-range-btn="24h" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-sky-500/20 text-sky-300 border border-sky-500/40">24h</button>
+            <button type="button" data-range-btn="7d" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-900 text-slate-400 border border-slate-800 hover:text-slate-200">7 días</button>
+            <button type="button" data-range-btn="30d" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-900 text-slate-400 border border-slate-800 hover:text-slate-200">30 días</button>
+            <button type="button" data-range-btn="custom" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-900 text-slate-400 border border-slate-800 hover:text-slate-200">Personalizado</button>
+          </div>
+
+          <!-- Controles Zoom / Pan / Reset Zoom -->
+          <div class="flex flex-wrap items-center gap-2">
+            <div class="inline-flex items-center rounded-lg bg-slate-950 border border-slate-800 p-0.5" title="Cambia el gesto de arrastre del mouse">
+              <button id="btn-mode-zoom" type="button" class="px-2.5 py-1 rounded-md text-xs font-semibold bg-sky-500/20 text-sky-300 border border-sky-500/40">
+                🔍 Zoom arrastre
+              </button>
+              <button id="btn-mode-pan" type="button" class="px-2.5 py-1 rounded-md text-xs font-medium text-slate-400 hover:text-slate-200 border border-transparent">
+                ✋ Desplazar (Pan)
+              </button>
+            </div>
+
+            <button id="btn-reset-zoom" type="button" disabled class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 text-slate-500 border border-slate-800 text-xs font-medium cursor-not-allowed transition">
+              Reset Zoom
+            </button>
+          </div>
+        </div>
+
+        <!-- Rango de fechas personalizado -->
+        <div id="analytics-custom-dates" class="hidden flex flex-wrap items-end gap-3 pt-2 border-t border-slate-800/80">
+          <div>
+            <label class="block text-[11px] text-slate-400 mb-1">Desde</label>
+            <input id="analytics-from" type="datetime-local" class="rounded-xl bg-slate-950 border border-slate-800 px-3 py-1.5 text-xs text-slate-100" />
+          </div>
+          <div>
+            <label class="block text-[11px] text-slate-400 mb-1">Hasta</label>
+            <input id="analytics-to" type="datetime-local" class="rounded-xl bg-slate-950 border border-slate-800 px-3 py-1.5 text-xs text-slate-100" />
+          </div>
+          <button id="btn-apply-custom-range" type="button" class="px-4 py-1.5 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 text-xs font-semibold transition">
+            Aplicar rango
+          </button>
+        </div>
+
+        <!-- Selector multi-dispositivo / multi-DP -->
+        <div class="pt-2 border-t border-slate-800/80">
+          <p class="text-[11px] uppercase tracking-wider text-slate-500 mb-2">Series graficadas (clic para comparar hasta 6)</p>
+          <div id="analytics-series-chips" class="flex flex-wrap items-center gap-2"></div>
+        </div>
+      </div>
+
+      <!-- Canvas interactivo Chart.js -->
+      <div class="relative rounded-2xl bg-slate-900/90 border border-slate-800 p-4 sm:p-5">
+        <div class="flex items-center justify-between text-[11px] text-slate-500 mb-3">
+          <span>Tip: Arrastra para hacer zoom · Rueda/pinch para acercar · <kbd class="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300">Shift</kbd> + arrastrar para desplazar</span>
+        </div>
+        <div class="relative h-[380px] sm:h-[440px] w-full">
+          <canvas id="telemetry-chart"></canvas>
+          <div id="chart-empty-overlay" class="hidden absolute inset-0 flex flex-col items-center justify-center bg-slate-950/70 rounded-xl text-center p-6">
+            <p class="text-sm font-semibold text-slate-200">Sin datos históricos en este rango</p>
+            <p class="text-xs text-slate-400 mt-1 max-w-md">
+              Selecciona otra serie, pulsa "Capturar lectura ahora" o haz clic en "Generar historial demo (48h)" para probar el zoom y desplazamiento interactivo.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tarjetas de estadísticas por serie -->
+      <div id="analytics-stats" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3"></div>
     </section>
 
     <!-- ========================================================= -->
-    <!-- PESTAÑA 4: ALERTAS SMTP (FASE 5)                          -->
+    <!-- PESTAÑA 4: ALERTAS SMTP Y COOLDOWN (FASE 5)               -->
     <!-- ========================================================= -->
-    <section data-tab-panel="alerts" class="hidden">
-      <div class="rounded-2xl bg-slate-900/70 border border-slate-800 p-8 text-center">
-        <span class="text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">Próxima Fase · Fase 5</span>
-        <h2 class="text-xl font-bold mt-3">Alertas por Correo y Cooldown</h2>
-        <p class="text-sm text-slate-400 mt-2 max-w-xl mx-auto">
-          Gestión de destinatarios SMTP, pruebas de envío, alertas por desconexión offline y registro de envíos con enfriamiento configurable.
-        </p>
+    <section data-tab-panel="alerts" class="hidden space-y-5">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 class="text-lg font-bold text-slate-100">Alertas por Correo (SMTP) y Cooldown</h2>
+          <p class="text-xs text-slate-400 mt-0.5">
+            Configura tu servidor SMTP, administra destinatarios y audita los envíos o bloqueos por enfriamiento.
+          </p>
+        </div>
+        <span id="smtp-status-badge" class="text-[11px] px-2.5 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30">
+          Verificando SMTP...
+        </span>
+      </div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <!-- Configuración SMTP -->
+        <div class="rounded-2xl bg-slate-900/90 border border-slate-800 p-5 space-y-4">
+          <div class="flex items-center justify-between">
+            <h3 class="text-sm font-semibold text-slate-100">Servidor SMTP</h3>
+            <button id="btn-test-smtp" type="button" class="px-3 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 text-xs font-semibold transition">
+              Enviar correo de prueba
+            </button>
+          </div>
+
+          <form id="smtp-form" class="space-y-3">
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div class="sm:col-span-2">
+                <label class="block text-[11px] text-slate-400 mb-1">Host SMTP</label>
+                <input id="smtp-host" type="text" placeholder="smtp.hostinger.com" class="w-full rounded-xl bg-slate-950 border border-slate-800 px-3 py-2 text-xs text-slate-100" />
+              </div>
+              <div>
+                <label class="block text-[11px] text-slate-400 mb-1">Puerto</label>
+                <input id="smtp-port" type="number" value="465" class="w-full rounded-xl bg-slate-950 border border-slate-800 px-3 py-2 text-xs text-slate-100" />
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label class="block text-[11px] text-slate-400 mb-1">Usuario SMTP</label>
+                <input id="smtp-user" type="text" placeholder="alertas@pulsegrid.2api2.com" class="w-full rounded-xl bg-slate-950 border border-slate-800 px-3 py-2 text-xs text-slate-100" />
+              </div>
+              <div>
+                <label class="block text-[11px] text-slate-400 mb-1">Contraseña SMTP</label>
+                <input id="smtp-pass" type="password" placeholder="Contraseña SMTP" class="w-full rounded-xl bg-slate-950 border border-slate-800 px-3 py-2 text-xs text-slate-100" />
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label class="block text-[11px] text-slate-400 mb-1">Nombre remitente</label>
+                <input id="smtp-from-name" type="text" placeholder="PulseGrid Alertas" class="w-full rounded-xl bg-slate-950 border border-slate-800 px-3 py-2 text-xs text-slate-100" />
+              </div>
+              <div>
+                <label class="block text-[11px] text-slate-400 mb-1">Email remitente</label>
+                <input id="smtp-from-email" type="email" placeholder="alertas@pulsegrid.2api2.com" class="w-full rounded-xl bg-slate-950 border border-slate-800 px-3 py-2 text-xs text-slate-100" />
+              </div>
+            </div>
+
+            <div class="flex items-center justify-between pt-2">
+              <label class="inline-flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+                <input id="smtp-secure" type="checkbox" checked class="h-4 w-4 accent-sky-500" />
+                <span>Usar SSL/TLS seguro (puerto 465)</span>
+              </label>
+              <button type="submit" class="px-4 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 text-xs font-semibold transition">
+                Guardar SMTP
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <!-- Destinatarios -->
+        <div class="rounded-2xl bg-slate-900/90 border border-slate-800 p-5 space-y-4">
+          <h3 class="text-sm font-semibold text-slate-100">Destinatarios de Alertas</h3>
+          <form id="recipient-form" class="flex flex-wrap items-center gap-2">
+            <input id="rec-name" type="text" placeholder="Nombre" class="flex-1 min-w-[120px] rounded-xl bg-slate-950 border border-slate-800 px-3 py-2 text-xs text-slate-100" />
+            <input id="rec-email" type="email" required placeholder="correo@ejemplo.com" class="flex-[2] min-w-[180px] rounded-xl bg-slate-950 border border-slate-800 px-3 py-2 text-xs text-slate-100" />
+            <button type="submit" class="px-3.5 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 text-xs font-semibold transition">
+              Agregar
+            </button>
+          </form>
+          <div id="alert-recipients-list" class="space-y-2 max-h-64 overflow-y-auto pr-1"></div>
+        </div>
+      </div>
+
+      <!-- Historial de alertas enviadas / cooldown -->
+      <div class="rounded-2xl bg-slate-900/90 border border-slate-800 p-5">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-sm font-semibold text-slate-100">Historial de Envíos y Cooldown</h3>
+          <button id="btn-refresh-alert-logs" type="button" class="px-3 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 border border-slate-700 transition">
+            Actualizar
+          </button>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left">
+            <thead>
+              <tr class="text-[10px] uppercase tracking-wider text-slate-500">
+                <th class="pb-2 pr-3">Fecha</th>
+                <th class="pb-2 pr-3">Estado</th>
+                <th class="pb-2 pr-3">Asunto / Detalle</th>
+                <th class="pb-2">Destinatarios</th>
+              </tr>
+            </thead>
+            <tbody id="alert-logs-tbody"></tbody>
+          </table>
+        </div>
       </div>
     </section>
   </main>

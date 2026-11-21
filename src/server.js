@@ -5,6 +5,7 @@ import { testConnection, closePool } from './config/db.js';
 import { initSocket, closeSocket } from './sockets/socketManager.js';
 import tuyaService from './services/tuyaService.js';
 import automationEngine from './services/automationEngine.js';
+import emailService from './services/emailService.js';
 import logger from './utils/logger.js';
 
 const server = http.createServer(app);
@@ -36,6 +37,7 @@ async function bootstrap() {
 
   server.listen(env.port, () => {
     logger.info(`PulseGrid escuchando en el puerto ${env.port} [${env.nodeEnv}]`);
+    automationEngine.registerEmailDispatcher(emailService.sendAlert);
     automationEngine.startScheduler();
   });
 }

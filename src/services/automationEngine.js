@@ -3,14 +3,17 @@ import env from '../config/env.js';
 import { query } from '../config/db.js';
 import tuyaService from './tuyaService.js';
 import weatherService, { getSolarEventTime } from './weatherService.js';
+import telemetryService from './telemetryService.js';
+import emailService from './emailService.js';
 import { emitDeviceUpdate, emitAlert, getIO } from '../sockets/socketManager.js';
 import logger from '../utils/logger.js';
 
 let evaluationTask = null;
 let pollingTask = null;
+let telemetryTask = null;
 let cleanupTask = null;
 let isEvaluating = false;
-let emailDispatcher = null; // Hook conectable por emailService en Fase 5
+let emailDispatcher = null; // Hook conectado a emailService en Fase 5
 
 export function registerEmailDispatcher(fn) {
   emailDispatcher = fn;
@@ -705,6 +708,14 @@ export function startScheduler() {
       if (res.changes?.length > 0) {
         for (const ch of res.changes) {
           emitDeviceUpdate(ch.device);
+          if (ch.statusChanged) {
+            telemetryService.recordDeviceSnapshot(ch.device).catch(() => {});
+          }
+          if (ch.wentOffline) {
+            emailService.sendDeviceOfflineAlert(ch.device).catch((err) => {
+              logger.warn(`Error enviando alerta offline para ${ch.device.id}`, { error: err.message });
+            });
+          }
         }
       }
     } catch (err) {
@@ -712,7 +723,16 @@ export function startScheduler() {
     }
   });
 
-  // Limpieza diaria a las 03:30 AM de logs antiguos
+  // Captura periódica de telemetría cada 5 minutos para series continuas
+  telemetryTask = cron.schedule('*/5 * * * *', async () => {
+    try {
+      await telemetryService.captureAllDevicesTelemetry();
+    } catch (err) {
+      logger.warn('Error en captura periódica de telemetría', { error: err.message });
+    }
+  });
+
+  // Limpieza diaria a las 03:30 AM de logs y telemetría antiguos
   cleanupTask = cron.schedule('30 3 * * *', async () => {
     try {
       const days = env.polling.automationLogRetentionDays || 30;
@@ -723,8 +743,12 @@ export function startScheduler() {
       if (res.affectedRows > 0) {
         logger.info(`Limpieza de automation_logs: ${res.affectedRows} registro(s) eliminados`);
       }
+      const purgedTelemetry = await telemetryService.purgeOldTelemetry();
+      if (purgedTelemetry > 0) {
+        logger.info(`Limpieza de telemetry_logs: ${purgedTelemetry} registro(s) eliminados`);
+      }
     } catch (err) {
-      logger.warn('Error en limpieza de automation_logs', { error: err.message });
+      logger.warn('Error en limpieza programada', { error: err.message });
     }
   });
 
@@ -734,6 +758,7 @@ export function startScheduler() {
 export function stopScheduler() {
   evaluationTask?.stop();
   pollingTask?.stop();
+  telemetryTask?.stop();
   cleanupTask?.stop();
   logger.info('Scheduler node-cron detenido correctamente');
 }

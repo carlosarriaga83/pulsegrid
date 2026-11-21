@@ -3,6 +3,7 @@ import env from '../config/env.js';
 import logger from '../utils/logger.js';
 import tuyaService from '../services/tuyaService.js';
 import weatherService from '../services/weatherService.js';
+import telemetryService from '../services/telemetryService.js';
 
 let io = null;
 
@@ -39,6 +40,7 @@ export function initSocket(httpServer) {
       try {
         const { deviceId, commands } = payload || {};
         const result = await tuyaService.sendDeviceCommands(deviceId, commands);
+        telemetryService.recordCommandsTelemetry(result.device, result.commands).catch(() => {});
         emitDeviceUpdate(result.device);
         if (typeof ack === 'function') ack({ ok: true, data: result });
       } catch (err) {

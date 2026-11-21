@@ -1,4 +1,5 @@
 import tuyaService from '../services/tuyaService.js';
+import telemetryService from '../services/telemetryService.js';
 import { emitDeviceUpdate, emitDevicesSnapshot } from '../sockets/socketManager.js';
 
 export async function listDevices(req, res, next) {
@@ -59,6 +60,7 @@ export async function sendCommands(req, res, next) {
     }
 
     const result = await tuyaService.sendDeviceCommands(req.params.id, cmdList);
+    telemetryService.recordCommandsTelemetry(result.device, result.commands).catch(() => {});
     emitDeviceUpdate(result.device);
     res.json({ ok: true, data: result });
   } catch (err) {
