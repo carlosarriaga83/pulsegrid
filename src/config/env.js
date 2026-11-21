@@ -41,6 +41,29 @@ function buildAllowedOrigins(appUrl, corsOriginRaw) {
   return Array.from(set);
 }
 
+/**
+ * Evalúa si un header Origin está permitido para Express y Socket.io.
+ * Permite: mismo host (same-origin), orígenes en APP_URL/CORS_ORIGIN y dominios temporales *.hostingersite.com.
+ */
+export function isOriginAllowed(origin, requestHost = '') {
+  if (!origin) return true;
+  if (env.allowedOrigins === '*') return true;
+
+  const normalized = String(origin).trim().replace(/\/+$/, '');
+  if (env.allowedOrigins.includes(normalized)) return true;
+
+  try {
+    const parsed = new URL(normalized);
+    const reqHost = String(requestHost || '').split(',')[0].trim().toLowerCase();
+    if (reqHost && parsed.host.toLowerCase() === reqHost) return true;
+    if (parsed.hostname.toLowerCase().endsWith('.hostingersite.com')) return true;
+  } catch {
+    return false;
+  }
+
+  return false;
+}
+
 const resolvedAppUrl = process.env.APP_URL || DEFAULT_APP_URL;
 const resolvedCorsOrigin = process.env.CORS_ORIGIN || '';
 

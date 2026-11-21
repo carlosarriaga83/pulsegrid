@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
-import env from './config/env.js';
+import env, { isOriginAllowed } from './config/env.js';
 import apiRoutes from './routes/index.js';
 import { notFoundHandler, errorHandler } from './middlewares/errorHandler.js';
 
@@ -33,21 +33,14 @@ app.use(
   })
 );
 
-const corsOriginConfig =
-  env.allowedOrigins === '*'
-    ? true
-    : (origin, callback) => {
-        // Permitir peticiones sin Origin (healthchecks, curl, mismo servidor) o de orígenes permitidos
-        if (!origin || env.allowedOrigins.includes(origin.replace(/\/+$/, ''))) {
-          return callback(null, true);
-        }
-        return callback(new Error(`Origen CORS no permitido: ${origin}`));
-      };
-
 app.use(
-  cors({
-    origin: corsOriginConfig,
-    credentials: true,
+  cors((req, callback) => {
+    const origin = req.headers.origin;
+    const reqHost = req.headers['x-forwarded-host'] || req.headers.host || '';
+    if (isOriginAllowed(origin, reqHost)) {
+      return callback(null, { origin: true, credentials: true });
+    }
+    return callback(new Error(`Origen CORS no permitido: ${origin}`));
   })
 );
 

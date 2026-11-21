@@ -1,5 +1,5 @@
 import { Server } from 'socket.io';
-import env from '../config/env.js';
+import env, { isOriginAllowed } from '../config/env.js';
 import logger from '../utils/logger.js';
 import tuyaService from '../services/tuyaService.js';
 import weatherService from '../services/weatherService.js';
@@ -10,7 +10,10 @@ let io = null;
 export function initSocket(httpServer) {
   io = new Server(httpServer, {
     cors: {
-      origin: env.allowedOrigins === '*' ? '*' : env.allowedOrigins,
+      origin: (origin, callback) => {
+        if (isOriginAllowed(origin)) return callback(null, true);
+        return callback(new Error(`Origen Socket.io no permitido: ${origin}`));
+      },
       methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE'],
       credentials: true,
     },

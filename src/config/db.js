@@ -15,7 +15,8 @@ const pool = mysql.createPool({
   queueLimit: 0,
   enableKeepAlive: true,
   keepAliveInitialDelay: 10000,
-  timezone: env.db.timezone,
+  // Usar siempre UTC ('Z') evita desfases horarios entre DATETIME de MySQL y Date() de Node.js
+  timezone: 'Z',
   charset: 'utf8mb4',
 });
 

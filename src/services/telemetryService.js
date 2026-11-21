@@ -120,7 +120,7 @@ export async function recordDeviceSnapshot(device) {
     if (rawVal === undefined || rawVal === null) continue;
     const meta = getDpMeta(device, code);
     const norm = normalizeForTelemetry(rawVal, meta);
-    placeholders.push('(?, ?, ?, ?, ?, NOW())');
+    placeholders.push('(?, ?, ?, ?, ?, UTC_TIMESTAMP())');
     params.push(device.id, code, norm.valueType, norm.valueNumeric, norm.valueText);
   }
 
@@ -147,7 +147,7 @@ export async function recordCommandsTelemetry(device, commands) {
   for (const cmd of commands) {
     const meta = getDpMeta(device, cmd.code);
     const norm = normalizeForTelemetry(cmd.value, meta);
-    placeholders.push('(?, ?, ?, ?, ?, NOW())');
+    placeholders.push('(?, ?, ?, ?, ?, UTC_TIMESTAMP())');
     params.push(device.id, cmd.code, norm.valueType, norm.valueNumeric, norm.valueText);
   }
 
