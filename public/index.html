@@ -175,15 +175,37 @@
     </section>
 
     <!-- ========================================================= -->
-    <!-- PESTAÑA 2: AUTOMATIZACIONES (FASE 4)                      -->
+    <!-- PESTAÑA 2: AUTOMATIZACIONES (FASE 4 ACTIVA)               -->
     <!-- ========================================================= -->
-    <section data-tab-panel="automations" class="hidden">
-      <div class="rounded-2xl bg-slate-900/70 border border-slate-800 p-8 text-center">
-        <span class="text-xs font-semibold px-2.5 py-1 rounded-full bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">Próxima Fase · Fase 4</span>
-        <h2 class="text-xl font-bold mt-3">Motor de Automatizaciones (SI / CUANDO / ENTONCES)</h2>
-        <p class="text-sm text-slate-400 mt-2 max-w-xl mx-auto">
-          Constructor visual en lenguaje natural con comparaciones entre dispositivos, horarios, amanecer/atardecer con offsets (Open-Meteo), acciones múltiples y vista de evaluación en vivo.
+    <section data-tab-panel="automations" class="hidden space-y-5">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 class="text-lg font-bold text-slate-100">Motor de Automatizaciones</h2>
+          <p class="text-xs text-slate-400 mt-0.5">
+            Reglas en lenguaje natural (<strong class="text-sky-400">SI</strong> / <strong class="text-amber-400">CUANDO</strong> / <strong class="text-emerald-400">ENTONCES</strong>) evaluadas automáticamente cada minuto.
+            <span id="automations-counter" class="ml-1 text-slate-300 font-medium"></span>
+          </p>
+        </div>
+        <div class="flex items-center gap-2">
+          <button id="btn-eval-all-automations" type="button" class="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-800 text-xs font-medium transition">
+            Evaluar motor ahora
+          </button>
+          <button id="btn-new-automation" type="button" class="px-4 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 text-xs font-semibold shadow-lg shadow-sky-500/20 transition">
+            + Nueva Automatización
+          </button>
+        </div>
+      </div>
+
+      <div id="automations-list" class="space-y-4"></div>
+
+      <div id="automations-empty" class="hidden rounded-2xl border border-dashed border-slate-800 bg-slate-900/40 p-12 text-center">
+        <p class="text-base font-semibold text-slate-200">Aún no tienes reglas de automatización</p>
+        <p class="text-xs text-slate-400 mt-1 max-w-md mx-auto">
+          Crea tu primera regla comparando dispositivos, valores fijos o clima de Open-Meteo (incluyendo amanecer/atardecer con offsets).
         </p>
+        <button id="btn-empty-new-automation" type="button" class="mt-4 px-4 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 text-xs font-semibold transition">
+          Crear primera automatización
+        </button>
       </div>
     </section>
 
@@ -280,6 +302,161 @@
         <div class="flex items-center justify-end gap-2 pt-2">
           <button type="button" data-close-location-modal class="px-3.5 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-slate-100">Cancelar</button>
           <button type="submit" class="px-4 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 text-xs font-semibold transition">Actualizar clima</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Constructor Visual de Automatizaciones (SI / CUANDO / ENTONCES) -->
+  <div id="automation-modal" class="hidden fixed inset-0 z-50 items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
+    <div class="w-full max-w-3xl max-h-[90vh] flex flex-col rounded-2xl bg-slate-900 border border-slate-800 shadow-2xl overflow-hidden">
+      <div class="px-5 py-4 border-b border-slate-800 flex items-center justify-between flex-shrink-0">
+        <h3 id="automation-modal-title" class="text-sm font-semibold text-slate-100">Nueva Automatización</h3>
+        <button type="button" data-close-automation-modal class="text-slate-400 hover:text-slate-100 text-lg leading-none">&times;</button>
+      </div>
+
+      <form id="automation-form" class="p-5 space-y-5 overflow-y-auto flex-1">
+        <!-- Nombre y descripción -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-medium text-slate-300 mb-1">Nombre de la regla *</label>
+            <input id="builder-name" type="text" required placeholder="Ej. Encender luz al atardecer si hace calor" class="w-full rounded-xl bg-slate-950 border border-slate-800 px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-sky-500" />
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-300 mb-1">Descripción (opcional)</label>
+            <input id="builder-description" type="text" placeholder="Nota corta sobre el objetivo de esta regla" class="w-full rounded-xl bg-slate-950 border border-slate-800 px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-sky-500" />
+          </div>
+        </div>
+
+        <!-- BLOQUE 1: SI (Condiciones) -->
+        <div class="rounded-2xl border border-sky-500/25 bg-sky-500/5 p-4 space-y-3">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div class="flex items-center gap-2">
+              <span class="px-2 py-0.5 rounded-md bg-sky-500/20 text-sky-300 text-xs font-bold">1. SI</span>
+              <span class="text-xs text-slate-300">Se cumplen</span>
+              <select id="builder-logic" class="rounded-lg bg-slate-950 border border-slate-700 px-2 py-1 text-xs text-slate-100">
+                <option value="ALL">todas las condiciones (Y)</option>
+                <option value="ANY">cualquiera de las condiciones (O)</option>
+              </select>
+            </div>
+            <button id="btn-add-condition" type="button" class="px-2.5 py-1 rounded-lg bg-sky-500/20 hover:bg-sky-500/30 text-sky-200 border border-sky-500/40 text-xs font-medium transition">
+              + Agregar condición
+            </button>
+          </div>
+          <div id="builder-conditions-list" class="space-y-2"></div>
+        </div>
+
+        <!-- BLOQUE 2: CUANDO (Restricciones y Entorno) -->
+        <div class="rounded-2xl border border-amber-500/25 bg-amber-500/5 p-4 space-y-3">
+          <div class="flex items-center gap-2">
+            <span class="px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-300 text-xs font-bold">2. CUANDO</span>
+            <span class="text-xs text-slate-300">Restricciones de horario, días y entorno (Open-Meteo)</span>
+          </div>
+
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <label class="block text-[11px] text-slate-400 mb-1.5">Días activos</label>
+              <div id="builder-days-pills" class="flex items-center gap-1.5"></div>
+            </div>
+
+            <div class="flex-1 min-w-[200px]">
+              <label class="block text-[11px] text-slate-400 mb-1.5">Ventana horaria / solar</label>
+              <select id="builder-schedule-mode" class="w-full rounded-xl bg-slate-950 border border-slate-800 px-3 py-2 text-xs text-slate-100">
+                <option value="anytime">A cualquier hora</option>
+                <option value="time_range">Horario específico (Desde – Hasta)</option>
+                <option value="solar">Evento solar (Amanecer / Atardecer con offset)</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Sub-campos Horario específico -->
+          <div id="builder-time-range-fields" class="hidden grid grid-cols-2 gap-3 pt-1">
+            <div>
+              <label class="block text-[11px] text-slate-400 mb-1">Desde</label>
+              <input id="builder-start-time" type="time" value="08:00" class="w-full rounded-xl bg-slate-950 border border-slate-800 px-3 py-2 text-xs text-slate-100" />
+            </div>
+            <div>
+              <label class="block text-[11px] text-slate-400 mb-1">Hasta</label>
+              <input id="builder-end-time" type="time" value="22:00" class="w-full rounded-xl bg-slate-950 border border-slate-800 px-3 py-2 text-xs text-slate-100" />
+            </div>
+          </div>
+
+          <!-- Sub-campos Evento solar -->
+          <div id="builder-solar-fields" class="hidden grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+            <div>
+              <label class="block text-[11px] text-slate-400 mb-1">Condición solar (Open-Meteo)</label>
+              <select id="builder-solar-rule" class="w-full rounded-xl bg-slate-950 border border-slate-800 px-3 py-2 text-xs text-slate-100">
+                <option value="after_sunset">Después del atardecer</option>
+                <option value="before_sunset">Antes del atardecer</option>
+                <option value="after_sunrise">Después del amanecer</option>
+                <option value="before_sunrise">Antes del amanecer</option>
+                <option value="night">Durante la noche (atardecer → amanecer)</option>
+                <option value="day">Durante el día (amanecer → atardecer)</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-[11px] text-slate-400 mb-1">Offset en minutos (ej. -30 = 30 min antes)</label>
+              <input id="builder-solar-offset" type="number" min="-180" max="180" value="-30" class="w-full rounded-xl bg-slate-950 border border-slate-800 px-3 py-2 text-xs text-slate-100" />
+            </div>
+          </div>
+
+          <!-- Filtro opcional de clima -->
+          <div>
+            <label class="block text-[11px] text-slate-400 mb-1">Condición climática exterior (opcional)</label>
+            <select id="builder-weather-cond" class="w-full sm:w-64 rounded-xl bg-slate-950 border border-slate-800 px-3 py-2 text-xs text-slate-100">
+              <option value="any">Cualquier clima</option>
+              <option value="clear">Solo si está despejado</option>
+              <option value="cloudy">Solo si está nublado</option>
+              <option value="rain">Solo si está lloviendo</option>
+              <option value="storm">Solo si hay tormenta</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- BLOQUE 3: ENTONCES (Acciones) -->
+        <div class="rounded-2xl border border-emerald-500/25 bg-emerald-500/5 p-4 space-y-3">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div class="flex items-center gap-2">
+              <span class="px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 text-xs font-bold">3. ENTONCES</span>
+              <span class="text-xs text-slate-300">Ejecutar estas acciones simultáneamente</span>
+            </div>
+            <button id="btn-add-action" type="button" class="px-2.5 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-200 border border-emerald-500/40 text-xs font-medium transition">
+              + Agregar acción a dispositivo
+            </button>
+          </div>
+
+          <div id="builder-actions-list" class="space-y-2"></div>
+
+          <!-- Alerta opcional por email + Cooldown -->
+          <div class="pt-3 border-t border-slate-800/80 space-y-3">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <label class="flex items-center gap-2 cursor-pointer text-xs text-slate-200">
+                <input id="builder-email-enabled" type="checkbox" class="h-4 w-4 rounded accent-emerald-500" />
+                <span>Enviar alerta por correo electrónico al dispararse</span>
+              </label>
+
+              <div class="flex items-center gap-2">
+                <label class="text-xs text-slate-400">Cooldown (min):</label>
+                <input id="builder-cooldown" type="number" min="0" max="1440" value="5" class="w-20 rounded-lg bg-slate-950 border border-slate-800 px-2.5 py-1 text-xs text-slate-100" />
+              </div>
+            </div>
+
+            <div id="builder-email-fields" class="hidden grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <input id="builder-email-subject" type="text" placeholder="Asunto del correo (ej. Alerta temperatura alta)" class="rounded-xl bg-slate-950 border border-slate-800 px-3 py-2 text-xs text-slate-100" />
+              <input id="builder-email-message" type="text" placeholder="Mensaje de la alerta..." class="rounded-xl bg-slate-950 border border-slate-800 px-3 py-2 text-xs text-slate-100" />
+            </div>
+          </div>
+        </div>
+
+        <!-- Vista previa en lenguaje natural -->
+        <div class="rounded-xl bg-slate-950 border border-slate-800 px-4 py-3 text-xs text-slate-300 leading-relaxed">
+          <span class="block text-[10px] uppercase tracking-wider text-slate-500 mb-1">Lectura en lenguaje natural</span>
+          <div id="builder-natural-preview">—</div>
+        </div>
+
+        <div class="flex items-center justify-end gap-2 pt-1">
+          <button type="button" data-close-automation-modal class="px-3.5 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-slate-100">Cancelar</button>
+          <button type="submit" class="px-5 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 text-xs font-semibold shadow-lg shadow-sky-500/20 transition">Guardar automatización</button>
         </div>
       </form>
     </div>

@@ -1,6 +1,11 @@
 import api from './api.js';
 import { connectSocket, onSocketEvent, emitDeviceCommand } from './socket.js';
 import { createDeviceCard, patchDeviceCard } from './ui/deviceCard.js';
+import {
+  initAutomationsModule,
+  handleLiveEvaluation,
+  handleLiveTrigger,
+} from './ui/automationBuilder.js';
 import { showToast } from './ui/toast.js';
 
 const state = {
@@ -414,6 +419,14 @@ async function init() {
     renderWeatherPill(weather);
   });
 
+  onSocketEvent('automationEvaluated', (payload) => {
+    handleLiveEvaluation(payload);
+  });
+
+  onSocketEvent('automationTriggered', (payload) => {
+    handleLiveTrigger(payload);
+  });
+
   // Carga inicial vía REST (fallback instantáneo mientras conecta Socket.io)
   try {
     const devRes = await api.getDevices(false);
@@ -423,6 +436,11 @@ async function init() {
   }
 
   loadWeather(false);
+
+  // Inicializar módulo de automatizaciones (Fase 4)
+  initAutomationsModule({
+    getDevices: () => Array.from(state.devices.values()),
+  });
 }
 
 init();

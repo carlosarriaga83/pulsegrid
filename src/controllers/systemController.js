@@ -29,7 +29,7 @@ export async function getHealth(_req, res) {
   res.status(healthy ? 200 : 503).json({
     ok: healthy,
     service: 'PulseGrid',
-    phase: 3,
+    phase: 4,
     environment: env.nodeEnv,
     uptimeSeconds: Math.floor(process.uptime()),
     timestamp: new Date().toISOString(),

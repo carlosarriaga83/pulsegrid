@@ -39,6 +39,35 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(payload),
     }),
+
+  // Automatizaciones (Fase 4)
+  getAutomations: () => request('/api/automations'),
+  createAutomation: (payload) =>
+    request('/api/automations', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  updateAutomation: (id, payload) =>
+    request(`/api/automations/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+  toggleAutomation: (id, isEnabled) =>
+    request(`/api/automations/${id}/toggle`, {
+      method: 'PATCH',
+      body: JSON.stringify({ isEnabled }),
+    }),
+  deleteAutomation: (id) =>
+    request(`/api/automations/${id}`, { method: 'DELETE' }),
+  evaluateAutomation: (id, dryRun = false) =>
+    request(`/api/automations/${id}/evaluate`, {
+      method: 'POST',
+      body: JSON.stringify({ dryRun }),
+    }),
+  evaluateAllAutomations: () =>
+    request('/api/automations/evaluate-all', { method: 'POST' }),
+  getAutomationLogs: (id, limit = 20) =>
+    request(`/api/automations/${id}/logs?limit=${limit}`),
 };
 
 export default api;

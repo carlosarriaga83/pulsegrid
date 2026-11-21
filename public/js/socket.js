@@ -8,6 +8,8 @@ const listeners = {
   deviceUpdate: new Set(),
   weatherUpdate: new Set(),
   alert: new Set(),
+  automationEvaluated: new Set(),
+  automationTriggered: new Set(),
 };
 
 let socket = null;
@@ -47,6 +49,14 @@ export function connectSocket() {
 
   socket.on('alert:new', (payload) => {
     listeners.alert.forEach((cb) => cb(payload));
+  });
+
+  socket.on('automation:evaluated', (payload) => {
+    listeners.automationEvaluated.forEach((cb) => cb(payload));
+  });
+
+  socket.on('automation:triggered', (payload) => {
+    listeners.automationTriggered.forEach((cb) => cb(payload));
   });
 
   return socket;
