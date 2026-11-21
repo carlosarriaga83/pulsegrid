@@ -102,11 +102,114 @@ export function coerceCommandValue(dpCode, rawValue, dpSchema) {
 }
 
 /**
+ * Mapea tipos del Thing Model v2.0 de Tuya al formato estándar usado en PulseGrid.
+ */
+function mapThingModelType(rawType) {
+  const t = String(rawType || '').toLowerCase();
+  if (t === 'bool' || t === 'boolean') return 'Boolean';
+  if (t === 'value' || t === 'integer' || t === 'int' || t === 'float' || t === 'double') return 'Integer';
+  if (t === 'enum') return 'Enum';
+  if (t === 'raw') return 'Raw';
+  return 'String';
+}
+
+/**
+ * Fallback v2.0 Thing Model: obtiene el esquema de propiedades para dispositivos
+ * en modo DP (ej. medidores de energía duales, cortinas, sensores custom).
+ */
+async function fetchThingModelV2(deviceId) {
+  const client = getClient();
+  const res = await client.request({
+    path: `/v2.0/cloud/thing/${deviceId}/model`,
+    method: 'GET',
+  });
+
+  if (!res.success || !res.result?.model) {
+    return null;
+  }
+
+  const model = parseJsonSafe(res.result.model);
+  const services = Array.isArray(model?.services) ? model.services : [];
+  const functions = [];
+  const status = [];
+
+  for (const svc of services) {
+    for (const prop of svc.properties || []) {
+      const ts = prop.typeSpec || {};
+      const mappedType = mapThingModelType(ts.type);
+      const parsedValues = {};
+
+      if (mappedType === 'Integer') {
+        if (ts.min !== undefined) parsedValues.min = Number(ts.min);
+        if (ts.max !== undefined) parsedValues.max = Number(ts.max);
+        if (ts.scale !== undefined) parsedValues.scale = Number(ts.scale);
+        if (ts.step !== undefined) parsedValues.step = Number(ts.step);
+        if (ts.unit !== undefined) parsedValues.unit = String(ts.unit);
+      } else if (mappedType === 'Enum' && Array.isArray(ts.range)) {
+        parsedValues.range = ts.range;
+      }
+
+      const entry = {
+        code: prop.code,
+        name: prop.name || prop.code,
+        type: mappedType,
+        dpId: prop.abilityId,
+        accessMode: prop.accessMode || 'ro',
+        values: JSON.stringify(parsedValues),
+        parsedValues,
+      };
+
+      status.push(entry);
+      if (prop.accessMode === 'rw' || prop.accessMode === 'wr') {
+        functions.push(entry);
+      }
+    }
+  }
+
+  if (status.length === 0 && functions.length === 0) return null;
+
+  return {
+    category: null,
+    source: 'thing_model_v2',
+    functions,
+    status,
+  };
+}
+
+/**
+ * Fallback v2.0 Shadow Properties: obtiene los valores actuales de dispositivos en modo DP.
+ */
+async function fetchShadowPropertiesV2(deviceId) {
+  const client = getClient();
+  const res = await client.request({
+    path: `/v2.0/cloud/thing/${deviceId}/shadow/properties`,
+    method: 'GET',
+  });
+
+  if (!res.success || !Array.isArray(res.result?.properties)) {
+    return { statusMap: {}, properties: [] };
+  }
+
+  const statusMap = {};
+  for (const prop of res.result.properties) {
+    if (prop && prop.code !== undefined && prop.value !== undefined) {
+      statusMap[prop.code] = prop.value;
+    }
+  }
+
+  return { statusMap, properties: res.result.properties };
+}
+
+/**
  * Obtiene las especificaciones de funciones/estados de un dispositivo (con caché).
+ * Si v1.0 /specification viene vacío (común en power meters y dispositivos DP),
+ * recurre automáticamente a Tuya v2.0 Thing Model y Shadow Properties.
  */
 export async function getDeviceSpecification(deviceId, forceRefresh = false) {
-  if (!forceRefresh && specCache.has(deviceId)) {
-    return specCache.get(deviceId);
+  const cached = specCache.get(deviceId);
+  const cachedHasEntries = (cached?.functions?.length || 0) + (cached?.status?.length || 0) > 0;
+  if (!forceRefresh && cachedHasEntries) {
+    return cached;
   }
 
   if (!isTuyaConfigured()) {
@@ -117,27 +220,73 @@ export async function getDeviceSpecification(deviceId, forceRefresh = false) {
   }
 
   const client = getClient();
-  const res = await client.request({
-    path: `/v1.0/iot-03/devices/${deviceId}/specification`,
-    method: 'GET',
-  });
+  let schema = null;
 
-  if (!res.success) {
-    logger.warn(`No se pudo obtener specification de ${deviceId}`, { msg: res.msg, code: res.code });
-    return specCache.get(deviceId) || null;
+  try {
+    const res = await client.request({
+      path: `/v1.0/iot-03/devices/${deviceId}/specification`,
+      method: 'GET',
+    });
+
+    if (res.success) {
+      const fns = (res.result?.functions || []).map((f) => ({
+        ...f,
+        parsedValues: parseJsonSafe(f.values) || {},
+      }));
+      const sts = (res.result?.status || []).map((s) => ({
+        ...s,
+        parsedValues: parseJsonSafe(s.values) || {},
+      }));
+
+      if (fns.length > 0 || sts.length > 0) {
+        schema = {
+          category: res.result?.category || null,
+          source: 'standard_v1',
+          functions: fns,
+          status: sts,
+        };
+      }
+    }
+  } catch (err) {
+    logger.warn(`Error consultando v1.0 specification de ${deviceId}`, { error: err.message });
   }
 
-  const schema = {
-    category: res.result?.category || null,
-    functions: (res.result?.functions || []).map((f) => ({
-      ...f,
-      parsedValues: parseJsonSafe(f.values) || {},
-    })),
-    status: (res.result?.status || []).map((s) => ({
-      ...s,
-      parsedValues: parseJsonSafe(s.values) || {},
-    })),
-  };
+  // Fallback a Thing Model v2.0 para medidores de energía / dispositivos en modo DP
+  if (!schema) {
+    try {
+      schema = await fetchThingModelV2(deviceId);
+    } catch (err) {
+      logger.warn(`Error consultando v2.0 model de ${deviceId}`, { error: err.message });
+    }
+  }
+
+  // Último respaldo: inferir esquema desde shadow/properties v2.0
+  if (!schema) {
+    try {
+      const shadow = await fetchShadowPropertiesV2(deviceId);
+      if (shadow.properties.length > 0) {
+        schema = {
+          category: null,
+          source: 'thing_model_v2',
+          functions: [],
+          status: shadow.properties.map((p) => ({
+            code: p.code,
+            name: p.custom_name || p.code,
+            type: mapThingModelType(p.type),
+            dpId: p.dp_id,
+            values: '{}',
+            parsedValues: {},
+          })),
+        };
+      }
+    } catch (err) {
+      logger.warn(`Error consultando v2.0 shadow properties de ${deviceId}`, { error: err.message });
+    }
+  }
+
+  if (!schema) {
+    return cached || null;
+  }
 
   specCache.set(deviceId, schema);
   await query('UPDATE devices SET dp_schema = ? WHERE id = ?', [JSON.stringify(schema), deviceId]);
@@ -234,12 +383,24 @@ export async function syncDevices() {
   const changes = [];
 
   for (const dev of tuyaDevices) {
-    const statusMap = statusArrayToMap(dev.status);
+    let statusMap = statusArrayToMap(dev.status);
     const isOnline = Boolean(dev.online);
     const previous = deviceCache.get(dev.id);
     const iconUrl = dev.icon
       ? (dev.icon.startsWith('http') ? dev.icon : `https://images.tuyaus.com/${dev.icon}`)
       : null;
+
+    // Si v1.0 devolvió status vacío (típico en power meters / modo DP), consultar v2.0 shadow/properties
+    if (Object.keys(statusMap).length === 0) {
+      try {
+        const shadow = await fetchShadowPropertiesV2(dev.id);
+        if (Object.keys(shadow.statusMap).length > 0) {
+          statusMap = shadow.statusMap;
+        }
+      } catch (shadowErr) {
+        logger.debug(`Shadow v2.0 no disponible para ${dev.id}`, { error: shadowErr.message });
+      }
+    }
 
     await query(
       `INSERT INTO devices (id, name, category, product_id, product_name, icon_url, is_online, last_online_at, last_status)
@@ -267,11 +428,12 @@ export async function syncDevices() {
       ]
     );
 
-    // Asegurar que tenemos el dp_schema para construir controles dinámicos en el frontend
+    // Asegurar que tenemos un dp_schema con entradas reales (reintentar si estaba vacío)
     let dpSchema = specCache.get(dev.id) || previous?.dpSchema || null;
-    if (!dpSchema) {
+    const hasSchemaEntries = (dpSchema?.functions?.length || 0) + (dpSchema?.status?.length || 0) > 0;
+    if (!hasSchemaEntries) {
       try {
-        dpSchema = await getDeviceSpecification(dev.id);
+        dpSchema = await getDeviceSpecification(dev.id, true);
       } catch (specErr) {
         logger.warn(`Error cargando specification para ${dev.id}`, { error: specErr.message });
       }
@@ -363,12 +525,20 @@ export async function getDeviceById(deviceId, forceStatusRefresh = false) {
 
   if (forceStatusRefresh && isTuyaConfigured()) {
     const client = getClient();
+    let statusMap = {};
+
     const res = await client.request({
       path: `/v1.0/iot-03/devices/${deviceId}/status`,
       method: 'GET',
     });
-    if (res.success && Array.isArray(res.result)) {
-      const statusMap = statusArrayToMap(res.result);
+    if (res.success && Array.isArray(res.result) && res.result.length > 0) {
+      statusMap = statusArrayToMap(res.result);
+    } else {
+      const shadow = await fetchShadowPropertiesV2(deviceId);
+      statusMap = shadow.statusMap;
+    }
+
+    if (Object.keys(statusMap).length > 0) {
       device.status = statusMap;
       device.updatedAt = new Date().toISOString();
       await query('UPDATE devices SET last_status = ? WHERE id = ?', [JSON.stringify(statusMap), deviceId]);
@@ -405,11 +575,31 @@ export async function sendDeviceCommands(deviceId, commands) {
   // Los dispositivos demo_* se ejecutan localmente para pruebas de UI y WebSockets sin requerir claves Tuya
   if (!String(deviceId).startsWith('demo_')) {
     const client = getClient();
-    const res = await client.request({
-      path: `/v1.0/iot-03/devices/${deviceId}/commands`,
-      method: 'POST',
-      body: { commands: serializedCommands },
-    });
+    const useV2 = dpSchema?.source === 'thing_model_v2';
+
+    const sendV2 = async () => {
+      const propsObj = {};
+      for (const cmd of serializedCommands) propsObj[cmd.code] = cmd.value;
+      return client.request({
+        path: `/v2.0/cloud/thing/${deviceId}/shadow/properties/issue`,
+        method: 'POST',
+        body: { properties: JSON.stringify(propsObj) },
+      });
+    };
+
+    const sendV1 = async () =>
+      client.request({
+        path: `/v1.0/iot-03/devices/${deviceId}/commands`,
+        method: 'POST',
+        body: { commands: serializedCommands },
+      });
+
+    let res = useV2 ? await sendV2() : await sendV1();
+    if (!res.success) {
+      // Fallback cruzado v1 <-> v2 si el dispositivo cambió de modo de instrucciones
+      const retryRes = useV2 ? await sendV1() : await sendV2();
+      if (retryRes.success) res = retryRes;
+    }
 
     if (!res.success) {
       const err = new Error(`Tuya rechazó el comando (${res.code}): ${res.msg}`);

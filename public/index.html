@@ -277,10 +277,66 @@
           </button>
         </div>
 
-        <!-- Selector multi-dispositivo / multi-DP -->
-        <div class="pt-2 border-t border-slate-800/80">
-          <p class="text-[11px] uppercase tracking-wider text-slate-500 mb-2">Series graficadas (clic para comparar hasta 6)</p>
-          <div id="analytics-series-chips" class="flex flex-wrap items-center gap-2"></div>
+        <!-- Series actualmente graficadas (compactas) -->
+        <div class="pt-3 border-t border-slate-800/80 space-y-3">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div class="flex items-center gap-2">
+              <span class="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">Graficando ahora</span>
+              <span id="analytics-selected-count" class="text-[11px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 font-mono">0/6</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <button id="btn-clear-series" type="button" class="hidden text-[11px] text-rose-400 hover:text-rose-300 transition">
+                Limpiar selección
+              </button>
+              <button id="btn-toggle-picker" type="button" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-[11px] font-medium transition">
+                Ocultar selector
+              </button>
+            </div>
+          </div>
+
+          <div id="analytics-active-series" class="flex flex-wrap items-center gap-2 min-h-[28px]"></div>
+
+          <!-- Selector práctico en 2 paneles: Dispositivo -> Parámetros -->
+          <div id="analytics-picker-panel" class="grid grid-cols-1 lg:grid-cols-12 gap-3 pt-1">
+            <!-- Columna 1: Dispositivos -->
+            <div class="lg:col-span-5 rounded-xl bg-slate-950/70 border border-slate-800 p-3 flex flex-col gap-2">
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-[11px] font-semibold text-slate-300">1. Elige un dispositivo</span>
+                <div class="flex items-center gap-2 text-[11px] text-slate-400">
+                  <label class="inline-flex items-center gap-1 cursor-pointer">
+                    <input id="analytics-only-online" type="checkbox" class="accent-emerald-500" />
+                    <span>Online</span>
+                  </label>
+                  <label class="inline-flex items-center gap-1 cursor-pointer">
+                    <input id="analytics-only-with-data" type="checkbox" class="accent-sky-500" />
+                    <span>Con datos</span>
+                  </label>
+                </div>
+              </div>
+              <input
+                id="analytics-device-search"
+                type="search"
+                placeholder="Buscar dispositivo, zona o categoría..."
+                class="w-full rounded-lg bg-slate-900 border border-slate-800 px-3 py-1.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-sky-500"
+              />
+              <div id="analytics-device-list" class="space-y-1 max-h-56 overflow-y-auto pr-1"></div>
+            </div>
+
+            <!-- Columna 2: Parámetros del dispositivo seleccionado -->
+            <div class="lg:col-span-7 rounded-xl bg-slate-950/70 border border-slate-800 p-3 flex flex-col gap-2">
+              <div class="flex items-center justify-between gap-2">
+                <span id="analytics-dp-header" class="text-[11px] font-semibold text-slate-300 truncate">2. Parámetros disponibles</span>
+                <span id="analytics-dp-count" class="text-[10px] text-slate-500 font-mono">0</span>
+              </div>
+              <input
+                id="analytics-dp-search"
+                type="search"
+                placeholder="Filtrar parámetro (ej. potencia, voltaje, temperatura, switch)..."
+                class="w-full rounded-lg bg-slate-900 border border-slate-800 px-3 py-1.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-sky-500"
+              />
+              <div id="analytics-dp-list" class="space-y-2 max-h-56 overflow-y-auto pr-1"></div>
+            </div>
+          </div>
         </div>
       </div>
 

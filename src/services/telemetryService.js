@@ -3,11 +3,71 @@ import env from '../config/env.js';
 import tuyaService from './tuyaService.js';
 import logger from '../utils/logger.js';
 
+const FRIENDLY_DP_LABELS = {
+  switch: 'Interruptor',
+  switch_1: 'Interruptor 1',
+  switch_2: 'Interruptor 2',
+  switch_led: 'Luz',
+  switch_led_1: 'Luz 1',
+  switch_usb1: 'USB 1',
+  temp_current: 'Temperatura actual',
+  temp_set: 'Temperatura objetivo',
+  va_temperature: 'Temperatura',
+  va_humidity: 'Humedad',
+  humidity: 'Humedad',
+  humidity_value: 'Humedad',
+  cur_power: 'Potencia actual',
+  cur_power_a: 'Potencia Canal A',
+  cur_power_b: 'Potencia Canal B',
+  power_a: 'Potencia Canal A',
+  power_b: 'Potencia Canal B',
+  total_power: 'Potencia total',
+  cur_voltage: 'Voltaje',
+  voltage_a: 'Voltaje A',
+  cur_current: 'Corriente',
+  cur_current_a: 'Corriente Canal A',
+  cur_current_b: 'Corriente Canal B',
+  current_a: 'Corriente Canal A',
+  current_b: 'Corriente Canal B',
+  add_ele: 'Energía acumulada',
+  total_forward_energy: 'Energía directa total',
+  forward_energy_total: 'Energía directa total',
+  reverse_energy_total: 'Energía inversa total',
+  energy_forword_a: 'Energía directa A',
+  energy_forword_b: 'Energía directa B',
+  energy_reverse_a: 'Energía inversa A',
+  energy_reverse_b: 'Energía inversa B',
+  power_factor: 'Factor de potencia',
+  power_factor_a: 'Factor de potencia A',
+  power_factor_b: 'Factor de potencia B',
+  freq: 'Frecuencia',
+  bright_value: 'Brillo',
+  bright_value_1: 'Brillo 1',
+  bright_value_v2: 'Brillo',
+  temp_value: 'Temperatura color',
+  temp_value_v2: 'Temperatura color',
+  battery_percentage: 'Batería',
+  fan_speed_percent: 'Velocidad ventilador',
+  backlight: 'Retroiluminación',
+};
+
+function hasCJK(str) {
+  return /[\u3400-\u9fff]/.test(String(str || ''));
+}
+
+function getFriendlyDpLabel(dpCode, rawName) {
+  if (FRIENDLY_DP_LABELS[dpCode]) return FRIENDLY_DP_LABELS[dpCode];
+  if (rawName && !hasCJK(rawName) && rawName !== dpCode) return rawName;
+  return String(dpCode || '')
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 function getDpMeta(device, dpCode) {
   const specs = [...(device?.dpSchema?.functions || []), ...(device?.dpSchema?.status || [])];
   const spec = specs.find((s) => s.code === dpCode);
   return {
-    label: spec?.name || dpCode,
+    label: getFriendlyDpLabel(dpCode, spec?.name),
     scale: Number(spec?.parsedValues?.scale || 0),
     unit: spec?.parsedValues?.unit || '',
     specType: String(spec?.type || '').toLowerCase(),
@@ -232,41 +292,62 @@ export async function getTelemetryHistory({ series = [], fromDate, toDate, maxPo
 }
 
 /**
- * Lista los pares (deviceId, dpCode) disponibles con historial o con DPs graficables.
+ * Lista los pares (deviceId, dpCode) disponibles con metadatos enriquecidos y conteo real en telemetry_logs.
  */
 export async function getAvailableSeries() {
   const devices = await tuyaService.getDevices(false);
+  const countRows = await query(
+    'SELECT device_id, dp_code, COUNT(*) AS cnt FROM telemetry_logs WHERE value_numeric IS NOT NULL GROUP BY device_id, dp_code'
+  );
+  const countMap = new Map(countRows.map((r) => [`${r.device_id}:${r.dp_code}`, Number(r.cnt || 0)]));
+
   const items = [];
 
   for (const dev of devices) {
     const seen = new Set();
     const specs = [...(dev.dpSchema?.status || []), ...(dev.dpSchema?.functions || [])];
+
+    const pushItem = (code, rawName, valueType, unit, scale) => {
+      if (seen.has(code)) return;
+      seen.add(code);
+      const rawVal = dev.status?.[code];
+      let currentValue = null;
+      if (rawVal !== undefined && rawVal !== null) {
+        if (valueType === 'boolean') currentValue = Boolean(rawVal) ? 'ON' : 'OFF';
+        else if (typeof rawVal === 'number') {
+          currentValue = scale > 0 ? Number((rawVal / Math.pow(10, scale)).toFixed(scale)) : rawVal;
+        }
+      }
+      items.push({
+        deviceId: dev.id,
+        deviceName: dev.displayName,
+        room: dev.room || '',
+        category: dev.category || 'unknown',
+        isOnline: Boolean(dev.isOnline),
+        dpCode: code,
+        dpLabel: getFriendlyDpLabel(code, rawName),
+        unit: valueType === 'boolean' ? '' : unit || '',
+        valueType,
+        currentValue,
+        recordCount: countMap.get(`${dev.id}:${code}`) || 0,
+      });
+    };
+
     for (const s of specs) {
       const t = String(s.type || '').toLowerCase();
       if (t !== 'integer' && t !== 'boolean') continue;
-      if (seen.has(s.code)) continue;
-      seen.add(s.code);
-      items.push({
-        deviceId: dev.id,
-        deviceName: dev.displayName,
-        dpCode: s.code,
-        dpLabel: s.name || s.code,
-        unit: t === 'boolean' ? '' : s.parsedValues?.unit || '',
-        valueType: t === 'boolean' ? 'boolean' : 'number',
-      });
+      pushItem(
+        s.code,
+        s.name,
+        t === 'boolean' ? 'boolean' : 'number',
+        s.parsedValues?.unit || '',
+        Number(s.parsedValues?.scale || 0)
+      );
     }
+
     for (const [code, val] of Object.entries(dev.status || {})) {
-      if (seen.has(code)) continue;
       if (typeof val !== 'number' && typeof val !== 'boolean') continue;
-      seen.add(code);
-      items.push({
-        deviceId: dev.id,
-        deviceName: dev.displayName,
-        dpCode: code,
-        dpLabel: code,
-        unit: '',
-        valueType: typeof val === 'boolean' ? 'boolean' : 'number',
-      });
+      pushItem(code, code, typeof val === 'boolean' ? 'boolean' : 'number', '', 0);
     }
   }
 

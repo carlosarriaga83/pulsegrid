@@ -38,10 +38,19 @@ const crosshairPlugin = {
 
 let chartInstance = null;
 let availableSeries = [];
+let groupedDevices = []; // [{ deviceId, deviceName, room, category, isOnline, totalRecords, params: [...] }]
+let activeDeviceId = null;
 let selectedKeys = [];
 let currentRange = '24h';
 let interactionMode = 'zoom'; // 'zoom' (drag-to-zoom, shift+drag pan) | 'pan' (drag-to-pan)
-let isZoomed = false;
+let pickerVisible = true;
+
+const pickerFilters = {
+  deviceQuery: '',
+  dpQuery: '',
+  onlyOnline: false,
+  onlyWithData: false,
+};
 
 function esc(str) {
   return String(str ?? '')
@@ -52,7 +61,6 @@ function esc(str) {
 }
 
 function setResetButtonState(zoomed) {
-  isZoomed = zoomed;
   const btn = document.getElementById('btn-reset-zoom');
   if (!btn) return;
   btn.disabled = !zoomed;
@@ -84,58 +92,252 @@ function updateModeButtons() {
   }
 }
 
-function renderSeriesChips() {
-  const wrap = document.getElementById('analytics-series-chips');
+function buildGroupedDevices() {
+  const map = new Map();
+  for (const item of availableSeries) {
+    if (!map.has(item.deviceId)) {
+      map.set(item.deviceId, {
+        deviceId: item.deviceId,
+        deviceName: item.deviceName,
+        room: item.room || '',
+        category: item.category || '',
+        isOnline: Boolean(item.isOnline),
+        totalRecords: 0,
+        params: [],
+      });
+    }
+    const dev = map.get(item.deviceId);
+    dev.totalRecords += Number(item.recordCount || 0);
+    dev.params.push(item);
+  }
+
+  groupedDevices = Array.from(map.values()).sort((a, b) => {
+    if (a.isOnline !== b.isOnline) return a.isOnline ? -1 : 1;
+    if (a.totalRecords !== b.totalRecords) return b.totalRecords - a.totalRecords;
+    return a.deviceName.localeCompare(b.deviceName);
+  });
+
+  if (!activeDeviceId || !map.has(activeDeviceId)) {
+    activeDeviceId = groupedDevices[0]?.deviceId || null;
+  }
+}
+
+function toggleSeriesKey(key) {
+  if (selectedKeys.includes(key)) {
+    selectedKeys = selectedKeys.filter((k) => k !== key);
+  } else {
+    if (selectedKeys.length >= 6) {
+      showToast('Puedes comparar hasta 6 series simultáneamente', 'warning');
+      return;
+    }
+    selectedKeys.push(key);
+  }
+  renderActiveSeriesBar();
+  renderDeviceList();
+  renderDpList();
+  loadHistoryChart();
+}
+
+function renderActiveSeriesBar() {
+  const wrap = document.getElementById('analytics-active-series');
+  const countEl = document.getElementById('analytics-selected-count');
+  const clearBtn = document.getElementById('btn-clear-series');
   if (!wrap) return;
 
-  if (availableSeries.length === 0) {
+  if (countEl) countEl.textContent = `${selectedKeys.length}/6`;
+  clearBtn?.classList.toggle('hidden', selectedKeys.length === 0);
+
+  if (selectedKeys.length === 0) {
     wrap.innerHTML =
-      '<span class="text-xs text-slate-500 italic">No hay dispositivos con métricas graficables. Sincroniza Tuya o carga dispositivos de ejemplo.</span>';
+      '<span class="text-xs text-slate-500 italic">Ninguna serie seleccionada. Elige un dispositivo y marca uno o más parámetros abajo.</span>';
     return;
   }
 
-  wrap.innerHTML = availableSeries
-    .map((item) => {
-      const key = `${item.deviceId}:${item.dpCode}`;
-      const activeIdx = selectedKeys.indexOf(key);
-      const isSelected = activeIdx !== -1;
-      const color = isSelected ? PALETTE[activeIdx % PALETTE.length] : null;
-      const typeTag = item.valueType === 'boolean' ? 'ON/OFF' : item.unit || 'Num';
+  const seriesMap = new Map(availableSeries.map((s) => [`${s.deviceId}:${s.dpCode}`, s]));
+
+  wrap.innerHTML = selectedKeys
+    .map((key, idx) => {
+      const s = seriesMap.get(key);
+      const color = PALETTE[idx % PALETTE.length];
+      const label = s ? `${s.deviceName} · ${s.dpLabel}` : key;
+      return `
+        <span class="inline-flex items-center gap-2 pl-2.5 pr-1.5 py-1 rounded-full text-xs bg-slate-800/90 text-slate-100 border border-slate-700">
+          <span class="h-2 w-2 rounded-full flex-shrink-0" style="background:${color}"></span>
+          <span class="truncate max-w-[220px]">${esc(label)}</span>
+          <button type="button" data-remove-series="${esc(key)}" title="Quitar serie" class="h-4 w-4 rounded-full hover:bg-slate-700 text-slate-400 hover:text-slate-100 inline-flex items-center justify-center leading-none">&times;</button>
+        </span>
+      `;
+    })
+    .join('');
+
+  wrap.querySelectorAll('[data-remove-series]').forEach((btn) => {
+    btn.addEventListener('click', () => toggleSeriesKey(btn.dataset.removeSeries));
+  });
+}
+
+function renderDeviceList() {
+  const container = document.getElementById('analytics-device-list');
+  if (!container) return;
+
+  const q = pickerFilters.deviceQuery.trim().toLowerCase();
+  const filtered = groupedDevices.filter((d) => {
+    if (pickerFilters.onlyOnline && !d.isOnline) return false;
+    if (pickerFilters.onlyWithData && d.totalRecords === 0) return false;
+    if (q) {
+      const hay = `${d.deviceName} ${d.room} ${d.category} ${d.deviceId}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+
+  if (filtered.length === 0) {
+    container.innerHTML = '<p class="text-xs text-slate-500 italic py-3 text-center">No se encontraron dispositivos con este filtro.</p>';
+    return;
+  }
+
+  if (!filtered.some((d) => d.deviceId === activeDeviceId)) {
+    activeDeviceId = filtered[0].deviceId;
+    renderDpList();
+  }
+
+  container.innerHTML = filtered
+    .map((d) => {
+      const isSelectedDev = d.deviceId === activeDeviceId;
+      const selectedCount = selectedKeys.filter((k) => k.startsWith(`${d.deviceId}:`)).length;
 
       return `
         <button
           type="button"
-          data-series-key="${esc(key)}"
-          class="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs border transition ${
-            isSelected
-              ? 'bg-slate-800/90 text-slate-100 border-slate-600 shadow-sm'
-              : 'bg-slate-950/70 text-slate-400 border-slate-800 hover:border-slate-700 hover:text-slate-200'
+          data-pick-device="${esc(d.deviceId)}"
+          class="w-full text-left px-2.5 py-2 rounded-lg border transition flex items-center justify-between gap-2 ${
+            isSelectedDev
+              ? 'bg-sky-500/15 border-sky-500/40 text-slate-100'
+              : 'bg-slate-900/60 border-transparent hover:bg-slate-900 hover:border-slate-800 text-slate-300'
           }"
         >
-          <span class="h-2.5 w-2.5 rounded-full flex-shrink-0" style="background:${color || '#334155'}"></span>
-          <span class="font-medium">${esc(item.deviceName)}</span>
-          <span class="text-slate-400">· ${esc(item.dpLabel)}</span>
-          <span class="text-[10px] px-1.5 py-0.5 rounded bg-slate-900 text-slate-400">${esc(typeTag)}</span>
+          <div class="flex items-center gap-2 min-w-0">
+            <span class="h-2 w-2 rounded-full flex-shrink-0 ${d.isOnline ? 'bg-emerald-400' : 'bg-rose-500/80'}"></span>
+            <div class="min-w-0">
+              <div class="text-xs font-medium truncate">${esc(d.deviceName)}</div>
+              <div class="text-[10px] text-slate-500 truncate">${esc(d.room || d.category)} · ${d.params.length} parám.</div>
+            </div>
+          </div>
+          <div class="flex items-center gap-1.5 flex-shrink-0">
+            ${
+              selectedCount > 0
+                ? `<span class="px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-sky-500/25 text-sky-300">${selectedCount}</span>`
+                : ''
+            }
+            ${
+              d.totalRecords > 0
+                ? `<span class="h-1.5 w-1.5 rounded-full bg-emerald-400/70" title="Tiene historial guardado"></span>`
+                : ''
+            }
+          </div>
         </button>
       `;
     })
     .join('');
 
-  wrap.querySelectorAll('[data-series-key]').forEach((btn) => {
+  container.querySelectorAll('[data-pick-device]').forEach((btn) => {
     btn.addEventListener('click', () => {
-      const key = btn.dataset.seriesKey;
-      if (selectedKeys.includes(key)) {
-        selectedKeys = selectedKeys.filter((k) => k !== key);
-      } else {
-        if (selectedKeys.length >= 6) {
-          showToast('Puedes comparar hasta 6 series simultáneamente', 'warning');
-          return;
-        }
-        selectedKeys.push(key);
-      }
-      renderSeriesChips();
-      loadHistoryChart();
+      activeDeviceId = btn.dataset.pickDevice;
+      renderDeviceList();
+      renderDpList();
     });
+  });
+}
+
+function renderDpList() {
+  const container = document.getElementById('analytics-dp-list');
+  const headerEl = document.getElementById('analytics-dp-header');
+  const countEl = document.getElementById('analytics-dp-count');
+  if (!container) return;
+
+  const dev = groupedDevices.find((d) => d.deviceId === activeDeviceId);
+  if (!dev) {
+    if (headerEl) headerEl.textContent = '2. Parámetros disponibles';
+    if (countEl) countEl.textContent = '0';
+    container.innerHTML = '<p class="text-xs text-slate-500 italic py-4 text-center">Selecciona un dispositivo en la lista izquierda.</p>';
+    return;
+  }
+
+  if (headerEl) headerEl.textContent = `2. Parámetros de ${dev.deviceName}`;
+
+  const q = pickerFilters.dpQuery.trim().toLowerCase();
+  const params = dev.params.filter((p) => {
+    if (!q) return true;
+    return `${p.dpLabel} ${p.dpCode} ${p.unit}`.toLowerCase().includes(q);
+  });
+
+  if (countEl) countEl.textContent = `${params.length} disponibles`;
+
+  if (params.length === 0) {
+    container.innerHTML = '<p class="text-xs text-slate-500 italic py-4 text-center">Sin parámetros que coincidan con el filtro.</p>';
+    return;
+  }
+
+  const numericParams = params.filter((p) => p.valueType !== 'boolean');
+  const boolParams = params.filter((p) => p.valueType === 'boolean');
+
+  const renderGroup = (title, items) => {
+    if (items.length === 0) return '';
+    return `
+      <div>
+        <p class="text-[10px] uppercase tracking-wider text-slate-500 mb-1">${title}</p>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+          ${items
+            .map((p) => {
+              const key = `${p.deviceId}:${p.dpCode}`;
+              const selIdx = selectedKeys.indexOf(key);
+              const isSelected = selIdx !== -1;
+              const color = isSelected ? PALETTE[selIdx % PALETTE.length] : null;
+              const liveTxt =
+                p.currentValue !== null && p.currentValue !== undefined
+                  ? `${p.currentValue}${p.unit ? ` ${p.unit}` : ''}`
+                  : '—';
+
+              return `
+                <button
+                  type="button"
+                  data-toggle-dp="${esc(key)}"
+                  class="text-left px-2.5 py-2 rounded-lg border transition flex items-center justify-between gap-2 ${
+                    isSelected
+                      ? 'bg-slate-800/90 border-slate-600 text-slate-100'
+                      : 'bg-slate-900/60 border-slate-800/80 hover:border-slate-700 text-slate-300'
+                  }"
+                >
+                  <div class="flex items-center gap-2 min-w-0">
+                    <span class="h-3.5 w-3.5 rounded flex-shrink-0 border flex items-center justify-center text-[10px] font-bold"
+                      style="${isSelected ? `background:${color};border-color:${color};color:#020617;` : 'border-color:#475569;'}">
+                      ${isSelected ? '✓' : ''}
+                    </span>
+                    <div class="min-w-0">
+                      <div class="text-xs font-medium truncate">${esc(p.dpLabel)}</div>
+                      <div class="text-[10px] font-mono text-slate-500 truncate">${esc(p.dpCode)}</div>
+                    </div>
+                  </div>
+                  <div class="text-right flex-shrink-0">
+                    <div class="text-[11px] font-mono font-semibold text-slate-200">${esc(liveTxt)}</div>
+                    <div class="text-[10px] ${p.recordCount > 0 ? 'text-emerald-400' : 'text-slate-500'}">
+                      ${p.recordCount > 0 ? `${p.recordCount} pts` : 'Sin historial'}
+                    </div>
+                  </div>
+                </button>
+              `;
+            })
+            .join('')}
+        </div>
+      </div>
+    `;
+  };
+
+  container.innerHTML =
+    renderGroup('Métricas numéricas (línea continua)', numericParams) +
+    renderGroup('Estados ON / OFF (gráfica escalonada)', boolParams);
+
+  container.querySelectorAll('[data-toggle-dp]').forEach((btn) => {
+    btn.addEventListener('click', () => toggleSeriesKey(btn.dataset.toggleDp));
   });
 }
 
@@ -357,16 +559,21 @@ export async function refreshAvailableSeries() {
   try {
     const res = await api.getTelemetrySeries();
     availableSeries = res.data || [];
+    buildGroupedDevices();
 
-    // Preseleccionar hasta 2 series útiles si no hay selección aún
+    // Preseleccionar hasta 2 series que ya tengan datos (o las 2 primeras disponibles)
     if (selectedKeys.length === 0 && availableSeries.length > 0) {
-      selectedKeys = availableSeries.slice(0, 2).map((s) => `${s.deviceId}:${s.dpCode}`);
+      const withData = availableSeries.filter((s) => s.recordCount > 0);
+      const source = withData.length > 0 ? withData : availableSeries;
+      selectedKeys = source.slice(0, 2).map((s) => `${s.deviceId}:${s.dpCode}`);
     } else {
       const validSet = new Set(availableSeries.map((s) => `${s.deviceId}:${s.dpCode}`));
       selectedKeys = selectedKeys.filter((k) => validSet.has(k));
     }
 
-    renderSeriesChips();
+    renderActiveSeriesBar();
+    renderDeviceList();
+    renderDpList();
     await loadHistoryChart();
   } catch (err) {
     showToast(`Error cargando series: ${err.message}`, 'error');
@@ -374,14 +581,48 @@ export async function refreshAvailableSeries() {
 }
 
 export function initAnalyticsModule() {
-  // Registrar plugin zoom explícitamente si está presente en window
   if (window.Chart && window.ChartZoom) {
     try {
       window.Chart.register(window.ChartZoom);
     } catch {
-      // Ya registrado automáticamente por UMD
+      // Ya registrado por UMD
     }
   }
+
+  // Buscadores y filtros del selector práctico de 2 columnas
+  document.getElementById('analytics-device-search')?.addEventListener('input', (e) => {
+    pickerFilters.deviceQuery = e.target.value;
+    renderDeviceList();
+  });
+
+  document.getElementById('analytics-dp-search')?.addEventListener('input', (e) => {
+    pickerFilters.dpQuery = e.target.value;
+    renderDpList();
+  });
+
+  document.getElementById('analytics-only-online')?.addEventListener('change', (e) => {
+    pickerFilters.onlyOnline = e.target.checked;
+    renderDeviceList();
+  });
+
+  document.getElementById('analytics-only-with-data')?.addEventListener('change', (e) => {
+    pickerFilters.onlyWithData = e.target.checked;
+    renderDeviceList();
+  });
+
+  document.getElementById('btn-clear-series')?.addEventListener('click', () => {
+    selectedKeys = [];
+    renderActiveSeriesBar();
+    renderDeviceList();
+    renderDpList();
+    loadHistoryChart();
+  });
+
+  document.getElementById('btn-toggle-picker')?.addEventListener('click', (e) => {
+    pickerVisible = !pickerVisible;
+    document.getElementById('analytics-picker-panel')?.classList.toggle('hidden', !pickerVisible);
+    e.currentTarget.textContent = pickerVisible ? 'Ocultar selector' : 'Mostrar selector';
+  });
 
   // Botones de rango (24h, 7d, 30d, custom)
   document.querySelectorAll('[data-range-btn]').forEach((btn) => {
@@ -425,7 +666,7 @@ export function initAnalyticsModule() {
     try {
       const res = await api.captureTelemetryNow();
       showToast(`Snapshot guardado (${res.inserted || 0} lecturas)`, 'success');
-      await loadHistoryChart();
+      await refreshAvailableSeries();
     } catch (err) {
       showToast(err.message, 'error');
     } finally {
@@ -433,7 +674,7 @@ export function initAnalyticsModule() {
     }
   });
 
-  // Generar historial de ejemplo (48h) para probar zoom/pan/crosshair al instante
+  // Generar historial de ejemplo (48h)
   document.getElementById('btn-seed-telemetry')?.addEventListener('click', async (e) => {
     const btn = e.currentTarget;
     btn.disabled = true;
