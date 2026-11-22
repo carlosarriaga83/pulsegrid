@@ -36,6 +36,9 @@ const crosshairPlugin = {
   },
 };
 
+const VISITOR_TZ = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+const VISITOR_LOCALE = navigator.language || 'es';
+
 let chartInstance = null;
 let availableSeries = [];
 let groupedDevices = []; // [{ deviceId, deviceName, room, category, isOnline, totalRecords, params: [...] }]
@@ -44,6 +47,46 @@ let selectedKeys = [];
 let currentRange = '24h';
 let interactionMode = 'zoom'; // 'zoom' (drag-to-zoom, shift+drag pan) | 'pan' (drag-to-pan)
 let pickerVisible = true;
+
+function getVisitorRangeBounds() {
+  const now = new Date();
+  if (currentRange === 'today') {
+    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+    const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+    return { fromDate: start, toDate: end };
+  }
+  if (currentRange === 'custom') {
+    const fromVal = document.getElementById('analytics-from')?.value;
+    const toVal = document.getElementById('analytics-to')?.value;
+    const f = fromVal ? new Date(fromVal) : new Date(now.getTime() - 24 * 3600 * 1000);
+    const t = toVal ? new Date(toVal) : now;
+    if (!Number.isNaN(f.getTime()) && !Number.isNaN(t.getTime()) && f < t) {
+      return { fromDate: f, toDate: t };
+    }
+  }
+  const hoursMap = { '24h': 24, '7d': 24 * 7, '30d': 24 * 30 };
+  const hours = hoursMap[currentRange] || 24;
+  return {
+    fromDate: new Date(now.getTime() - hours * 3600 * 1000),
+    toDate: now,
+  };
+}
+
+function formatVisitorDateTime(ms) {
+  try {
+    return new Intl.DateTimeFormat(VISITOR_LOCALE, {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      timeZone: VISITOR_TZ,
+    }).format(new Date(ms));
+  } catch {
+    return new Date(ms).toLocaleString();
+  }
+}
 
 const pickerFilters = {
   deviceQuery: '',
@@ -376,10 +419,14 @@ function renderStatsCards(seriesList) {
     .join('');
 }
 
-function renderChart(seriesList) {
+function renderChart(seriesList, bounds) {
   const canvas = document.getElementById('telemetry-chart');
   const emptyOverlay = document.getElementById('chart-empty-overlay');
   if (!canvas || !window.Chart) return;
+
+  const { fromDate, toDate } = bounds || getVisitorRangeBounds();
+  const xMin = fromDate.getTime();
+  const xMax = toDate.getTime();
 
   const totalPoints = seriesList.reduce((acc, s) => acc + s.points.length, 0);
   emptyOverlay?.classList.toggle('hidden', totalPoints > 0);
@@ -417,11 +464,12 @@ function renderChart(seriesList) {
   const scales = {
     x: {
       type: 'time',
+      min: xMin,
+      max: xMax,
       time: {
-        tooltipFormat: 'dd/MM/yyyy HH:mm:ss',
         displayFormats: {
           minute: 'HH:mm',
-          hour: 'dd/MM HH:mm',
+          hour: currentRange === 'today' ? 'HH:mm' : 'dd/MM HH:mm',
           day: 'dd MMM',
         },
       },
@@ -490,6 +538,10 @@ function renderChart(seriesList) {
           padding: 10,
           cornerRadius: 10,
           callbacks: {
+            title(items) {
+              const x = items?.[0]?.parsed?.x;
+              return x !== undefined ? formatVisitorDateTime(x) : '';
+            },
             label(ctx) {
               const ds = ctx.dataset;
               const y = ctx.parsed.y;
@@ -502,7 +554,7 @@ function renderChart(seriesList) {
         },
         zoom: {
           limits: {
-            x: { min: 'original', max: 'original', minRange: 60 * 1000 },
+            x: { min: xMin, max: xMax, minRange: 60 * 1000 },
           },
           pan: {
             enabled: true,
@@ -530,26 +582,25 @@ function renderChart(seriesList) {
 }
 
 export async function loadHistoryChart() {
+  const bounds = getVisitorRangeBounds();
+
   if (selectedKeys.length === 0) {
     renderStatsCards([]);
-    renderChart([]);
+    renderChart([], bounds);
     return;
   }
 
   try {
-    const fromVal = document.getElementById('analytics-from')?.value;
-    const toVal = document.getElementById('analytics-to')?.value;
-
     const res = await api.getTelemetryHistory({
       series: selectedKeys,
-      range: currentRange,
-      from: currentRange === 'custom' && fromVal ? new Date(fromVal).toISOString() : undefined,
-      to: currentRange === 'custom' && toVal ? new Date(toVal).toISOString() : undefined,
+      range: 'custom',
+      from: bounds.fromDate.toISOString(),
+      to: bounds.toDate.toISOString(),
     });
 
     const list = res.data?.series || [];
     renderStatsCards(list);
-    renderChart(list);
+    renderChart(list, bounds);
   } catch (err) {
     showToast(`Error cargando historial: ${err.message}`, 'error');
   }
@@ -581,6 +632,11 @@ export async function refreshAvailableSeries() {
 }
 
 export function initAnalyticsModule() {
+  const tzBadge = document.getElementById('analytics-timezone-badge');
+  if (tzBadge) {
+    tzBadge.textContent = `Hora local: ${VISITOR_TZ}`;
+  }
+
   if (window.Chart && window.ChartZoom) {
     try {
       window.Chart.register(window.ChartZoom);

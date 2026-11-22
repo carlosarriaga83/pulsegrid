@@ -239,6 +239,7 @@
         <div class="flex flex-wrap items-center justify-between gap-3">
           <!-- Rangos rápidos -->
           <div class="flex flex-wrap items-center gap-1.5">
+            <button type="button" data-range-btn="today" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-900 text-slate-400 border border-slate-800 hover:text-slate-200">Hoy (00–24h)</button>
             <button type="button" data-range-btn="24h" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-sky-500/20 text-sky-300 border border-sky-500/40">24h</button>
             <button type="button" data-range-btn="7d" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-900 text-slate-400 border border-slate-800 hover:text-slate-200">7 días</button>
             <button type="button" data-range-btn="30d" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-900 text-slate-400 border border-slate-800 hover:text-slate-200">30 días</button>
@@ -342,8 +343,9 @@
 
       <!-- Canvas interactivo Chart.js -->
       <div class="relative rounded-2xl bg-slate-900/90 border border-slate-800 p-4 sm:p-5">
-        <div class="flex items-center justify-between text-[11px] text-slate-500 mb-3">
+        <div class="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500 mb-3">
           <span>Tip: Arrastra para hacer zoom · Rueda/pinch para acercar · <kbd class="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300">Shift</kbd> + arrastrar para desplazar</span>
+          <span id="analytics-timezone-badge" class="font-mono text-slate-400"></span>
         </div>
         <div class="relative h-[380px] sm:h-[440px] w-full">
           <canvas id="telemetry-chart"></canvas>
