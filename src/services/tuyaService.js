@@ -9,6 +9,7 @@ let tuyaClient = null;
 const deviceCache = new Map();
 const specCache = new Map();
 let lastSyncAt = 0;
+let lastSyncError = null;
 
 function parseJsonSafe(val) {
   if (val === null || val === undefined) return null;
@@ -379,7 +380,19 @@ export async function syncDevices() {
     };
   }
 
-  const tuyaDevices = await fetchDevicesFromTuya();
+  let tuyaDevices;
+  try {
+    tuyaDevices = await fetchDevicesFromTuya();
+    lastSyncError = null;
+  } catch (err) {
+    const codeMatch = String(err.message || '').match(/\((\d+)\)/);
+    lastSyncError = {
+      message: err.message,
+      code: codeMatch ? codeMatch[1] : null,
+      at: new Date().toISOString(),
+    };
+    throw err;
+  }
   const changes = [];
 
   for (const dev of tuyaDevices) {
@@ -674,12 +687,17 @@ export async function updateDeviceMetadata(deviceId, { customName, room, notifyO
   return updated;
 }
 
+export function getLastSyncError() {
+  return lastSyncError;
+}
+
 export function getCacheStats() {
   return {
     configured: isTuyaConfigured(),
     cachedDevices: deviceCache.size,
     cachedSpecs: specCache.size,
     lastSyncAt: lastSyncAt ? new Date(lastSyncAt).toISOString() : null,
+    lastSyncError,
   };
 }
 
@@ -825,6 +843,7 @@ export default {
   updateDeviceMetadata,
   loadDevicesFromDb,
   getCacheStats,
+  getLastSyncError,
   seedDemoDevices,
   clearDemoDevices,
 };

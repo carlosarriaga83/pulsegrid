@@ -9,6 +9,7 @@ import {
 import { initAnalyticsModule, refreshAvailableSeries } from './ui/analyticsView.js';
 import { initAlertsModule, loadAlertsData } from './ui/alertsView.js';
 import { showToast } from './ui/toast.js';
+import { formatDateTime, formatNumber } from './utils/formatters.js';
 
 const state = {
   devices: new Map(),
@@ -28,6 +29,11 @@ const els = {
   socketBadge: document.getElementById('socket-badge'),
   weatherPill: document.getElementById('weather-pill'),
   tuyaWarningBanner: document.getElementById('tuya-warning-banner'),
+  tuyaErrorBanner: document.getElementById('tuya-error-banner'),
+  tuyaErrorMsg: document.getElementById('tuya-error-msg'),
+  tuyaErrorTime: document.getElementById('tuya-error-time'),
+  tuyaErrorHint: document.getElementById('tuya-error-hint'),
+  retryTuyaBtn: document.getElementById('btn-retry-tuya-sync'),
   syncBtn: document.getElementById('btn-sync-tuya'),
   seedDemoBtn: document.getElementById('btn-seed-demo'),
   clearDemoBtn: document.getElementById('btn-clear-demo'),
@@ -64,16 +70,38 @@ function isDeviceActive(device) {
   return Boolean(s.switch || s.switch_1 || s.switch_led || s.power_go);
 }
 
+function renderTuyaErrorBanner(errObj) {
+  if (!els.tuyaErrorBanner) return;
+  if (!errObj || !errObj.message) {
+    els.tuyaErrorBanner.classList.add('hidden');
+    return;
+  }
+
+  els.tuyaErrorMsg.textContent = errObj.message;
+  els.tuyaErrorTime.textContent = errObj.at ? `(${formatDateTime(errObj.at)})` : '';
+
+  const isExpired = String(errObj.code) === '28841002' || String(errObj.message).includes('28841002');
+  if (isExpired) {
+    els.tuyaErrorHint.textContent =
+      'Tu suscripción Trial de Tuya IoT Core venció. Renuévala gratis en iot.tuya.com → Cloud → Cloud Services → IoT Core → Extend Trial Period.';
+    els.tuyaErrorHint.classList.remove('hidden');
+  } else {
+    els.tuyaErrorHint.classList.add('hidden');
+  }
+
+  els.tuyaErrorBanner.classList.remove('hidden');
+}
+
 function updateKpis() {
   const list = Array.from(state.devices.values());
   const online = list.filter((d) => d.isOnline).length;
   const offline = list.length - online;
   const active = list.filter((d) => d.isOnline && isDeviceActive(d)).length;
 
-  els.kpiTotal.textContent = String(list.length);
-  els.kpiOnline.textContent = String(online);
-  els.kpiOffline.textContent = String(offline);
-  els.kpiActive.textContent = String(active);
+  els.kpiTotal.textContent = formatNumber(list.length, 0);
+  els.kpiOnline.textContent = formatNumber(online, 0);
+  els.kpiOffline.textContent = formatNumber(offline, 0);
+  els.kpiActive.textContent = formatNumber(active, 0);
 
   const hasDemo = list.some((d) => String(d.id).startsWith('demo_'));
   els.clearDemoBtn?.classList.toggle('hidden', !hasDemo);
@@ -313,26 +341,35 @@ async function init() {
     reconcileGrid();
   });
 
-  // Botón sincronizar Tuya
-  els.syncBtn?.addEventListener('click', async () => {
-    els.syncBtn.disabled = true;
-    const prevText = els.syncBtn.textContent;
-    els.syncBtn.textContent = 'Sincronizando...';
+  // Botón sincronizar Tuya (y botón reintentar en banner de error)
+  const triggerSyncTuya = async () => {
+    if (els.syncBtn) {
+      els.syncBtn.disabled = true;
+      els.syncBtn.textContent = 'Sincronizando...';
+    }
+    if (els.retryTuyaBtn) els.retryTuyaBtn.disabled = true;
     try {
       const res = await api.syncDevices();
+      renderTuyaErrorBanner(null);
       applyDevicesSnapshot(res.devices, res.synced ? true : state.tuyaConfigured);
       if (res.synced) {
-        showToast(`Sincronización completa (${res.devices.length} dispositivos)`, 'success');
+        showToast(`Sincronización completa (${formatNumber(res.devices.length, 0)} dispositivos)`, 'success');
       } else {
         showToast(res.reason || 'Tuya Cloud no está configurada aún', 'warning');
       }
     } catch (err) {
+      renderTuyaErrorBanner({ message: err.message, at: new Date().toISOString() });
       showToast(err.message, 'error');
     } finally {
-      els.syncBtn.disabled = false;
-      els.syncBtn.textContent = prevText;
+      if (els.syncBtn) {
+        els.syncBtn.disabled = false;
+        els.syncBtn.textContent = 'Sincronizar Tuya';
+      }
+      if (els.retryTuyaBtn) els.retryTuyaBtn.disabled = false;
     }
-  });
+  };
+  els.syncBtn?.addEventListener('click', triggerSyncTuya);
+  els.retryTuyaBtn?.addEventListener('click', triggerSyncTuya);
 
   // Botones Demo (pruebas en Hostinger antes de vincular Tuya)
   const triggerSeedDemo = async () => {
@@ -414,6 +451,11 @@ async function init() {
 
   onSocketEvent('snapshot', (payload) => {
     applyDevicesSnapshot(payload.devices, payload.tuyaConfigured);
+    if (payload.tuyaError !== undefined) renderTuyaErrorBanner(payload.tuyaError);
+  });
+
+  onSocketEvent('tuyaError', (errObj) => {
+    renderTuyaErrorBanner(errObj);
   });
 
   onSocketEvent('deviceUpdate', (payload) => {
@@ -440,6 +482,7 @@ async function init() {
   try {
     const devRes = await api.getDevices(false);
     applyDevicesSnapshot(devRes.data, devRes.tuyaConfigured);
+    renderTuyaErrorBanner(devRes.tuyaError || null);
   } catch (err) {
     showToast(`Error cargando dispositivos: ${err.message}`, 'error');
   }

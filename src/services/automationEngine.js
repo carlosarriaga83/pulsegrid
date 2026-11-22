@@ -5,7 +5,7 @@ import tuyaService from './tuyaService.js';
 import weatherService, { getSolarEventTime } from './weatherService.js';
 import telemetryService from './telemetryService.js';
 import emailService from './emailService.js';
-import { emitDeviceUpdate, emitAlert, getIO } from '../sockets/socketManager.js';
+import { emitDeviceUpdate, emitTuyaError, emitAlert, getIO } from '../sockets/socketManager.js';
 import logger from '../utils/logger.js';
 
 let evaluationTask = null;
@@ -705,6 +705,7 @@ export function startScheduler() {
     if (!tuyaService.isTuyaConfigured()) return;
     try {
       const res = await tuyaService.syncDevices();
+      emitTuyaError(null);
       if (res.changes?.length > 0) {
         for (const ch of res.changes) {
           emitDeviceUpdate(ch.device);
@@ -719,6 +720,7 @@ export function startScheduler() {
         }
       }
     } catch (err) {
+      emitTuyaError(tuyaService.getLastSyncError() || { message: err.message, at: new Date().toISOString() });
       logger.warn('Error en polling periódico de Tuya', { error: err.message });
     }
   });

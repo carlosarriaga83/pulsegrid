@@ -1,6 +1,6 @@
 import tuyaService from '../services/tuyaService.js';
 import telemetryService from '../services/telemetryService.js';
-import { emitDeviceUpdate, emitDevicesSnapshot } from '../sockets/socketManager.js';
+import { emitDeviceUpdate, emitDevicesSnapshot, emitTuyaError } from '../sockets/socketManager.js';
 
 export async function listDevices(req, res, next) {
   try {
@@ -10,6 +10,7 @@ export async function listDevices(req, res, next) {
       ok: true,
       count: devices.length,
       tuyaConfigured: tuyaService.isTuyaConfigured(),
+      tuyaError: tuyaService.getLastSyncError(),
       data: devices,
     });
   } catch (err) {
@@ -20,12 +21,14 @@ export async function listDevices(req, res, next) {
 export async function syncDevices(_req, res, next) {
   try {
     const result = await tuyaService.syncDevices();
+    emitTuyaError(null);
     emitDevicesSnapshot(result.devices);
     res.json({
       ok: true,
       ...result,
     });
   } catch (err) {
+    emitTuyaError(tuyaService.getLastSyncError() || { message: err.message, at: new Date().toISOString() });
     next(err);
   }
 }

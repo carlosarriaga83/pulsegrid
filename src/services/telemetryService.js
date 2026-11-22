@@ -63,13 +63,23 @@ function getFriendlyDpLabel(dpCode, rawName) {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+const UNIT_TRANSLATIONS = { '秒': 's', '分钟': 'min', '小时': 'h', '℃': '°C', '℉': '°F', '%RH': '%' };
+
+function cleanUnit(rawUnit) {
+  if (!rawUnit) return '';
+  const u = String(rawUnit).trim();
+  if (UNIT_TRANSLATIONS[u]) return UNIT_TRANSLATIONS[u];
+  if (hasCJK(u)) return '';
+  return u;
+}
+
 function getDpMeta(device, dpCode) {
   const specs = [...(device?.dpSchema?.functions || []), ...(device?.dpSchema?.status || [])];
   const spec = specs.find((s) => s.code === dpCode);
   return {
     label: getFriendlyDpLabel(dpCode, spec?.name),
     scale: Number(spec?.parsedValues?.scale || 0),
-    unit: spec?.parsedValues?.unit || '',
+    unit: cleanUnit(spec?.parsedValues?.unit || ''),
     specType: String(spec?.type || '').toLowerCase(),
   };
 }
@@ -335,7 +345,7 @@ export async function getAvailableSeries() {
         isOnline: Boolean(dev.isOnline),
         dpCode: code,
         dpLabel: getFriendlyDpLabel(code, rawName),
-        unit: valueType === 'boolean' ? '' : unit || '',
+        unit: valueType === 'boolean' ? '' : cleanUnit(unit || ''),
         valueType,
         currentValue,
         recordCount: countMap.get(`${dev.id}:${code}`) || 0,

@@ -8,6 +8,7 @@ const listeners = {
   deviceUpdate: new Set(),
   weatherUpdate: new Set(),
   alert: new Set(),
+  tuyaError: new Set(),
   automationEvaluated: new Set(),
   automationTriggered: new Set(),
 };
@@ -49,6 +50,10 @@ export function connectSocket() {
 
   socket.on('alert:new', (payload) => {
     listeners.alert.forEach((cb) => cb(payload));
+  });
+
+  socket.on('tuya:error', (payload) => {
+    listeners.tuyaError.forEach((cb) => cb(payload));
   });
 
   socket.on('automation:evaluated', (payload) => {

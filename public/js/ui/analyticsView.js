@@ -1,5 +1,13 @@
 import api from '../api.js';
 import { showToast } from './toast.js';
+import {
+  VISITOR_TZ,
+  translateDpLabel,
+  translateUnit,
+  formatDateTime,
+  formatTime,
+  formatNumber,
+} from '../utils/formatters.js';
 
 const PALETTE = [
   '#38bdf8', // sky-400
@@ -36,9 +44,6 @@ const crosshairPlugin = {
   },
 };
 
-const VISITOR_TZ = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-const VISITOR_LOCALE = navigator.language || 'es';
-
 let chartInstance = null;
 let availableSeries = [];
 let groupedDevices = []; // [{ deviceId, deviceName, room, category, isOnline, totalRecords, params: [...] }]
@@ -73,22 +78,6 @@ function getVisitorRangeBounds() {
     fromDate: new Date(now.getTime() - hours * 3600 * 1000),
     toDate: now,
   };
-}
-
-function formatVisitorDateTime(ms) {
-  try {
-    return new Intl.DateTimeFormat(VISITOR_LOCALE, {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      timeZone: VISITOR_TZ,
-    }).format(new Date(ms));
-  } catch {
-    return new Date(ms).toLocaleString();
-  }
 }
 
 const pickerFilters = {
@@ -371,9 +360,12 @@ function renderDpList() {
               const selIdx = selectedKeys.indexOf(key);
               const isSelected = selIdx !== -1;
               const color = isSelected ? PALETTE[selIdx % PALETTE.length] : null;
+              const unitClean = translateUnit(p.unit || '');
               const liveTxt =
                 p.currentValue !== null && p.currentValue !== undefined
-                  ? `${p.currentValue}${p.unit ? ` ${p.unit}` : ''}`
+                  ? p.valueType === 'boolean'
+                    ? String(p.currentValue)
+                    : `${formatNumber(p.currentValue)}${unitClean ? ` ${unitClean}` : ''}`
                   : '—';
 
               return `
@@ -392,14 +384,14 @@ function renderDpList() {
                       ${isSelected ? '✓' : ''}
                     </span>
                     <div class="min-w-0">
-                      <div class="text-xs font-medium truncate">${esc(p.dpLabel)}</div>
+                      <div class="text-xs font-medium truncate">${esc(translateDpLabel(p.dpCode, p.dpLabel))}</div>
                       <div class="text-[10px] font-mono text-slate-500 truncate">${esc(p.dpCode)}</div>
                     </div>
                   </div>
                   <div class="text-right flex-shrink-0">
                     <div class="text-[11px] font-mono font-semibold text-slate-200">${esc(liveTxt)}</div>
                     <div class="text-[10px] ${p.recordCount > 0 ? 'text-emerald-400' : 'text-slate-500'}">
-                      ${p.recordCount > 0 ? `${p.recordCount} pts` : 'Sin historial'}
+                      ${p.recordCount > 0 ? `${formatNumber(p.recordCount, 0)} pts` : 'Sin historial'}
                     </div>
                   </div>
                 </button>
@@ -432,22 +424,23 @@ function renderStatsCards(seriesList) {
   container.innerHTML = seriesList
     .map((s, idx) => {
       const color = PALETTE[idx % PALETTE.length];
-      const u = s.unit ? ` ${s.unit}` : '';
-      const minTxt = s.stats.min !== null ? (s.stepped ? (s.stats.min ? 'ON' : 'OFF') : `${s.stats.min}${u}`) : '—';
-      const avgTxt = s.stats.avg !== null ? (s.stepped ? `${Math.round(s.stats.avg * 100)}% ON` : `${s.stats.avg}${u}`) : '—';
-      const maxTxt = s.stats.max !== null ? (s.stepped ? (s.stats.max ? 'ON' : 'OFF') : `${s.stats.max}${u}`) : '—';
+      const cleanU = translateUnit(s.unit || '');
+      const u = cleanU ? ` ${cleanU}` : '';
+      const minTxt = s.stats.min !== null ? (s.stepped ? (s.stats.min ? 'ON' : 'OFF') : `${formatNumber(s.stats.min)}${u}`) : '—';
+      const avgTxt = s.stats.avg !== null ? (s.stepped ? `${formatNumber(Math.round(s.stats.avg * 100), 0)}% ON` : `${formatNumber(s.stats.avg)}${u}`) : '—';
+      const maxTxt = s.stats.max !== null ? (s.stepped ? (s.stats.max ? 'ON' : 'OFF') : `${formatNumber(s.stats.max)}${u}`) : '—';
 
       return `
         <div class="rounded-xl bg-slate-900/90 border border-slate-800 p-3.5">
           <div class="flex items-center gap-2 mb-2">
             <span class="h-2.5 w-2.5 rounded-full" style="background:${color}"></span>
-            <span class="text-xs font-semibold text-slate-200 truncate">${esc(s.deviceName)} · ${esc(s.dpLabel)}</span>
+            <span class="text-xs font-semibold text-slate-200 truncate">${esc(s.deviceName)} · ${esc(translateDpLabel(s.dpCode, s.dpLabel))}</span>
           </div>
           <div class="grid grid-cols-4 gap-2 text-[11px]">
             <div><span class="block text-slate-500">Mín</span><strong class="text-slate-200 font-mono">${esc(minTxt)}</strong></div>
             <div><span class="block text-slate-500">Prom</span><strong class="text-sky-300 font-mono">${esc(avgTxt)}</strong></div>
             <div><span class="block text-slate-500">Máx</span><strong class="text-slate-200 font-mono">${esc(maxTxt)}</strong></div>
-            <div><span class="block text-slate-500">Puntos</span><strong class="text-slate-300 font-mono">${s.totalRecords}</strong></div>
+            <div><span class="block text-slate-500">Puntos</span><strong class="text-slate-300 font-mono">${formatNumber(s.totalRecords, 0)}</strong></div>
           </div>
         </div>
       `;
@@ -504,9 +497,10 @@ function renderChart(seriesList, bounds) {
       max: xMax,
       time: {
         displayFormats: {
+          second: 'HH:mm:ss',
           minute: 'HH:mm',
-          hour: currentRange === 'today' ? 'HH:mm' : 'dd/MM HH:mm',
-          day: 'dd MMM',
+          hour: currentRange === 'today' ? 'HH:mm' : 'yyyy-MM-dd HH:mm',
+          day: 'yyyy-MM-dd',
         },
       },
       grid: { color: 'rgba(51, 65, 85, 0.35)' },
@@ -521,7 +515,7 @@ function renderChart(seriesList, bounds) {
         font: { size: 11 },
         callback: (val) => {
           if (!hasNumeric && hasBoolean) return val === 1 ? 'ON' : val === 0 ? 'OFF' : '';
-          return val;
+          return formatNumber(val);
         },
       },
       ...(!hasNumeric && hasBoolean ? { min: -0.1, max: 1.15 } : {}),
@@ -576,7 +570,7 @@ function renderChart(seriesList, bounds) {
           callbacks: {
             title(items) {
               const x = items?.[0]?.parsed?.x;
-              return x !== undefined ? formatVisitorDateTime(x) : '';
+              return x !== undefined ? formatDateTime(x) : '';
             },
             label(ctx) {
               const ds = ctx.dataset;
@@ -584,7 +578,7 @@ function renderChart(seriesList, bounds) {
               if (ds.metaStepped) {
                 return ` ${ds.label}: ${y >= 0.5 ? 'ENCENDIDO (ON)' : 'APAGADO (OFF)'}`;
               }
-              return ` ${ds.label}: ${y}${ds.metaUnit ? ` ${ds.metaUnit}` : ''}`;
+              return ` ${ds.label}: ${formatNumber(y)}${ds.metaUnit ? ` ${ds.metaUnit}` : ''}`;
             },
           },
         },
@@ -640,13 +634,7 @@ export async function loadHistoryChart() {
 
     const tzBadge = document.getElementById('analytics-timezone-badge');
     if (tzBadge) {
-      const timeStr = new Intl.DateTimeFormat(VISITOR_LOCALE, {
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        timeZone: VISITOR_TZ,
-      }).format(new Date());
-      tzBadge.textContent = `Hora local: ${VISITOR_TZ} · Act: ${timeStr}`;
+      tzBadge.textContent = `Hora local: ${VISITOR_TZ} · Act: ${formatTime(new Date())}`;
     }
   } catch (err) {
     showToast(`Error cargando historial: ${err.message}`, 'error');

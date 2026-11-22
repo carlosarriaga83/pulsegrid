@@ -1,5 +1,6 @@
 import api from '../api.js';
 import { showToast } from './toast.js';
+import { formatDateTime } from '../utils/formatters.js';
 
 function esc(str) {
   return String(str ?? '')
@@ -110,7 +111,7 @@ function renderLogs(logs = []) {
 
       return `
         <tr class="border-t border-slate-800/80 text-xs">
-          <td class="py-2.5 pr-3 font-mono text-[11px] text-slate-400 whitespace-nowrap">${new Date(l.sentAt).toLocaleString()}</td>
+          <td class="py-2.5 pr-3 font-mono text-[11px] text-slate-400 whitespace-nowrap">${formatDateTime(l.sentAt)}</td>
           <td class="py-2.5 pr-3">${badge}</td>
           <td class="py-2.5 pr-3 text-slate-200">
             <div class="font-medium">${esc(l.subject)}</div>

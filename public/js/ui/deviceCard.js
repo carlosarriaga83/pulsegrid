@@ -5,19 +5,26 @@
  * - Bloqueo de interacción (Interaction Lock) para evitar que actualizaciones Socket.io interrumpan al usuario
  */
 
+import { translateDpLabel, translateUnit, formatNumber } from '../utils/formatters.js';
+
 const CATEGORY_META = {
   wk: { label: 'Termostato', icon: '🌡️' },
   dj: { label: 'Iluminación', icon: '💡' },
   dd: { label: 'Tira LED', icon: '✨' },
-  cz: { label: 'Enchufe', icon: '🔌' },
+  tgq: { label: 'Atenuador (Dimmer)', icon: '🔆' },
+  cz: { label: 'Enchufe / Medidor', icon: '🔌' },
   pc: { label: 'Multicontacto', icon: '⚡' },
   kg: { label: 'Interruptor', icon: '🔘' },
   wsdcg: { label: 'Sensor Clima', icon: '🌦️' },
   mcs: { label: 'Sensor Puerta', icon: '🚪' },
+  tdq: { label: 'Sensor / Interruptor', icon: '🚪' },
   pir: { label: 'Movimiento', icon: '👁️' },
   kt: { label: 'Aire Acond.', icon: '❄️' },
   fs: { label: 'Ventilador', icon: '🌀' },
   cl: { label: 'Cortina', icon: '🪟' },
+  clkg: { label: 'Interruptor Cortina', icon: '🪟' },
+  mk: { label: 'Cerradura Inteligente', icon: '🔐' },
+  sos: { label: 'Botón SOS', icon: '🆘' },
 };
 
 const PRIMARY_SWITCH_CODES = ['switch', 'switch_1', 'switch_led', 'power_go', 'switch_all'];
@@ -66,12 +73,13 @@ function formatScaledValue(rawValue, spec) {
 
   const values = spec?.parsedValues || {};
   const scale = Number(values.scale || 0);
-  const unit = values.unit ? ` ${values.unit}` : '';
+  const cleanU = translateUnit(values.unit || '');
+  const unit = cleanU ? ` ${cleanU}` : '';
 
   if (typeof rawValue === 'number' || (!Number.isNaN(Number(rawValue)) && spec?.type === 'Integer')) {
     const num = Number(rawValue);
-    const scaled = scale > 0 ? (num / Math.pow(10, scale)).toFixed(scale) : String(num);
-    return `${scaled}${unit}`;
+    const scaled = scale > 0 ? num / Math.pow(10, scale) : num;
+    return `${formatNumber(scaled, scale > 0 ? scale : 0)}${unit}`;
   }
 
   return `${String(rawValue)}${unit}`;
@@ -115,7 +123,7 @@ function getReadOnlyMetrics(device, functions) {
     const spec = statusSpecs.find((s) => s.code === code) || null;
     metrics.push({
       code,
-      label: spec?.name || humanizeCode(code),
+      label: translateDpLabel(code, spec?.name),
       formatted: formatScaledValue(value, spec),
       raw: value,
       spec,
@@ -126,10 +134,11 @@ function getReadOnlyMetrics(device, functions) {
 
 function renderControlHtml(device, fn) {
   const code = fn.code;
-  const label = fn.name || humanizeCode(code);
+  const label = translateDpLabel(code, fn.name);
   const type = String(fn.type || '').toLowerCase();
   const currentVal = device.status?.[code];
   const constraints = fn.parsedValues || {};
+  const cleanUnit = translateUnit(constraints.unit || '');
   const disabledAttr = !device.isOnline ? 'disabled' : '';
 
   if (type === 'boolean') {
@@ -175,7 +184,7 @@ function renderControlHtml(device, fn) {
           data-dp-control="integer"
           data-dp-code="${escapeHtml(code)}"
           data-scale="${constraints.scale || 0}"
-          data-unit="${escapeHtml(constraints.unit || '')}"
+          data-unit="${escapeHtml(cleanUnit)}"
           class="pg-slider w-full"
           ${disabledAttr}
         />
@@ -478,7 +487,8 @@ function bindCardEvents(card, deviceId, { onSendCommand, onOpenSettings }) {
     slider.addEventListener('input', () => {
       lockControl(deviceId, code);
       const num = Number(slider.value);
-      const formatted = scale > 0 ? (num / Math.pow(10, scale)).toFixed(scale) : String(num);
+      const scaled = scale > 0 ? num / Math.pow(10, scale) : num;
+      const formatted = formatNumber(scaled, scale > 0 ? scale : 0);
       if (displayEl) displayEl.textContent = `${formatted}${unit}`;
     });
 

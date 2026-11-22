@@ -32,6 +32,7 @@ export function initSocket(httpServer) {
       socket.emit('devices:snapshot', {
         devices,
         tuyaConfigured: tuyaService.isTuyaConfigured(),
+        tuyaError: tuyaService.getLastSyncError(),
         timestamp: new Date().toISOString(),
       });
     } catch (err) {
@@ -104,8 +105,14 @@ export function emitDevicesSnapshot(devices) {
   io.emit('devices:snapshot', {
     devices,
     tuyaConfigured: tuyaService.isTuyaConfigured(),
+    tuyaError: tuyaService.getLastSyncError(),
     timestamp: new Date().toISOString(),
   });
+}
+
+export function emitTuyaError(errorObj) {
+  if (!io) return;
+  io.emit('tuya:error', errorObj || null);
 }
 
 export function emitAlert(alert) {
@@ -132,6 +139,7 @@ export default {
   getConnectedClientsCount,
   emitDeviceUpdate,
   emitDevicesSnapshot,
+  emitTuyaError,
   emitAlert,
   closeSocket,
 };

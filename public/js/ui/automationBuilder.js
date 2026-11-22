@@ -1,5 +1,6 @@
 import api from '../api.js';
 import { showToast } from './toast.js';
+import { translateDpLabel, translateUnit, formatDateTime, formatTime, formatNumber } from '../utils/formatters.js';
 
 const DAYS_SHORT = ['D', 'L', 'M', 'X', 'J', 'V', 'S'];
 const OPERATORS = [
@@ -51,15 +52,23 @@ function getReadableDps(device) {
   if (!device) return [];
   const map = new Map();
   for (const s of device.dpSchema?.status || []) {
-    map.set(s.code, { code: s.code, label: s.name || s.code, unit: s.parsedValues?.unit || '' });
+    map.set(s.code, {
+      code: s.code,
+      label: translateDpLabel(s.code, s.name),
+      unit: translateUnit(s.parsedValues?.unit || ''),
+    });
   }
   for (const f of device.dpSchema?.functions || []) {
     if (!map.has(f.code)) {
-      map.set(f.code, { code: f.code, label: f.name || f.code, unit: f.parsedValues?.unit || '' });
+      map.set(f.code, {
+        code: f.code,
+        label: translateDpLabel(f.code, f.name),
+        unit: translateUnit(f.parsedValues?.unit || ''),
+      });
     }
   }
   for (const code of Object.keys(device.status || {})) {
-    if (!map.has(code)) map.set(code, { code, label: code, unit: '' });
+    if (!map.has(code)) map.set(code, { code, label: translateDpLabel(code, code), unit: '' });
   }
   return Array.from(map.values());
 }
@@ -70,14 +79,14 @@ function getWritableDps(device) {
   if (fns.length > 0) {
     return fns.map((f) => ({
       code: f.code,
-      label: f.name || f.code,
+      label: translateDpLabel(f.code, f.name),
       type: String(f.type || '').toLowerCase(),
       values: f.parsedValues || {},
     }));
   }
   return Object.entries(device.status || {}).map(([code, val]) => ({
     code,
-    label: code,
+    label: translateDpLabel(code, code),
     type: typeof val === 'boolean' ? 'boolean' : typeof val === 'number' ? 'integer' : 'string',
     values: {},
   }));
@@ -177,7 +186,7 @@ function renderRuleCard(rule) {
     : '';
 
   const lastTriggerText = rule.lastTriggeredAt
-    ? new Date(rule.lastTriggeredAt).toLocaleString()
+    ? formatDateTime(rule.lastTriggeredAt)
     : 'Nunca';
 
   return `
@@ -188,7 +197,7 @@ function renderRuleCard(rule) {
             <div class="flex items-center gap-2 flex-wrap">
               <h3 class="text-base font-semibold text-slate-100">${esc(rule.name)}</h3>
               ${statusBadge}
-              <span class="text-[11px] text-slate-500">Cooldown: ${rule.cooldownMinutes}m · Disparos: ${rule.triggerCount}</span>
+              <span class="text-[11px] text-slate-500">Cooldown: ${formatNumber(rule.cooldownMinutes, 0)}m · Disparos: ${formatNumber(rule.triggerCount, 0)}</span>
             </div>
             ${rule.description ? `<p class="text-xs text-slate-400 mt-0.5">${esc(rule.description)}</p>` : ''}
           </div>
@@ -233,7 +242,7 @@ function renderRuleCard(rule) {
               </svg>
               <span>Evaluación en vivo y trazabilidad (logs)</span>
             </span>
-            <span class="text-[11px] text-slate-500">${snap?.evaluatedAt ? `Eval: ${new Date(snap.evaluatedAt).toLocaleTimeString()}` : 'Sin evaluar'}</span>
+            <span class="text-[11px] text-slate-500">${snap?.evaluatedAt ? `Eval: ${formatTime(snap.evaluatedAt)}` : 'Sin evaluar'}</span>
           </summary>
 
           <div class="mt-3 space-y-3">
@@ -275,7 +284,7 @@ async function loadLogsForRule(ruleId) {
           <div class="flex items-center justify-between gap-2 py-1 border-t border-slate-800/70">
             <span class="${color} font-semibold uppercase text-[10px]">${esc(l.status)}</span>
             <span class="text-slate-400 truncate flex-1">${esc(l.errorMessage || `${(l.actionsResult || []).length} acción(es) ejecutada(s)`)}</span>
-            <span class="font-mono text-[10px] text-slate-500">${new Date(l.executedAt).toLocaleString()}</span>
+            <span class="font-mono text-[10px] text-slate-500">${formatDateTime(l.executedAt)}</span>
           </div>
         `;
       })
