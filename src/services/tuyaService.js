@@ -391,16 +391,25 @@ export async function syncDevices() {
       : null;
 
     // Si v1.0 devolvió status vacío (típico en power meters / modo DP), consultar v2.0 shadow/properties
-    if (Object.keys(statusMap).length === 0) {
+    // Solo consultamos en cada ciclo si el equipo está online (o si nunca hemos tenido estado) para ahorrar cuota Tuya
+    const prevHasStatus = previous?.status && Object.keys(previous.status).length > 0;
+    if (Object.keys(statusMap).length === 0 && (isOnline || !prevHasStatus)) {
       try {
         const shadow = await fetchShadowPropertiesV2(dev.id);
         if (Object.keys(shadow.statusMap).length > 0) {
           statusMap = shadow.statusMap;
         }
       } catch (shadowErr) {
-        logger.debug(`Shadow v2.0 no disponible para ${dev.id}`, { error: shadowErr.message });
+        logger.warn(`Shadow v2.0 falló para ${dev.id} (${dev.name})`, { error: shadowErr.message });
       }
     }
+
+    // Nunca sobrescribir un last_status válido con '{}' si la consulta v2.0 falló transitoriamente
+    if (Object.keys(statusMap).length === 0 && prevHasStatus) {
+      statusMap = previous.status;
+    }
+
+    const statusJson = JSON.stringify(statusMap);
 
     await query(
       `INSERT INTO devices (id, name, category, product_id, product_name, icon_url, is_online, last_online_at, last_status)
@@ -412,8 +421,8 @@ export async function syncDevices() {
          product_name = VALUES(product_name),
          icon_url = VALUES(icon_url),
          is_online = VALUES(is_online),
-         last_online_at = IF(VALUES(is_online) = 1, NOW(), last_online_at),
-         last_status = VALUES(last_status),
+         last_online_at = IF(VALUES(is_online) = 1, UTC_TIMESTAMP(), last_online_at),
+         last_status = IF(VALUES(last_status) = '{}' AND last_status IS NOT NULL, last_status, VALUES(last_status)),
          updated_at = CURRENT_TIMESTAMP`,
       [
         dev.id,
@@ -424,7 +433,7 @@ export async function syncDevices() {
         iconUrl,
         isOnline ? 1 : 0,
         isOnline ? new Date() : null,
-        JSON.stringify(statusMap),
+        statusJson,
       ]
     );
 

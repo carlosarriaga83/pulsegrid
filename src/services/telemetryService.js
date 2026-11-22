@@ -162,8 +162,17 @@ export async function recordCommandsTelemetry(device, commands) {
 
 /**
  * Registra snapshot periódico de todos los dispositivos online.
+ * Si Tuya está configurada, fuerza primero una sincronización fresca para no guardar estados obsoletos o vacíos.
  */
 export async function captureAllDevicesTelemetry() {
+  if (tuyaService.isTuyaConfigured()) {
+    try {
+      await tuyaService.syncDevices();
+    } catch (err) {
+      logger.warn('Sync previo a captura de telemetría falló, usando caché', { error: err.message });
+    }
+  }
+
   const devices = await tuyaService.getDevices(false);
   let totalInserted = 0;
   for (const dev of devices) {

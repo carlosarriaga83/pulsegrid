@@ -47,6 +47,9 @@ let selectedKeys = [];
 let currentRange = '24h';
 let interactionMode = 'zoom'; // 'zoom' (drag-to-zoom, shift+drag pan) | 'pan' (drag-to-pan)
 let pickerVisible = true;
+let isZoomed = false;
+let autoRefreshSeconds = Number(localStorage.getItem('pg_analytics_autorefresh') || 0);
+let autoRefreshTimer = null;
 
 function getVisitorRangeBounds() {
   const now = new Date();
@@ -104,6 +107,7 @@ function esc(str) {
 }
 
 function setResetButtonState(zoomed) {
+  isZoomed = zoomed;
   const btn = document.getElementById('btn-reset-zoom');
   if (!btn) return;
   btn.disabled = !zoomed;
@@ -113,6 +117,38 @@ function setResetButtonState(zoomed) {
   } else {
     btn.className =
       'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 text-slate-500 border border-slate-800 text-xs font-medium cursor-not-allowed transition';
+  }
+}
+
+function updateAutoRefreshUI() {
+  const dot = document.getElementById('analytics-autorefresh-dot');
+  const sel = document.getElementById('analytics-autorefresh-select');
+  if (sel) sel.value = String(autoRefreshSeconds);
+  if (dot) {
+    dot.className =
+      autoRefreshSeconds > 0
+        ? 'h-2 w-2 rounded-full bg-emerald-400 animate-pulse'
+        : 'h-2 w-2 rounded-full bg-slate-600';
+  }
+}
+
+function configureAutoRefresh(seconds) {
+  autoRefreshSeconds = Number(seconds) || 0;
+  localStorage.setItem('pg_analytics_autorefresh', String(autoRefreshSeconds));
+  if (autoRefreshTimer) {
+    clearInterval(autoRefreshTimer);
+    autoRefreshTimer = null;
+  }
+  updateAutoRefreshUI();
+
+  if (autoRefreshSeconds > 0) {
+    autoRefreshTimer = setInterval(() => {
+      const panel = document.querySelector('[data-tab-panel="analytics"]');
+      const isVisible = panel && !panel.classList.contains('hidden');
+      // Solo autorefrescar si la pestaña está visible y el usuario no está inspeccionando un zoom
+      if (!isVisible || isZoomed || selectedKeys.length === 0) return;
+      loadHistoryChart();
+    }, autoRefreshSeconds * 1000);
   }
 }
 
@@ -601,6 +637,17 @@ export async function loadHistoryChart() {
     const list = res.data?.series || [];
     renderStatsCards(list);
     renderChart(list, bounds);
+
+    const tzBadge = document.getElementById('analytics-timezone-badge');
+    if (tzBadge) {
+      const timeStr = new Intl.DateTimeFormat(VISITOR_LOCALE, {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        timeZone: VISITOR_TZ,
+      }).format(new Date());
+      tzBadge.textContent = `Hora local: ${VISITOR_TZ} · Act: ${timeStr}`;
+    }
   } catch (err) {
     showToast(`Error cargando historial: ${err.message}`, 'error');
   }
@@ -707,6 +754,24 @@ export function initAnalyticsModule() {
     updateModeButtons();
   });
 
+  // Auto-refresco y botón refrescar manual
+  document.getElementById('analytics-autorefresh-select')?.addEventListener('change', (e) => {
+    const secs = Number(e.target.value || 0);
+    configureAutoRefresh(secs);
+    showToast(secs > 0 ? `Auto-refresco activado cada ${secs >= 60 ? `${secs / 60} min` : `${secs}s`}` : 'Auto-refresco desactivado', 'info');
+  });
+
+  document.getElementById('btn-refresh-chart')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    try {
+      await loadHistoryChart();
+      showToast('Gráfica actualizada', 'info', 1800);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
   // Reset Zoom
   document.getElementById('btn-reset-zoom')?.addEventListener('click', () => {
     if (chartInstance && typeof chartInstance.resetZoom === 'function') {
@@ -750,6 +815,7 @@ export function initAnalyticsModule() {
 
   updateModeButtons();
   setResetButtonState(false);
+  configureAutoRefresh(autoRefreshSeconds);
   refreshAvailableSeries();
 }
 
