@@ -1,6 +1,32 @@
 import api from '../api.js';
 import { showToast } from './toast.js';
-import { translateDpLabel, translateUnit, formatDateTime, formatTime, formatNumber } from '../utils/formatters.js';
+import {
+  VISITOR_TZ,
+  translateDpLabel,
+  translateUnit,
+  formatDateTime,
+  formatTime,
+  formatNumber,
+} from '../utils/formatters.js';
+
+const COMMON_TIMEZONES = [
+  'America/Mexico_City',
+  'America/Monterrey',
+  'America/Cancun',
+  'America/Tijuana',
+  'America/Bogota',
+  'America/Lima',
+  'America/Santiago',
+  'America/Argentina/Buenos_Aires',
+  'America/Sao_Paulo',
+  'America/New_York',
+  'America/Chicago',
+  'America/Denver',
+  'America/Los_Angeles',
+  'Europe/Madrid',
+  'Europe/London',
+  'UTC',
+];
 
 const DAYS_SHORT = ['D', 'L', 'M', 'X', 'J', 'V', 'S'];
 const OPERATORS = [
@@ -118,7 +144,8 @@ function describeSchedule(s = {}) {
   }
 
   const wText = s.weatherCondition && s.weatherCondition !== 'any' ? ` · clima: ${s.weatherCondition}` : '';
-  return `${dayText}, ${timeText}${wText}`;
+  const tzText = s.timezone ? ` [${s.timezone}]` : '';
+  return `${dayText}, ${timeText}${wText}${tzText}`;
 }
 
 function describeActions(actions = []) {
@@ -644,6 +671,7 @@ function collectPayloadFromModal() {
       solarRule: document.getElementById('builder-solar-rule').value || 'after_sunset',
       offsetMinutes: Number(document.getElementById('builder-solar-offset').value || 0),
       weatherCondition: document.getElementById('builder-weather-cond').value || 'any',
+      timezone: document.getElementById('builder-timezone')?.value || VISITOR_TZ,
     },
     actions,
     cooldownMinutes: Number(document.getElementById('builder-cooldown').value || 5),
@@ -669,6 +697,19 @@ function syncScheduleModeVisibility() {
   updateNaturalPreview();
 }
 
+function populateTimezoneSelect(selectedTz) {
+  const sel = document.getElementById('builder-timezone');
+  if (!sel) return;
+  const target = selectedTz || VISITOR_TZ;
+  const list = Array.from(new Set([VISITOR_TZ, target, ...COMMON_TIMEZONES].filter(Boolean)));
+  sel.innerHTML = list
+    .map((tz) => {
+      const tag = tz === VISITOR_TZ ? `${tz} (tu zona actual)` : tz;
+      return `<option value="${esc(tz)}" ${tz === target ? 'selected' : ''}>${esc(tag)}</option>`;
+    })
+    .join('');
+}
+
 function openBuilderModal(rule = null) {
   const modal = document.getElementById('automation-modal');
   const titleEl = document.getElementById('automation-modal-title');
@@ -682,13 +723,14 @@ function openBuilderModal(rule = null) {
   document.getElementById('builder-logic').value = rule?.conditionLogic || 'ALL';
   document.getElementById('builder-cooldown').value = String(rule?.cooldownMinutes ?? 5);
 
-  const sched = rule?.schedule || { mode: 'anytime', days: [0, 1, 2, 3, 4, 5, 6] };
+  const sched = rule?.schedule || { mode: 'anytime', days: [0, 1, 2, 3, 4, 5, 6], timezone: VISITOR_TZ };
   document.getElementById('builder-schedule-mode').value = sched.mode || 'anytime';
   document.getElementById('builder-start-time').value = sched.startTime || '08:00';
   document.getElementById('builder-end-time').value = sched.endTime || '22:00';
   document.getElementById('builder-solar-rule').value = sched.solarRule || 'after_sunset';
   document.getElementById('builder-solar-offset').value = String(sched.offsetMinutes ?? -30);
   document.getElementById('builder-weather-cond').value = sched.weatherCondition || 'any';
+  populateTimezoneSelect(sched.timezone || VISITOR_TZ);
   draftDays = Array.isArray(sched.days) && sched.days.length > 0 ? [...sched.days] : [0, 1, 2, 3, 4, 5, 6];
 
   if (rule) {
@@ -826,6 +868,7 @@ export function initAutomationsModule({ getDevices }) {
   document.getElementById('builder-solar-rule')?.addEventListener('change', updateNaturalPreview);
   document.getElementById('builder-solar-offset')?.addEventListener('input', updateNaturalPreview);
   document.getElementById('builder-weather-cond')?.addEventListener('change', updateNaturalPreview);
+  document.getElementById('builder-timezone')?.addEventListener('change', updateNaturalPreview);
 
   document.getElementById('builder-email-enabled')?.addEventListener('change', (e) => {
     document.getElementById('builder-email-fields')?.classList.toggle('hidden', !e.target.checked);

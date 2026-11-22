@@ -135,14 +135,26 @@ function compareValues(left, operator, right) {
  * Obtiene hora, minuto y día de semana (0=Dom..6=Sáb) en la zona horaria IANA configurada.
  */
 function getLocalClock(now, timeZone) {
-  const tz = timeZone || env.weather.timezone || 'America/Mexico_City';
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: tz,
-    weekday: 'short',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).formatToParts(now);
+  let tz = timeZone || env.weather.timezone || 'America/Mexico_City';
+  let parts;
+  try {
+    parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      weekday: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).formatToParts(now);
+  } catch {
+    tz = env.weather.timezone || 'UTC';
+    parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      weekday: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).formatToParts(now);
+  }
 
   const map = {};
   for (const p of parts) map[p.type] = p.value;
@@ -173,7 +185,7 @@ function parseHHMM(str) {
  */
 function evaluateSchedule(schedule, weather, now) {
   const cfg = schedule || { mode: 'anytime', days: [0, 1, 2, 3, 4, 5, 6] };
-  const tz = weather?.timezone || weather?.location?.timezone || env.weather.timezone;
+  const tz = cfg.timezone || weather?.timezone || weather?.location?.timezone || env.weather.timezone;
   const clock = getLocalClock(now, tz);
 
   // 1. Días de la semana
@@ -255,7 +267,7 @@ function evaluateSchedule(schedule, weather, now) {
     weatherMet,
     localTime: clock.formattedTime,
     timeZone: tz,
-    detail: `${dayMet ? 'Día OK' : 'Día fuera de rango'} · ${timeDetail}${cfg.weatherCondition && cfg.weatherCondition !== 'any' ? ` · ${weatherDetail}` : ''}`,
+    detail: `${dayMet ? 'Día OK' : 'Día fuera de rango'} · ${timeDetail} (${tz})${cfg.weatherCondition && cfg.weatherCondition !== 'any' ? ` · ${weatherDetail}` : ''}`,
   };
 }
 

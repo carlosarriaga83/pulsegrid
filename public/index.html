@@ -4,6 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>PulseGrid — Control y Automatización IoT</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="shortcut icon" href="/favicon.svg" />
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="/socket.io/socket.io.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
@@ -568,9 +570,14 @@
           <label class="block text-xs font-medium text-slate-300 mb-1">Zona horaria (IANA)</label>
           <input id="input-loc-tz" type="text" placeholder="America/Mexico_City" required class="w-full rounded-xl bg-slate-950 border border-slate-800 px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-sky-500" />
         </div>
-        <div class="flex items-center justify-end gap-2 pt-2">
-          <button type="button" data-close-location-modal class="px-3.5 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-slate-100">Cancelar</button>
-          <button type="submit" class="px-4 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 text-xs font-semibold transition">Actualizar clima</button>
+        <div class="flex items-center justify-between gap-2 pt-2">
+          <button id="btn-detect-location" type="button" class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sky-300 border border-slate-700 text-xs font-medium transition">
+            📍 Usar mi ubicación
+          </button>
+          <div class="flex items-center gap-2">
+            <button type="button" data-close-location-modal class="px-3.5 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-slate-100">Cancelar</button>
+            <button type="submit" class="px-4 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 text-xs font-semibold transition">Actualizar clima</button>
+          </div>
         </div>
       </form>
     </div>
@@ -669,16 +676,22 @@
             </div>
           </div>
 
-          <!-- Filtro opcional de clima -->
-          <div>
-            <label class="block text-[11px] text-slate-400 mb-1">Condición climática exterior (opcional)</label>
-            <select id="builder-weather-cond" class="w-full sm:w-64 rounded-xl bg-slate-950 border border-slate-800 px-3 py-2 text-xs text-slate-100">
-              <option value="any">Cualquier clima</option>
-              <option value="clear">Solo si está despejado</option>
-              <option value="cloudy">Solo si está nublado</option>
-              <option value="rain">Solo si está lloviendo</option>
-              <option value="storm">Solo si hay tormenta</option>
-            </select>
+          <!-- Filtro opcional de clima y Zona horaria de la automatización -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label class="block text-[11px] text-slate-400 mb-1">Condición climática exterior (opcional)</label>
+              <select id="builder-weather-cond" class="w-full rounded-xl bg-slate-950 border border-slate-800 px-3 py-2 text-xs text-slate-100">
+                <option value="any">Cualquier clima</option>
+                <option value="clear">Solo si está despejado</option>
+                <option value="cloudy">Solo si está nublado</option>
+                <option value="rain">Solo si está lloviendo</option>
+                <option value="storm">Solo si hay tormenta</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-[11px] text-slate-400 mb-1">Zona horaria de esta automatización</label>
+              <select id="builder-timezone" class="w-full rounded-xl bg-slate-950 border border-slate-800 px-3 py-2 text-xs text-slate-100"></select>
+            </div>
           </div>
         </div>
 

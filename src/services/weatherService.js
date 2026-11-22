@@ -90,23 +90,37 @@ export async function updateLocationSettings({ latitude, longitude, timezone, la
     [JSON.stringify(payload)]
   );
 
-  cachedWeather = null;
-  lastFetchedAt = 0;
+  weatherCacheMap.clear();
   return payload;
 }
 
+const weatherCacheMap = new Map();
+
 /**
- * Consulta Open-Meteo (sin API Key) con caché en memoria.
+ * Consulta Open-Meteo (sin API Key) con caché en memoria por ubicación.
+ * Si se pasan overrideLocation ({ latitude, longitude, timezone, label }), usa las coordenadas del visitante.
  */
-export async function getWeather(forceRefresh = false) {
+export async function getWeather(forceRefresh = false, overrideLocation = null) {
   const ttlMs = env.weather.cacheMinutes * 60 * 1000;
   const now = Date.now();
 
-  if (!forceRefresh && cachedWeather && now - lastFetchedAt < ttlMs) {
-    return { ...cachedWeather, fromCache: true };
+  const location =
+    overrideLocation && overrideLocation.latitude !== undefined && overrideLocation.longitude !== undefined
+      ? {
+          latitude: Number(overrideLocation.latitude),
+          longitude: Number(overrideLocation.longitude),
+          timezone: overrideLocation.timezone || env.weather.timezone,
+          label: overrideLocation.label || 'Tu ubicación',
+        }
+      : await getLocationSettings();
+
+  const cacheKey = `${location.latitude.toFixed(2)},${location.longitude.toFixed(2)},${location.timezone}`;
+  const cachedEntry = weatherCacheMap.get(cacheKey);
+
+  if (!forceRefresh && cachedEntry && now - cachedEntry.fetchedAtMs < ttlMs) {
+    return { ...cachedEntry.data, fromCache: true };
   }
 
-  const location = await getLocationSettings();
   const params = new URLSearchParams({
     latitude: String(location.latitude),
     longitude: String(location.longitude),
@@ -132,7 +146,7 @@ export async function getWeather(forceRefresh = false) {
     const daily = data.daily || {};
     const wmo = WMO_CODES[current.weather_code] || { label: 'Desconocido', category: 'unknown' };
 
-    cachedWeather = {
+    const result = {
       location,
       timezone: data.timezone || location.timezone,
       fetchedAt: new Date().toISOString(),
@@ -159,12 +173,12 @@ export async function getWeather(forceRefresh = false) {
       },
     };
 
-    lastFetchedAt = now;
-    return { ...cachedWeather, fromCache: false };
+    weatherCacheMap.set(cacheKey, { data: result, fetchedAtMs: now });
+    return { ...result, fromCache: false };
   } catch (err) {
     logger.error('Error consultando Open-Meteo', err);
-    if (cachedWeather) {
-      return { ...cachedWeather, fromCache: true, stale: true, error: err.message };
+    if (cachedEntry?.data) {
+      return { ...cachedEntry.data, fromCache: true, stale: true, error: err.message };
     }
     throw err;
   } finally {

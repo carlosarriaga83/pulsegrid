@@ -33,7 +33,18 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify(payload),
     }),
-  getWeather: (refresh = false) => request(`/api/weather${refresh ? '?refresh=true' : ''}`),
+  getWeather: (refresh = false, coords = null) => {
+    const params = new URLSearchParams();
+    if (refresh) params.set('refresh', 'true');
+    if (coords && coords.latitude !== undefined && coords.longitude !== undefined) {
+      params.set('lat', String(coords.latitude));
+      params.set('lon', String(coords.longitude));
+      if (coords.timezone) params.set('tz', coords.timezone);
+      if (coords.label) params.set('label', coords.label);
+    }
+    const qs = params.toString();
+    return request(`/api/weather${qs ? `?${qs}` : ''}`);
+  },
   saveLocation: (payload) =>
     request('/api/weather/location', {
       method: 'PUT',

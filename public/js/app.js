@@ -9,7 +9,7 @@ import {
 import { initAnalyticsModule, refreshAvailableSeries } from './ui/analyticsView.js';
 import { initAlertsModule, loadAlertsData } from './ui/alertsView.js';
 import { showToast } from './ui/toast.js';
-import { formatDateTime, formatNumber } from './utils/formatters.js';
+import { VISITOR_TZ, formatDateTime, formatNumber } from './utils/formatters.js';
 
 const state = {
   devices: new Map(),
@@ -252,12 +252,61 @@ function renderWeatherPill(weather) {
   `;
 }
 
-async function loadWeather(refresh = false) {
+function getSavedVisitorCoords() {
   try {
-    const res = await api.getWeather(refresh);
+    const raw = localStorage.getItem('pg_visitor_coords');
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && parsed.latitude !== undefined && parsed.longitude !== undefined) {
+      return { ...parsed, timezone: VISITOR_TZ };
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+function detectBrowserPosition() {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) {
+      return reject(new Error('Tu navegador no soporta geolocalización'));
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const coords = {
+          latitude: Number(pos.coords.latitude.toFixed(4)),
+          longitude: Number(pos.coords.longitude.toFixed(4)),
+          timezone: VISITOR_TZ,
+          label: 'Tu ubicación actual',
+        };
+        localStorage.setItem('pg_visitor_coords', JSON.stringify(coords));
+        resolve(coords);
+      },
+      (err) => reject(err),
+      { enableHighAccuracy: false, timeout: 8000, maximumAge: 15 * 60 * 1000 }
+    );
+  });
+}
+
+async function loadWeather(refresh = false) {
+  const savedCoords = getSavedVisitorCoords();
+  try {
+    const res = await api.getWeather(refresh, savedCoords);
     renderWeatherPill(res.data);
   } catch {
     els.weatherPill.innerHTML = '<span class="text-amber-400">Clima no disponible</span>';
+  }
+
+  // Detectar ubicación actual del visitante para Open-Meteo (sin bloquear el render inicial)
+  if (navigator.geolocation) {
+    detectBrowserPosition()
+      .then(async (coords) => {
+        const res = await api.getWeather(false, coords);
+        renderWeatherPill(res.data);
+      })
+      .catch(() => {
+        // Si el usuario no otorga permiso, se mantiene la ubicación configurada en el servidor
+      });
   }
 }
 
@@ -420,17 +469,41 @@ async function init() {
   els.locationForm?.addEventListener('submit', async (e) => {
     e.preventDefault();
     try {
-      const res = await api.saveLocation({
+      const payload = {
         label: els.inputLocLabel.value,
         latitude: Number(els.inputLocLat.value),
         longitude: Number(els.inputLocLon.value),
         timezone: els.inputLocTz.value,
-      });
+      };
+      const res = await api.saveLocation(payload);
+      localStorage.setItem('pg_visitor_coords', JSON.stringify(payload));
       renderWeatherPill(res.weather);
       closeLocationModal();
       showToast('Ubicación de Open-Meteo actualizada', 'success');
     } catch (err) {
       showToast(err.message, 'error');
+    }
+  });
+
+  document.getElementById('btn-detect-location')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    const prev = btn.textContent;
+    btn.textContent = 'Detectando...';
+    try {
+      const coords = await detectBrowserPosition();
+      els.inputLocLabel.value = coords.label;
+      els.inputLocLat.value = coords.latitude;
+      els.inputLocLon.value = coords.longitude;
+      els.inputLocTz.value = coords.timezone;
+      const res = await api.getWeather(true, coords);
+      renderWeatherPill(res.data);
+      showToast('Ubicación detectada desde tu navegador', 'success');
+    } catch (err) {
+      showToast(err.message || 'No se pudo obtener tu ubicación (verifica permisos del navegador)', 'warning');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = prev;
     }
   });
 

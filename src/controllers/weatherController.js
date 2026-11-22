@@ -3,7 +3,24 @@ import weatherService from '../services/weatherService.js';
 export async function getCurrentWeather(req, res, next) {
   try {
     const forceRefresh = req.query.refresh === 'true';
-    const data = await weatherService.getWeather(forceRefresh);
+    const lat = req.query.lat !== undefined ? Number(req.query.lat) : undefined;
+    const lon = req.query.lon !== undefined ? Number(req.query.lon) : undefined;
+    const tz = req.query.tz ? String(req.query.tz) : undefined;
+    const label = req.query.label ? String(req.query.label) : undefined;
+
+    const override =
+      lat !== undefined &&
+      lon !== undefined &&
+      !Number.isNaN(lat) &&
+      !Number.isNaN(lon) &&
+      lat >= -90 &&
+      lat <= 90 &&
+      lon >= -180 &&
+      lon <= 180
+        ? { latitude: lat, longitude: lon, timezone: tz, label: label || 'Tu ubicación' }
+        : null;
+
+    const data = await weatherService.getWeather(forceRefresh, override);
     res.json({ ok: true, data });
   } catch (err) {
     next(err);
