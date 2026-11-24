@@ -6,6 +6,15 @@
   <title>PulseGrid — Control y Automatización IoT</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <link rel="shortcut icon" href="/favicon.svg" />
+  <script>
+    (function () {
+      var saved = localStorage.getItem('pg_theme');
+      if (saved === 'light') {
+        document.documentElement.classList.remove('dark');
+        document.documentElement.classList.add('light');
+      }
+    })();
+  </script>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="/socket.io/socket.io.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
@@ -64,6 +73,18 @@
           <span class="h-2 w-2 rounded-full bg-amber-400"></span>
           <span>Conectando...</span>
         </span>
+
+        <!-- Switch Dark / Light Mode -->
+        <button
+          id="btn-theme-toggle"
+          type="button"
+          title="Cambiar entre tema oscuro y claro"
+          aria-label="Cambiar tema"
+          class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-slate-900 hover:bg-slate-800 border border-slate-800 text-xs font-medium text-slate-200 transition"
+        >
+          <span id="theme-toggle-icon" class="text-sm leading-none">☀️</span>
+          <span id="theme-toggle-label" class="hidden sm:inline">Claro</span>
+        </button>
       </div>
     </div>
 
@@ -271,13 +292,23 @@
       <!-- Selector de rango y controles de interacción de la gráfica -->
       <div class="rounded-2xl bg-slate-900/90 border border-slate-800 p-4 space-y-4">
         <div class="flex flex-wrap items-center justify-between gap-3">
-          <!-- Rangos rápidos -->
-          <div class="flex flex-wrap items-center gap-1.5">
-            <button type="button" data-range-btn="today" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-900 text-slate-400 border border-slate-800 hover:text-slate-200">Hoy (00–24h)</button>
-            <button type="button" data-range-btn="24h" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-sky-500/20 text-sky-300 border border-sky-500/40">24h</button>
-            <button type="button" data-range-btn="7d" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-900 text-slate-400 border border-slate-800 hover:text-slate-200">7 días</button>
-            <button type="button" data-range-btn="30d" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-900 text-slate-400 border border-slate-800 hover:text-slate-200">30 días</button>
-            <button type="button" data-range-btn="custom" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-900 text-slate-400 border border-slate-800 hover:text-slate-200">Personalizado</button>
+          <!-- Rangos rápidos y navegación por día (< Hoy >) -->
+          <div class="flex flex-wrap items-center gap-2">
+            <div class="inline-flex items-center rounded-lg bg-slate-950 border border-slate-800 p-0.5">
+              <button id="btn-day-prev" type="button" title="Día anterior" class="px-2.5 py-1 rounded-md text-xs font-bold text-slate-300 hover:bg-slate-800 transition">&lt;</button>
+              <button id="btn-day-today" type="button" data-range-btn="today" class="px-3 py-1 rounded-md text-xs font-medium text-slate-300 hover:text-slate-100 border border-transparent transition">
+                Hoy
+              </button>
+              <button id="btn-day-next" type="button" title="Día siguiente" disabled class="px-2.5 py-1 rounded-md text-xs font-bold text-slate-500 cursor-not-allowed transition">&gt;</button>
+            </div>
+            <span id="analytics-day-label" class="hidden text-xs font-mono text-sky-300 px-2 py-1 rounded-lg bg-sky-500/10 border border-sky-500/25"></span>
+
+            <div class="flex flex-wrap items-center gap-1.5">
+              <button type="button" data-range-btn="24h" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-sky-500/20 text-sky-300 border border-sky-500/40">24h</button>
+              <button type="button" data-range-btn="7d" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-900 text-slate-400 border border-slate-800 hover:text-slate-200">7 días</button>
+              <button type="button" data-range-btn="30d" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-900 text-slate-400 border border-slate-800 hover:text-slate-200">30 días</button>
+              <button type="button" data-range-btn="custom" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-900 text-slate-400 border border-slate-800 hover:text-slate-200">Personalizado</button>
+            </div>
           </div>
 
           <!-- Controles Zoom / Pan / Reset Zoom -->

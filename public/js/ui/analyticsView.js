@@ -4,6 +4,7 @@ import {
   VISITOR_TZ,
   translateDpLabel,
   translateUnit,
+  formatDate,
   formatDateTime,
   formatTime,
   formatNumber,
@@ -50,17 +51,24 @@ let groupedDevices = []; // [{ deviceId, deviceName, room, category, isOnline, t
 let activeDeviceId = null;
 let selectedKeys = [];
 let currentRange = '24h';
+let dayOffset = 0; // 0 = hoy, -1 = ayer, -2 = anteayer...
 let interactionMode = 'zoom'; // 'zoom' (drag-to-zoom, shift+drag pan) | 'pan' (drag-to-pan)
 let pickerVisible = true;
 let isZoomed = false;
 let autoRefreshSeconds = Number(localStorage.getItem('pg_analytics_autorefresh') || 0);
 let autoRefreshTimer = null;
+let lastSeriesData = [];
+let lastBounds = null;
+
+function isLightTheme() {
+  return document.documentElement.classList.contains('light');
+}
 
 function getVisitorRangeBounds() {
   const now = new Date();
   if (currentRange === 'today') {
-    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
-    const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() + dayOffset, 0, 0, 0, 0);
+    const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + dayOffset, 23, 59, 59, 999);
     return { fromDate: start, toDate: end };
   }
   if (currentRange === 'custom') {
@@ -93,6 +101,45 @@ function esc(str) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+function updateDayNavigationUI() {
+  const dayLabel = document.getElementById('analytics-day-label');
+  const nextBtn = document.getElementById('btn-day-next');
+  const isDayMode = currentRange === 'today';
+
+  if (nextBtn) {
+    const disableNext = !isDayMode || dayOffset >= 0;
+    nextBtn.disabled = disableNext;
+    nextBtn.className = disableNext
+      ? 'px-2.5 py-1 rounded-md text-xs font-bold text-slate-500 cursor-not-allowed transition'
+      : 'px-2.5 py-1 rounded-md text-xs font-bold text-slate-300 hover:bg-slate-800 transition';
+  }
+
+  if (dayLabel) {
+    if (isDayMode) {
+      const { fromDate } = getVisitorRangeBounds();
+      const dateStr = formatDate(fromDate);
+      const prefix = dayOffset === 0 ? 'Hoy · ' : dayOffset === -1 ? 'Ayer · ' : '';
+      dayLabel.textContent = `${prefix}${dateStr}`;
+      dayLabel.classList.remove('hidden');
+    } else {
+      dayLabel.classList.add('hidden');
+    }
+  }
+
+  document.querySelectorAll('[data-range-btn]').forEach((b) => {
+    const active = b.dataset.rangeBtn === currentRange;
+    if (b.id === 'btn-day-today') {
+      b.className = active
+        ? 'px-3 py-1 rounded-md text-xs font-semibold bg-sky-500/20 text-sky-300 border border-sky-500/40 transition'
+        : 'px-3 py-1 rounded-md text-xs font-medium text-slate-300 hover:text-slate-100 border border-transparent transition';
+    } else {
+      b.className = active
+        ? 'px-3 py-1.5 rounded-lg text-xs font-semibold bg-sky-500/20 text-sky-300 border border-sky-500/40'
+        : 'px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-900 text-slate-400 border border-slate-800 hover:text-slate-200';
+    }
+  });
 }
 
 function setResetButtonState(zoomed) {
@@ -453,7 +500,18 @@ function renderChart(seriesList, bounds) {
   const emptyOverlay = document.getElementById('chart-empty-overlay');
   if (!canvas || !window.Chart) return;
 
-  const { fromDate, toDate } = bounds || getVisitorRangeBounds();
+  lastSeriesData = seriesList;
+  lastBounds = bounds || getVisitorRangeBounds();
+
+  const light = isLightTheme();
+  const gridColor = light ? 'rgba(148, 163, 184, 0.35)' : 'rgba(51, 65, 85, 0.35)';
+  const tickColor = light ? '#475569' : '#94a3b8';
+  const legendColor = light ? '#334155' : '#cbd5e1';
+  const tooltipBg = light ? 'rgba(255, 255, 255, 0.96)' : 'rgba(2, 6, 23, 0.94)';
+  const tooltipTitle = light ? '#0f172a' : '#f8fafc';
+  const tooltipBody = light ? '#334155' : '#cbd5e1';
+
+  const { fromDate, toDate } = lastBounds;
   const xMin = fromDate.getTime();
   const xMax = toDate.getTime();
 
@@ -503,15 +561,15 @@ function renderChart(seriesList, bounds) {
           day: 'yyyy-MM-dd',
         },
       },
-      grid: { color: 'rgba(51, 65, 85, 0.35)' },
-      ticks: { color: '#94a3b8', maxRotation: 0, autoSkipPadding: 18, font: { size: 11 } },
+      grid: { color: gridColor },
+      ticks: { color: tickColor, maxRotation: 0, autoSkipPadding: 18, font: { size: 11 } },
     },
     y: {
       type: 'linear',
       position: 'left',
-      grid: { color: 'rgba(51, 65, 85, 0.35)' },
+      grid: { color: gridColor },
       ticks: {
-        color: '#94a3b8',
+        color: tickColor,
         font: { size: 11 },
         callback: (val) => {
           if (!hasNumeric && hasBoolean) return val === 1 ? 'ON' : val === 0 ? 'OFF' : '';
@@ -556,15 +614,15 @@ function renderChart(seriesList, bounds) {
         legend: {
           position: 'top',
           align: 'start',
-          labels: { color: '#cbd5e1', usePointStyle: true, boxWidth: 8, font: { size: 11 } },
+          labels: { color: legendColor, usePointStyle: true, boxWidth: 8, font: { size: 11 } },
         },
         tooltip: {
           enabled: true,
-          backgroundColor: 'rgba(2, 6, 23, 0.94)',
-          borderColor: 'rgba(56, 189, 248, 0.35)',
+          backgroundColor: tooltipBg,
+          borderColor: 'rgba(56, 189, 248, 0.4)',
           borderWidth: 1,
-          titleColor: '#f8fafc',
-          bodyColor: '#cbd5e1',
+          titleColor: tooltipTitle,
+          bodyColor: tooltipBody,
           padding: 10,
           cornerRadius: 10,
           callbacks: {
@@ -715,19 +773,40 @@ export function initAnalyticsModule() {
     e.currentTarget.textContent = pickerVisible ? 'Ocultar selector' : 'Mostrar selector';
   });
 
-  // Botones de rango (24h, 7d, 30d, custom)
+  // Botones de navegación entre días (<, Hoy, >)
+  document.getElementById('btn-day-prev')?.addEventListener('click', () => {
+    if (currentRange !== 'today') {
+      currentRange = 'today';
+      dayOffset = -1;
+    } else {
+      dayOffset -= 1;
+    }
+    document.getElementById('analytics-custom-dates')?.classList.add('hidden');
+    updateDayNavigationUI();
+    loadHistoryChart();
+  });
+
+  document.getElementById('btn-day-next')?.addEventListener('click', () => {
+    if (currentRange !== 'today' || dayOffset >= 0) return;
+    dayOffset += 1;
+    updateDayNavigationUI();
+    loadHistoryChart();
+  });
+
+  // Botones de rango (Hoy, 24h, 7d, 30d, custom)
   document.querySelectorAll('[data-range-btn]').forEach((btn) => {
     btn.addEventListener('click', () => {
       currentRange = btn.dataset.rangeBtn;
-      document.querySelectorAll('[data-range-btn]').forEach((b) => {
-        const active = b.dataset.rangeBtn === currentRange;
-        b.className = active
-          ? 'px-3 py-1.5 rounded-lg text-xs font-semibold bg-sky-500/20 text-sky-300 border border-sky-500/40'
-          : 'px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-900 text-slate-400 border border-slate-800 hover:text-slate-200';
-      });
+      if (currentRange === 'today') dayOffset = 0;
       document.getElementById('analytics-custom-dates')?.classList.toggle('hidden', currentRange !== 'custom');
+      updateDayNavigationUI();
       if (currentRange !== 'custom') loadHistoryChart();
     });
+  });
+
+  // Re-estilizar gráfica al cambiar entre Dark y Light mode
+  window.addEventListener('pg:theme-change', () => {
+    if (chartInstance) renderChart(lastSeriesData, lastBounds);
   });
 
   document.getElementById('btn-apply-custom-range')?.addEventListener('click', loadHistoryChart);
@@ -801,6 +880,7 @@ export function initAnalyticsModule() {
     }
   });
 
+  updateDayNavigationUI();
   updateModeButtons();
   setResetButtonState(false);
   configureAutoRefresh(autoRefreshSeconds);
