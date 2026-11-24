@@ -4,6 +4,8 @@ import logger from '../utils/logger.js';
 import tuyaService from '../services/tuyaService.js';
 import weatherService from '../services/weatherService.js';
 import telemetryService from '../services/telemetryService.js';
+import authService from '../services/authService.js';
+import { parseCookies, SESSION_COOKIE_NAME } from '../middlewares/authMiddleware.js';
 
 let io = null;
 
@@ -19,6 +21,23 @@ export function initSocket(httpServer) {
     },
     pingTimeout: 20000,
     pingInterval: 25000,
+  });
+
+  // Autenticar conexión WebSocket usando la misma cookie de sesión HttpOnly
+  io.use(async (socket, next) => {
+    try {
+      const cookies = parseCookies(socket.handshake.headers?.cookie);
+      const token = cookies[SESSION_COOKIE_NAME] || socket.handshake.auth?.token;
+      if (!token) return next(new Error('UNAUTHORIZED'));
+      const session = await authService.getSessionByToken(token);
+      if (!session) return next(new Error('UNAUTHORIZED'));
+      socket.user = session.user;
+      socket.account = session.account;
+      socket.role = session.role;
+      next();
+    } catch {
+      next(new Error('UNAUTHORIZED'));
+    }
   });
 
   io.on('connection', async (socket) => {
@@ -42,6 +61,10 @@ export function initSocket(httpServer) {
     // Control de dispositivos en tiempo real vía WebSocket
     socket.on('device:command', async (payload, ack) => {
       try {
+        if (socket.role === 'viewer') {
+          if (typeof ack === 'function') ack({ ok: false, error: 'Tu rol es solo lectura' });
+          return;
+        }
         const { deviceId, commands } = payload || {};
         const result = await tuyaService.sendDeviceCommands(deviceId, commands);
         telemetryService.recordCommandsTelemetry(result.device, result.commands).catch(() => {});
@@ -56,6 +79,10 @@ export function initSocket(httpServer) {
     // Solicitud manual de sincronización desde un cliente
     socket.on('devices:sync', async (ack) => {
       try {
+        if (socket.role === 'viewer') {
+          if (typeof ack === 'function') ack({ ok: false, error: 'Tu rol es solo lectura' });
+          return;
+        }
         const result = await tuyaService.syncDevices();
         emitDevicesSnapshot(result.devices);
         if (typeof ack === 'function') ack({ ok: true, data: result });

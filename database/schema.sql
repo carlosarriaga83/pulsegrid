@@ -162,4 +162,107 @@ VALUES
   )
 ON DUPLICATE KEY UPDATE updated_at = CURRENT_TIMESTAMP;
 
+-- -----------------------------------------------------------------------------
+-- 8. Cuentas (espacios de dispositivos) y Usuarios
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS accounts (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  name VARCHAR(150) NOT NULL,
+  owner_user_id INT UNSIGNED NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  INDEX idx_accounts_owner (owner_user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS users (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  email VARCHAR(255) NOT NULL,
+  name VARCHAR(120) NOT NULL,
+  password_hash VARCHAR(255) NOT NULL,
+  is_active TINYINT(1) NOT NULL DEFAULT 1,
+  last_login_at DATETIME NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_users_email (email),
+  INDEX idx_users_active (is_active)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS account_members (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  account_id INT UNSIGNED NOT NULL,
+  user_id INT UNSIGNED NOT NULL,
+  role ENUM('owner', 'admin', 'member', 'viewer') NOT NULL DEFAULT 'member',
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_account_member (account_id, user_id),
+  CONSTRAINT fk_members_account
+    FOREIGN KEY (account_id) REFERENCES accounts (id)
+    ON DELETE CASCADE,
+  CONSTRAINT fk_members_user
+    FOREIGN KEY (user_id) REFERENCES users (id)
+    ON DELETE CASCADE,
+  INDEX idx_members_user (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS user_sessions (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  user_id INT UNSIGNED NOT NULL,
+  account_id INT UNSIGNED NOT NULL,
+  token_hash CHAR(64) NOT NULL,
+  user_agent VARCHAR(255) NULL,
+  ip_address VARCHAR(64) NULL,
+  expires_at DATETIME NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_sessions_token (token_hash),
+  CONSTRAINT fk_sessions_user
+    FOREIGN KEY (user_id) REFERENCES users (id)
+    ON DELETE CASCADE,
+  CONSTRAINT fk_sessions_account
+    FOREIGN KEY (account_id) REFERENCES accounts (id)
+    ON DELETE CASCADE,
+  INDEX idx_sessions_user (user_id),
+  INDEX idx_sessions_expires (expires_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS password_reset_tokens (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  user_id INT UNSIGNED NOT NULL,
+  token_hash CHAR(64) NOT NULL,
+  expires_at DATETIME NOT NULL,
+  used_at DATETIME NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_reset_token (token_hash),
+  CONSTRAINT fk_reset_user
+    FOREIGN KEY (user_id) REFERENCES users (id)
+    ON DELETE CASCADE,
+  INDEX idx_reset_expires (expires_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS account_invitations (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  account_id INT UNSIGNED NOT NULL,
+  invited_by_user_id INT UNSIGNED NOT NULL,
+  email VARCHAR(255) NOT NULL,
+  role ENUM('admin', 'member', 'viewer') NOT NULL DEFAULT 'member',
+  token_hash CHAR(64) NOT NULL,
+  status ENUM('pending', 'accepted', 'revoked', 'expired') NOT NULL DEFAULT 'pending',
+  expires_at DATETIME NOT NULL,
+  accepted_at DATETIME NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_invitations_token (token_hash),
+  CONSTRAINT fk_invitations_account
+    FOREIGN KEY (account_id) REFERENCES accounts (id)
+    ON DELETE CASCADE,
+  CONSTRAINT fk_invitations_inviter
+    FOREIGN KEY (invited_by_user_id) REFERENCES users (id)
+    ON DELETE CASCADE,
+  INDEX idx_invitations_account_status (account_id, status),
+  INDEX idx_invitations_email (email)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 SET FOREIGN_KEY_CHECKS = 1;

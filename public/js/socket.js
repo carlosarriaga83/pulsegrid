@@ -89,4 +89,11 @@ export function emitDeviceCommand(deviceId, commands) {
   });
 }
 
-export default { connectSocket, onSocketEvent, emitDeviceCommand };
+export function disconnectSocket() {
+  if (socket) {
+    socket.disconnect();
+    socket = null;
+  }
+}
+
+export default { connectSocket, disconnectSocket, onSocketEvent, emitDeviceCommand };

@@ -4,12 +4,17 @@
 
 async function request(path, options = {}) {
   const config = {
+    credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
     ...options,
   };
 
   const response = await fetch(path, config);
   const data = await response.json().catch(() => ({ ok: false, error: `HTTP ${response.status}` }));
+
+  if (response.status === 401 && !String(path).startsWith('/api/auth/')) {
+    window.dispatchEvent(new CustomEvent('pg:unauthorized'));
+  }
 
   if (!response.ok || data.ok === false) {
     throw new Error(data.error || `Error HTTP ${response.status}`);
@@ -123,6 +128,35 @@ export const api = {
       body: JSON.stringify(email ? { email } : {}),
     }),
   getAlertLogs: (limit = 40) => request(`/api/alerts/logs?limit=${limit}`),
+
+  // Autenticación y Gestión de Cuenta
+  getMe: () => request('/api/auth/me'),
+  register: (payload) =>
+    request('/api/auth/register', { method: 'POST', body: JSON.stringify(payload) }),
+  login: (payload) =>
+    request('/api/auth/login', { method: 'POST', body: JSON.stringify(payload) }),
+  logout: () => request('/api/auth/logout', { method: 'POST' }),
+  forgotPassword: (email) =>
+    request('/api/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email }) }),
+  resetPassword: (payload) =>
+    request('/api/auth/reset-password', { method: 'POST', body: JSON.stringify(payload) }),
+  previewInvitation: (token) => request(`/api/auth/invite/${encodeURIComponent(token)}`),
+
+  getAccount: () => request('/api/account'),
+  updateProfile: (payload) =>
+    request('/api/account/profile', { method: 'PUT', body: JSON.stringify(payload) }),
+  changePassword: (payload) =>
+    request('/api/account/password', { method: 'PUT', body: JSON.stringify(payload) }),
+  updateAccountDetails: (name) =>
+    request('/api/account/details', { method: 'PUT', body: JSON.stringify({ name }) }),
+  inviteUser: (payload) =>
+    request('/api/account/invitations', { method: 'POST', body: JSON.stringify(payload) }),
+  revokeInvitation: (id) =>
+    request(`/api/account/invitations/${id}`, { method: 'DELETE' }),
+  updateMemberRole: (userId, role) =>
+    request(`/api/account/members/${userId}`, { method: 'PATCH', body: JSON.stringify({ role }) }),
+  removeMember: (userId) =>
+    request(`/api/account/members/${userId}`, { method: 'DELETE' }),
 };
 
 export default api;

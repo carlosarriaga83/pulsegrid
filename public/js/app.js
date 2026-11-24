@@ -1,5 +1,5 @@
 import api from './api.js';
-import { connectSocket, onSocketEvent, emitDeviceCommand } from './socket.js';
+import { connectSocket, disconnectSocket, onSocketEvent, emitDeviceCommand } from './socket.js';
 import { createDeviceCard, patchDeviceCard } from './ui/deviceCard.js';
 import {
   initAutomationsModule,
@@ -8,6 +8,8 @@ import {
 } from './ui/automationBuilder.js';
 import { initAnalyticsModule, refreshAvailableSeries } from './ui/analyticsView.js';
 import { initAlertsModule, loadAlertsData } from './ui/alertsView.js';
+import { initAuthView, showAuthScreen, hideAuthScreen } from './ui/authView.js';
+import { initAccountModule, loadAccountData } from './ui/accountView.js';
 import { showToast } from './ui/toast.js';
 import { VISITOR_TZ, formatDateTime, formatNumber } from './utils/formatters.js';
 
@@ -370,6 +372,7 @@ function setupTabs() {
 
       if (target === 'analytics') refreshAvailableSeries();
       if (target === 'alerts') loadAlertsData();
+      if (target === 'account') loadAccountData();
     });
   });
 }
@@ -398,11 +401,118 @@ function setupThemeToggle() {
   });
 }
 
+let dashboardBooted = false;
+
+function updateTopbarUser(sessionData) {
+  const nameEl = document.getElementById('topbar-user-name');
+  if (nameEl && sessionData?.user?.name) {
+    nameEl.textContent = sessionData.user.name;
+    nameEl.title = `${sessionData.user.name} (${sessionData.account?.name || 'PulseGrid'})`;
+  }
+}
+
+async function bootAuthenticatedApp(sessionData) {
+  updateTopbarUser(sessionData);
+  hideAuthScreen();
+
+  // Conexión Socket.io autenticada
+  connectSocket();
+
+  if (!dashboardBooted) {
+    dashboardBooted = true;
+
+    onSocketEvent('status', ({ connected }) => {
+      if (connected) {
+        els.socketBadge.innerHTML = '<span class="h-2 w-2 rounded-full bg-emerald-400"></span><span>Tiempo real</span>';
+        els.socketBadge.className =
+          'inline-flex items-center gap-2 text-xs font-medium px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/30';
+      } else {
+        els.socketBadge.innerHTML = '<span class="h-2 w-2 rounded-full bg-rose-400"></span><span>Reconectando...</span>';
+        els.socketBadge.className =
+          'inline-flex items-center gap-2 text-xs font-medium px-2.5 py-1 rounded-full bg-rose-500/10 text-rose-300 border border-rose-500/30';
+      }
+    });
+
+    onSocketEvent('snapshot', (payload) => {
+      applyDevicesSnapshot(payload.devices, payload.tuyaConfigured);
+      if (payload.tuyaError !== undefined) renderTuyaErrorBanner(payload.tuyaError);
+    });
+
+    onSocketEvent('tuyaError', (errObj) => {
+      renderTuyaErrorBanner(errObj);
+    });
+
+    onSocketEvent('deviceUpdate', (payload) => {
+      applySingleDeviceUpdate(payload.device);
+    });
+
+    onSocketEvent('weatherUpdate', (weather) => {
+      renderWeatherPill(weather);
+    });
+
+    onSocketEvent('automationEvaluated', (payload) => {
+      handleLiveEvaluation(payload);
+    });
+
+    onSocketEvent('automationTriggered', (payload) => {
+      handleLiveTrigger(payload);
+    });
+
+    onSocketEvent('alert', () => {
+      loadAlertsData();
+    });
+
+    initAutomationsModule({
+      getDevices: () => Array.from(state.devices.values()),
+    });
+    initAnalyticsModule();
+    initAlertsModule();
+    initAccountModule({
+      onProfileUpdated: (upd) => {
+        if (upd?.user) updateTopbarUser({ user: upd.user, account: sessionData?.account });
+      },
+    });
+  }
+
+  // Carga inicial vía REST
+  try {
+    const devRes = await api.getDevices(false);
+    applyDevicesSnapshot(devRes.data, devRes.tuyaConfigured);
+    renderTuyaErrorBanner(devRes.tuyaError || null);
+  } catch (err) {
+    showToast(`Error cargando dispositivos: ${err.message}`, 'error');
+  }
+
+  loadWeather(false);
+}
+
 // --- Inicialización ---
 
 async function init() {
   setupThemeToggle();
   setupTabs();
+
+  // Botón cerrar sesión
+  document.getElementById('btn-logout')?.addEventListener('click', async () => {
+    try {
+      await api.logout();
+    } catch {
+      // ignore
+    }
+    disconnectSocket();
+    showAuthScreen({ hasUsers: true });
+    showToast('Sesión cerrada', 'info');
+  });
+
+  // Redirigir a Login si la sesión expira en cualquier petición
+  window.addEventListener('pg:unauthorized', () => {
+    disconnectSocket();
+    showAuthScreen({ hasUsers: true });
+  });
+
+  initAuthView({
+    onAuthSuccess: (sessionData) => bootAuthenticatedApp(sessionData),
+  });
 
   // Eventos de filtros
   els.searchInput?.addEventListener('input', (e) => {
@@ -532,67 +642,20 @@ async function init() {
     }
   });
 
-  // Conexión Socket.io en tiempo real
-  connectSocket();
+  // Verificar sesión activa antes de mostrar el dashboard
+  const urlParams = new URLSearchParams(window.location.search);
+  const hasAuthLink = urlParams.has('resetToken') || urlParams.has('inviteToken');
 
-  onSocketEvent('status', ({ connected }) => {
-    if (connected) {
-      els.socketBadge.innerHTML = '<span class="h-2 w-2 rounded-full bg-emerald-400"></span><span>Tiempo real</span>';
-      els.socketBadge.className =
-        'inline-flex items-center gap-2 text-xs font-medium px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/30';
-    } else {
-      els.socketBadge.innerHTML = '<span class="h-2 w-2 rounded-full bg-rose-400"></span><span>Reconectando...</span>';
-      els.socketBadge.className =
-        'inline-flex items-center gap-2 text-xs font-medium px-2.5 py-1 rounded-full bg-rose-500/10 text-rose-300 border border-rose-500/30';
-    }
-  });
-
-  onSocketEvent('snapshot', (payload) => {
-    applyDevicesSnapshot(payload.devices, payload.tuyaConfigured);
-    if (payload.tuyaError !== undefined) renderTuyaErrorBanner(payload.tuyaError);
-  });
-
-  onSocketEvent('tuyaError', (errObj) => {
-    renderTuyaErrorBanner(errObj);
-  });
-
-  onSocketEvent('deviceUpdate', (payload) => {
-    applySingleDeviceUpdate(payload.device);
-  });
-
-  onSocketEvent('weatherUpdate', (weather) => {
-    renderWeatherPill(weather);
-  });
-
-  onSocketEvent('automationEvaluated', (payload) => {
-    handleLiveEvaluation(payload);
-  });
-
-  onSocketEvent('automationTriggered', (payload) => {
-    handleLiveTrigger(payload);
-  });
-
-  onSocketEvent('alert', () => {
-    loadAlertsData();
-  });
-
-  // Carga inicial vía REST (fallback instantáneo mientras conecta Socket.io)
   try {
-    const devRes = await api.getDevices(false);
-    applyDevicesSnapshot(devRes.data, devRes.tuyaConfigured);
-    renderTuyaErrorBanner(devRes.tuyaError || null);
-  } catch (err) {
-    showToast(`Error cargando dispositivos: ${err.message}`, 'error');
+    const meRes = await api.getMe();
+    if (meRes.authenticated && !hasAuthLink) {
+      await bootAuthenticatedApp(meRes.data);
+    } else {
+      showAuthScreen({ hasUsers: meRes.hasUsers });
+    }
+  } catch {
+    showAuthScreen({ hasUsers: true });
   }
-
-  loadWeather(false);
-
-  // Inicializar módulos de Fases 4 y 5
-  initAutomationsModule({
-    getDevices: () => Array.from(state.devices.values()),
-  });
-  initAnalyticsModule();
-  initAlertsModule();
 }
 
 init();

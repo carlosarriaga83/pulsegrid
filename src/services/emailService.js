@@ -315,6 +315,54 @@ export async function getAlertLogs(limit = 40) {
   }));
 }
 
+/**
+ * Envía un correo transaccional (recuperación de contraseña, invitación a cuenta) sin cooldown.
+ */
+export async function sendTransactionalEmail({ to, subject, body, actionLabel = null, actionUrl = null }) {
+  const smtp = await getSmtpConfig(true);
+  if (!smtp.configured) {
+    return { ok: false, smtpConfigured: false, error: 'SMTP no configurado' };
+  }
+
+  const buttonHtml =
+    actionLabel && actionUrl
+      ? `<div style="margin:20px 0;"><a href="${actionUrl}" style="display:inline-block;background:#0ea5e9;color:#020617;font-weight:600;padding:10px 18px;border-radius:10px;text-decoration:none;font-size:13px;">${actionLabel}</a></div>`
+      : '';
+
+  const html = `
+    <div style="font-family:system-ui,-apple-system,sans-serif;background:#020617;color:#f8fafc;padding:24px;border-radius:12px;max-width:560px;margin:auto;border:1px solid #1e293b;">
+      <div style="margin-bottom:14px;"><strong style="font-size:15px;color:#38bdf8;">PulseGrid IoT</strong></div>
+      <h2 style="margin:0 0 12px;font-size:18px;color:#f8fafc;">${subject}</h2>
+      <p style="margin:0 0 14px;font-size:14px;line-height:1.6;color:#cbd5e1;white-space:pre-line;">${body}</p>
+      ${buttonHtml}
+      ${actionUrl ? `<p style="font-size:11px;color:#64748b;word-break:break-all;">Si el botón no funciona, copia este enlace:<br/>${actionUrl}</p>` : ''}
+    </div>
+  `;
+
+  try {
+    const transporter = nodemailer.createTransport({
+      host: smtp.host,
+      port: smtp.port,
+      secure: smtp.secure,
+      auth: { user: smtp.user, pass: smtp.pass },
+      connectionTimeout: 10000,
+    });
+
+    await transporter.sendMail({
+      from: `"${smtp.fromName}" <${smtp.fromEmail || smtp.user}>`,
+      to,
+      subject,
+      text: actionUrl ? `${body}\n\n${actionUrl}` : body,
+      html,
+    });
+
+    return { ok: true, smtpConfigured: true };
+  } catch (err) {
+    logger.error('Error enviando correo transaccional', err);
+    return { ok: false, smtpConfigured: true, error: err.message };
+  }
+}
+
 export default {
   getSmtpConfig,
   saveSmtpConfig,
@@ -324,5 +372,6 @@ export default {
   deleteRecipient,
   sendAlert,
   sendDeviceOfflineAlert,
+  sendTransactionalEmail,
   getAlertLogs,
 };
