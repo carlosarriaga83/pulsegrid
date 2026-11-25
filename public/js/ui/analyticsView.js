@@ -50,6 +50,7 @@ let availableSeries = [];
 let groupedDevices = []; // [{ deviceId, deviceName, room, category, isOnline, totalRecords, params: [...] }]
 let activeDeviceId = null;
 let selectedKeys = [];
+let secondaryAxisKeys = new Set(); // Claves de series numéricas asignadas al eje Y secundario (derecho Y2)
 let currentRange = '24h';
 let dayOffset = 0; // 0 = hoy, -1 = ayer, -2 = anteayer...
 let interactionMode = 'zoom'; // 'zoom' (drag-to-zoom, shift+drag pan) | 'pan' (drag-to-pan)
@@ -242,6 +243,7 @@ function buildGroupedDevices() {
 function toggleSeriesKey(key) {
   if (selectedKeys.includes(key)) {
     selectedKeys = selectedKeys.filter((k) => k !== key);
+    secondaryAxisKeys.delete(key);
   } else {
     if (selectedKeys.length >= 6) {
       showToast('Puedes comparar hasta 6 series simultáneamente', 'warning');
@@ -253,6 +255,18 @@ function toggleSeriesKey(key) {
   renderDeviceList();
   renderDpList();
   loadHistoryChart();
+}
+
+function toggleSeriesAxis(key) {
+  if (secondaryAxisKeys.has(key)) {
+    secondaryAxisKeys.delete(key);
+  } else {
+    secondaryAxisKeys.add(key);
+  }
+  renderActiveSeriesBar();
+  if (lastSeriesData.length > 0) {
+    renderChart(lastSeriesData, lastBounds);
+  }
 }
 
 function renderActiveSeriesBar() {
@@ -276,16 +290,37 @@ function renderActiveSeriesBar() {
     .map((key, idx) => {
       const s = seriesMap.get(key);
       const color = PALETTE[idx % PALETTE.length];
-      const label = s ? `${s.deviceName} · ${s.dpLabel}` : key;
+      const label = s ? `${s.deviceName} · ${translateDpLabel(s.dpCode, s.dpLabel)}` : key;
+      const isBool = s?.valueType === 'boolean';
+      const isY2 = !isBool && secondaryAxisKeys.has(key);
+
+      const axisBtn = !isBool
+        ? `<button
+             type="button"
+             data-toggle-axis="${esc(key)}"
+             title="Cambiar eje Y (Y1 izquierdo / Y2 derecho)"
+             class="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold border transition ${
+               isY2
+                 ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                 : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-slate-200'
+             }"
+           >${isY2 ? 'Y2' : 'Y1'}</button>`
+        : '';
+
       return `
-        <span class="inline-flex items-center gap-2 pl-2.5 pr-1.5 py-1 rounded-full text-xs bg-slate-800/90 text-slate-100 border border-slate-700">
+        <span class="inline-flex items-center gap-1.5 pl-2.5 pr-1.5 py-1 rounded-full text-xs bg-slate-800/90 text-slate-100 border border-slate-700">
           <span class="h-2 w-2 rounded-full flex-shrink-0" style="background:${color}"></span>
-          <span class="truncate max-w-[220px]">${esc(label)}</span>
+          <span class="truncate max-w-[200px]">${esc(label)}</span>
+          ${axisBtn}
           <button type="button" data-remove-series="${esc(key)}" title="Quitar serie" class="h-4 w-4 rounded-full hover:bg-slate-700 text-slate-400 hover:text-slate-100 inline-flex items-center justify-center leading-none">&times;</button>
         </span>
       `;
     })
     .join('');
+
+  wrap.querySelectorAll('[data-toggle-axis]').forEach((btn) => {
+    btn.addEventListener('click', () => toggleSeriesAxis(btn.dataset.toggleAxis));
+  });
 
   wrap.querySelectorAll('[data-remove-series]').forEach((btn) => {
     btn.addEventListener('click', () => toggleSeriesKey(btn.dataset.removeSeries));
@@ -525,23 +560,43 @@ function renderChart(seriesList, bounds) {
 
   const hasNumeric = seriesList.some((s) => !s.stepped);
   const hasBoolean = seriesList.some((s) => s.stepped);
+  const hasY2 = seriesList.some((s) => !s.stepped && secondaryAxisKeys.has(s.key));
+  const hasY1 = seriesList.some((s) => !s.stepped && !secondaryAxisKeys.has(s.key));
+
+  const y1Units = Array.from(
+    new Set(seriesList.filter((s) => !s.stepped && !secondaryAxisKeys.has(s.key) && s.unit).map((s) => translateUnit(s.unit)))
+  ).filter(Boolean);
+  const y2Units = Array.from(
+    new Set(seriesList.filter((s) => !s.stepped && secondaryAxisKeys.has(s.key) && s.unit).map((s) => translateUnit(s.unit)))
+  ).filter(Boolean);
 
   const datasets = seriesList.map((s, idx) => {
     const color = PALETTE[idx % PALETTE.length];
+    const isY2 = !s.stepped && secondaryAxisKeys.has(s.key);
+    const axisTag = hasY2 && !s.stepped ? (isY2 ? ' [Y2]' : ' [Y1]') : '';
+    const yAxisID = s.stepped
+      ? hasNumeric
+        ? 'yBool'
+        : 'y'
+      : isY2
+        ? 'y2'
+        : 'y';
+
     return {
-      label: `${s.deviceName} · ${s.dpLabel}${s.unit ? ` (${s.unit})` : ''}`,
+      label: `${s.deviceName} · ${translateDpLabel(s.dpCode, s.dpLabel)}${s.unit ? ` (${translateUnit(s.unit)})` : ''}${axisTag}`,
       data: s.points.map((p) => ({ x: p.x, y: p.y })),
       borderColor: color,
       backgroundColor: `${color}22`,
       borderWidth: 2,
+      borderDash: isY2 ? [6, 3] : [],
       pointRadius: s.points.length > 150 ? 0 : 2.5,
       pointHoverRadius: 5,
       pointHoverBackgroundColor: color,
       tension: s.stepped ? 0 : 0.25,
       stepped: s.stepped ? 'before' : false,
       fill: s.stepped ? 'origin' : false,
-      yAxisID: s.stepped && hasNumeric ? 'yBool' : 'y',
-      metaUnit: s.unit || '',
+      yAxisID,
+      metaUnit: translateUnit(s.unit || ''),
       metaStepped: s.stepped,
       metaDpCode: s.dpCode,
     };
@@ -573,6 +628,13 @@ function renderChart(seriesList, bounds) {
     y: {
       type: 'linear',
       position: 'left',
+      display: hasY1 || !hasY2,
+      title: {
+        display: hasY2 && y1Units.length > 0,
+        text: `Y1 (${y1Units.join(', ')})`,
+        color: tickColor,
+        font: { size: 11, weight: '600' },
+      },
       grid: { color: gridColor },
       ticks: {
         color: tickColor,
@@ -586,10 +648,30 @@ function renderChart(seriesList, bounds) {
     },
   };
 
+  if (hasY2) {
+    scales.y2 = {
+      type: 'linear',
+      position: 'right',
+      title: {
+        display: true,
+        text: y2Units.length > 0 ? `Y2 (${y2Units.join(', ')})` : 'Eje Y2',
+        color: light ? '#b45309' : '#fbbf24',
+        font: { size: 11, weight: '600' },
+      },
+      grid: { drawOnChartArea: false },
+      ticks: {
+        color: light ? '#b45309' : '#fbbf24',
+        font: { size: 11 },
+        callback: (val) => formatNumber(val),
+      },
+    };
+  }
+
   if (hasNumeric && hasBoolean) {
     scales.yBool = {
       type: 'linear',
       position: 'right',
+      display: !hasY2,
       min: -0.1,
       max: 1.2,
       grid: { drawOnChartArea: false },
@@ -770,6 +852,7 @@ export function initAnalyticsModule() {
 
   document.getElementById('btn-clear-series')?.addEventListener('click', () => {
     selectedKeys = [];
+    secondaryAxisKeys.clear();
     renderActiveSeriesBar();
     renderDeviceList();
     renderDpList();
