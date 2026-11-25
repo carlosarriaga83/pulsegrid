@@ -20,6 +20,69 @@ const PALETTE = [
   '#f97316', // orange-500
 ];
 
+// Última posición X del cursor para mostrar crosshair y timestamp exactos en el tooltip
+let lastPointerX = null;
+let lastPointerTimestamp = null;
+
+function findClosestPointIndex(data, targetX, isStepped) {
+  if (!Array.isArray(data) || data.length === 0) return -1;
+  let lo = 0;
+  let hi = data.length - 1;
+  let floorIdx = -1;
+
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (data[mid].x <= targetX) {
+      floorIdx = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+
+  if (isStepped) return floorIdx >= 0 ? floorIdx : 0;
+  if (floorIdx === -1) return 0;
+  if (floorIdx === data.length - 1) return floorIdx;
+
+  const distPrev = Math.abs(targetX - data[floorIdx].x);
+  const distNext = Math.abs(data[floorIdx + 1].x - targetX);
+  return distPrev <= distNext ? floorIdx : floorIdx + 1;
+}
+
+function registerPulsegridInteractionMode() {
+  if (!window.Chart?.Interaction?.modes) return;
+  window.Chart.Interaction.modes.pulsegridAll = function (chart, e) {
+    const xScale = chart.scales?.x;
+    const area = chart.chartArea;
+    if (!xScale || !area) return [];
+
+    const relX = e.x;
+    if (relX === undefined || relX < area.left || relX > area.right) {
+      lastPointerX = null;
+      lastPointerTimestamp = null;
+      return [];
+    }
+
+    const targetX = xScale.getValueForPixel(relX);
+    lastPointerX = relX;
+    lastPointerTimestamp = targetX;
+
+    const items = [];
+    chart.data.datasets.forEach((ds, datasetIndex) => {
+      if (!chart.isDatasetVisible(datasetIndex)) return;
+      const meta = chart.getDatasetMeta(datasetIndex);
+      if (!meta || !meta.data || meta.data.length === 0) return;
+
+      const idx = findClosestPointIndex(ds.data, targetX, Boolean(ds.stepped));
+      if (idx >= 0 && meta.data[idx]) {
+        items.push({ element: meta.data[idx], datasetIndex, index: idx });
+      }
+    });
+
+    return items;
+  };
+}
+
 // Plugin custom de Chart.js para dibujar línea vertical guía (Crosshair) sincronizada con el cursor
 const crosshairPlugin = {
   id: 'pulsegridCrosshair',
@@ -27,11 +90,11 @@ const crosshairPlugin = {
     const active = chart.tooltip?.getActiveElements?.() || [];
     if (active.length === 0) return;
 
-    const x = active[0].element?.x;
+    const x = lastPointerX ?? active[0].element?.x;
     if (x === undefined || Number.isNaN(x)) return;
 
     const { ctx, chartArea } = chart;
-    if (!chartArea) return;
+    if (!chartArea || x < chartArea.left || x > chartArea.right) return;
 
     ctx.save();
     ctx.beginPath();
@@ -130,8 +193,12 @@ function updateDayNavigationUI() {
   }
 
   document.querySelectorAll('[data-range-btn]').forEach((b) => {
-    const active = b.dataset.rangeBtn === currentRange;
-    if (b.id === 'btn-day-today') {
+    const isTodayBtn = b.id === 'btn-day-today';
+    const active = isTodayBtn
+      ? currentRange === 'today' && dayOffset === 0
+      : b.dataset.rangeBtn === currentRange;
+
+    if (isTodayBtn) {
       b.className = active
         ? 'px-3 py-1 rounded-md text-xs font-semibold bg-sky-500/20 text-sky-300 border border-sky-500/40 transition'
         : 'px-3 py-1 rounded-md text-xs font-medium text-slate-300 hover:text-slate-100 border border-transparent transition';
@@ -684,6 +751,8 @@ function renderChart(seriesList, bounds) {
     };
   }
 
+  registerPulsegridInteractionMode();
+
   chartInstance = new window.Chart(canvas.getContext('2d'), {
     type: 'line',
     data: { datasets },
@@ -693,7 +762,7 @@ function renderChart(seriesList, bounds) {
       maintainAspectRatio: false,
       animation: { duration: 220 },
       interaction: {
-        mode: 'index',
+        mode: 'pulsegridAll',
         intersect: false,
         axis: 'x',
       },
@@ -706,6 +775,8 @@ function renderChart(seriesList, bounds) {
         },
         tooltip: {
           enabled: true,
+          mode: 'pulsegridAll',
+          intersect: false,
           backgroundColor: tooltipBg,
           borderColor: 'rgba(56, 189, 248, 0.4)',
           borderWidth: 1,
@@ -715,7 +786,7 @@ function renderChart(seriesList, bounds) {
           cornerRadius: 10,
           callbacks: {
             title(items) {
-              const x = items?.[0]?.parsed?.x;
+              const x = lastPointerTimestamp ?? items?.[0]?.parsed?.x;
               return x !== undefined ? formatDateTime(x) : '';
             },
             label(ctx) {
