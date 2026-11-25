@@ -475,9 +475,12 @@ function renderStatsCards(seriesList) {
       const color = PALETTE[idx % PALETTE.length];
       const cleanU = translateUnit(s.unit || '');
       const u = cleanU ? ` ${cleanU}` : '';
-      const minTxt = s.stats.min !== null ? (s.stepped ? (s.stats.min ? 'ON' : 'OFF') : `${formatNumber(s.stats.min)}${u}`) : '—';
-      const avgTxt = s.stats.avg !== null ? (s.stepped ? `${formatNumber(Math.round(s.stats.avg * 100), 0)}% ON` : `${formatNumber(s.stats.avg)}${u}`) : '—';
-      const maxTxt = s.stats.max !== null ? (s.stepped ? (s.stats.max ? 'ON' : 'OFF') : `${formatNumber(s.stats.max)}${u}`) : '—';
+      const isSolar = s.dpCode === 'weather_is_day';
+      const onLbl = isSolar ? 'Día' : 'ON';
+      const offLbl = isSolar ? 'Noche' : 'OFF';
+      const minTxt = s.stats.min !== null ? (s.stepped ? (s.stats.min ? onLbl : offLbl) : `${formatNumber(s.stats.min)}${u}`) : '—';
+      const avgTxt = s.stats.avg !== null ? (s.stepped ? `${formatNumber(Math.round(s.stats.avg * 100), 0)}% ${onLbl}` : `${formatNumber(s.stats.avg)}${u}`) : '—';
+      const maxTxt = s.stats.max !== null ? (s.stepped ? (s.stats.max ? onLbl : offLbl) : `${formatNumber(s.stats.max)}${u}`) : '—';
 
       return `
         <div class="rounded-xl bg-slate-900/90 border border-slate-800 p-3.5">
@@ -540,6 +543,7 @@ function renderChart(seriesList, bounds) {
       yAxisID: s.stepped && hasNumeric ? 'yBool' : 'y',
       metaUnit: s.unit || '',
       metaStepped: s.stepped,
+      metaDpCode: s.dpCode,
     };
   });
 
@@ -636,6 +640,9 @@ function renderChart(seriesList, bounds) {
               const ds = ctx.dataset;
               const y = ctx.parsed.y;
               if (ds.metaStepped) {
+                if (ds.metaDpCode === 'weather_is_day') {
+                  return ` ${ds.label}: ${y >= 0.5 ? 'Día (Sol arriba)' : 'Noche'}`;
+                }
                 return ` ${ds.label}: ${y >= 0.5 ? 'ENCENDIDO (ON)' : 'APAGADO (OFF)'}`;
               }
               return ` ${ds.label}: ${formatNumber(y)}${ds.metaUnit ? ` ${ds.metaUnit}` : ''}`;

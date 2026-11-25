@@ -132,6 +132,7 @@ const DP_LABELS = {
   weather_humidity: 'Humedad exterior',
   weather_wind_speed: 'Viento exterior',
   weather_precipitation: 'Precipitación',
+  weather_is_day: 'Luz solar (Día / Noche)',
 };
 
 export function hasChinese(str) {

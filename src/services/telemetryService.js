@@ -7,11 +7,12 @@ import logger from '../utils/logger.js';
 export const WEATHER_DEVICE_ID = 'weather_openmeteo';
 
 const WEATHER_METRICS_META = [
-  { code: 'weather_temperature', label: 'Temperatura exterior', unit: '°C', field: 'temperature', hourlyField: 'temperature_2m' },
-  { code: 'weather_apparent_temp', label: 'Sensación térmica', unit: '°C', field: 'apparentTemperature', hourlyField: 'apparent_temperature' },
-  { code: 'weather_humidity', label: 'Humedad exterior', unit: '%', field: 'humidity', hourlyField: 'relative_humidity_2m' },
-  { code: 'weather_wind_speed', label: 'Viento exterior', unit: 'km/h', field: 'windSpeed', hourlyField: 'wind_speed_10m' },
-  { code: 'weather_precipitation', label: 'Precipitación', unit: 'mm', field: 'precipitation', hourlyField: 'precipitation' },
+  { code: 'weather_temperature', label: 'Temperatura exterior', unit: '°C', field: 'temperature', hourlyField: 'temperature_2m', valueType: 'number' },
+  { code: 'weather_apparent_temp', label: 'Sensación térmica', unit: '°C', field: 'apparentTemperature', hourlyField: 'apparent_temperature', valueType: 'number' },
+  { code: 'weather_humidity', label: 'Humedad exterior', unit: '%', field: 'humidity', hourlyField: 'relative_humidity_2m', valueType: 'number' },
+  { code: 'weather_wind_speed', label: 'Viento exterior', unit: 'km/h', field: 'windSpeed', hourlyField: 'wind_speed_10m', valueType: 'number' },
+  { code: 'weather_precipitation', label: 'Precipitación', unit: 'mm', field: 'precipitation', hourlyField: 'precipitation', valueType: 'number' },
+  { code: 'weather_is_day', label: 'Luz solar (Día / Noche)', unit: '', field: 'isDay', hourlyField: 'is_day', valueType: 'boolean' },
 ];
 
 const FRIENDLY_DP_LABELS = {
@@ -65,6 +66,7 @@ const FRIENDLY_DP_LABELS = {
   weather_humidity: 'Humedad exterior',
   weather_wind_speed: 'Viento exterior',
   weather_precipitation: 'Precipitación',
+  weather_is_day: 'Luz solar (Día / Noche)',
 };
 
 function hasCJK(str) {
@@ -92,7 +94,14 @@ function cleanUnit(rawUnit) {
 function getDpMeta(device, dpCode) {
   if (device?.id === WEATHER_DEVICE_ID) {
     const wm = WEATHER_METRICS_META.find((m) => m.code === dpCode);
-    if (wm) return { label: wm.label, scale: 0, unit: wm.unit, specType: 'integer' };
+    if (wm) {
+      return {
+        label: wm.label,
+        scale: 0,
+        unit: wm.unit,
+        specType: wm.valueType === 'boolean' ? 'boolean' : 'integer',
+      };
+    }
   }
   const specs = [...(device?.dpSchema?.functions || []), ...(device?.dpSchema?.status || [])];
   const spec = specs.find((s) => s.code === dpCode);
@@ -137,17 +146,19 @@ async function ensureWeatherDeviceRow(weatherData = null) {
  * desde Open-Meteo (hourly + past_days=2) para que la curva esté disponible de inmediato.
  */
 async function backfillInitialWeatherHistoryIfEmpty() {
-  const [cntRow] = await query(
-    'SELECT COUNT(*) AS cnt FROM telemetry_logs WHERE device_id = ?',
+  const existingRows = await query(
+    'SELECT dp_code, COUNT(*) AS cnt FROM telemetry_logs WHERE device_id = ? GROUP BY dp_code',
     [WEATHER_DEVICE_ID]
   );
-  if (Number(cntRow?.cnt || 0) > 0) return 0;
+  const existingMap = new Map(existingRows.map((r) => [r.dp_code, Number(r.cnt || 0)]));
+  const missingMetrics = WEATHER_METRICS_META.filter((m) => (existingMap.get(m.code) || 0) === 0);
+  if (missingMetrics.length === 0) return 0;
 
   const loc = await weatherService.getLocationSettings();
   const params = new URLSearchParams({
     latitude: String(loc.latitude),
     longitude: String(loc.longitude),
-    hourly: 'temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m,precipitation',
+    hourly: missingMetrics.map((m) => m.hourlyField).join(','),
     past_days: '2',
     forecast_days: '1',
     timezone: 'GMT',
@@ -163,10 +174,15 @@ async function backfillInitialWeatherHistoryIfEmpty() {
   for (let i = 0; i < times.length; i++) {
     const dt = new Date(`${times[i]}Z`);
     if (Number.isNaN(dt.getTime()) || dt.getTime() > nowMs) continue;
-    for (const m of WEATHER_METRICS_META) {
+    for (const m of missingMetrics) {
       const val = data.hourly?.[m.hourlyField]?.[i];
       if (val === undefined || val === null || Number.isNaN(Number(val))) continue;
-      rows.push([WEATHER_DEVICE_ID, m.code, 'number', Number(val), null, dt]);
+      if (m.valueType === 'boolean') {
+        const b = Number(val) >= 1;
+        rows.push([WEATHER_DEVICE_ID, m.code, 'boolean', b ? 1 : 0, b ? 'true' : 'false', dt]);
+      } else {
+        rows.push([WEATHER_DEVICE_ID, m.code, 'number', Number(val), null, dt]);
+      }
     }
   }
 
@@ -203,9 +219,15 @@ export async function recordWeatherTelemetry() {
 
   for (const m of WEATHER_METRICS_META) {
     const val = weather.current[m.field];
-    if (val === undefined || val === null || Number.isNaN(Number(val))) continue;
-    placeholders.push('(?, ?, ?, ?, ?, UTC_TIMESTAMP())');
-    params.push(WEATHER_DEVICE_ID, m.code, 'number', Number(val), null);
+    if (val === undefined || val === null) continue;
+    if (m.valueType === 'boolean') {
+      const b = Boolean(val);
+      placeholders.push('(?, ?, ?, ?, ?, UTC_TIMESTAMP())');
+      params.push(WEATHER_DEVICE_ID, m.code, 'boolean', b ? 1 : 0, b ? 'true' : 'false');
+    } else if (!Number.isNaN(Number(val))) {
+      placeholders.push('(?, ?, ?, ?, ?, UTC_TIMESTAMP())');
+      params.push(WEATHER_DEVICE_ID, m.code, 'number', Number(val), null);
+    }
   }
 
   if (placeholders.length === 0) return 0;
@@ -478,6 +500,7 @@ export async function getAvailableSeries() {
 
   for (const m of WEATHER_METRICS_META) {
     const curVal = liveWeather?.current?.[m.field];
+    const isBool = m.valueType === 'boolean';
     items.push({
       deviceId: WEATHER_DEVICE_ID,
       deviceName: 'Clima Exterior (Open-Meteo)',
@@ -487,8 +510,15 @@ export async function getAvailableSeries() {
       dpCode: m.code,
       dpLabel: m.label,
       unit: m.unit,
-      valueType: 'number',
-      currentValue: curVal !== undefined && curVal !== null ? Number(curVal) : null,
+      valueType: isBool ? 'boolean' : 'number',
+      currentValue:
+        curVal !== undefined && curVal !== null
+          ? isBool
+            ? curVal
+              ? 'Día (Sol)'
+              : 'Noche'
+            : Number(curVal)
+          : null,
       recordCount: countMap.get(`${WEATHER_DEVICE_ID}:${m.code}`) || 0,
     });
   }
