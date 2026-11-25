@@ -227,6 +227,8 @@ function buildGroupedDevices() {
   }
 
   groupedDevices = Array.from(map.values()).sort((a, b) => {
+    if (a.deviceId === 'weather_openmeteo') return -1;
+    if (b.deviceId === 'weather_openmeteo') return 1;
     if (a.isOnline !== b.isOnline) return a.isOnline ? -1 : 1;
     if (a.totalRecords !== b.totalRecords) return b.totalRecords - a.totalRecords;
     return a.deviceName.localeCompare(b.deviceName);

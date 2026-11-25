@@ -330,7 +330,9 @@ async function fetchDevicesFromTuya() {
  * Carga dispositivos desde MySQL a la caché en memoria (útil al iniciar o sin Tuya configurado).
  */
 export async function loadDevicesFromDb() {
-  const rows = await query('SELECT * FROM devices ORDER BY room ASC, COALESCE(custom_name, name) ASC');
+  const rows = await query(
+    "SELECT * FROM devices WHERE id <> 'weather_openmeteo' ORDER BY room ASC, COALESCE(custom_name, name) ASC"
+  );
   deviceCache.clear();
 
   for (const row of rows) {

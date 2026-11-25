@@ -127,6 +127,11 @@ const DP_LABELS = {
   normal_open_switch: 'Modo paso libre',
   normal_open_period: 'Horario paso libre',
   doorcontact_state: 'Estado puerta',
+  weather_temperature: 'Temperatura exterior',
+  weather_apparent_temp: 'Sensación térmica',
+  weather_humidity: 'Humedad exterior',
+  weather_wind_speed: 'Viento exterior',
+  weather_precipitation: 'Precipitación',
 };
 
 export function hasChinese(str) {

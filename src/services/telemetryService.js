@@ -1,7 +1,18 @@
 import { query, pool } from '../config/db.js';
 import env from '../config/env.js';
 import tuyaService from './tuyaService.js';
+import weatherService from './weatherService.js';
 import logger from '../utils/logger.js';
+
+export const WEATHER_DEVICE_ID = 'weather_openmeteo';
+
+const WEATHER_METRICS_META = [
+  { code: 'weather_temperature', label: 'Temperatura exterior', unit: '°C', field: 'temperature', hourlyField: 'temperature_2m' },
+  { code: 'weather_apparent_temp', label: 'Sensación térmica', unit: '°C', field: 'apparentTemperature', hourlyField: 'apparent_temperature' },
+  { code: 'weather_humidity', label: 'Humedad exterior', unit: '%', field: 'humidity', hourlyField: 'relative_humidity_2m' },
+  { code: 'weather_wind_speed', label: 'Viento exterior', unit: 'km/h', field: 'windSpeed', hourlyField: 'wind_speed_10m' },
+  { code: 'weather_precipitation', label: 'Precipitación', unit: 'mm', field: 'precipitation', hourlyField: 'precipitation' },
+];
 
 const FRIENDLY_DP_LABELS = {
   switch: 'Interruptor',
@@ -49,6 +60,11 @@ const FRIENDLY_DP_LABELS = {
   battery_percentage: 'Batería',
   fan_speed_percent: 'Velocidad ventilador',
   backlight: 'Retroiluminación',
+  weather_temperature: 'Temperatura exterior',
+  weather_apparent_temp: 'Sensación térmica',
+  weather_humidity: 'Humedad exterior',
+  weather_wind_speed: 'Viento exterior',
+  weather_precipitation: 'Precipitación',
 };
 
 function hasCJK(str) {
@@ -74,6 +90,10 @@ function cleanUnit(rawUnit) {
 }
 
 function getDpMeta(device, dpCode) {
+  if (device?.id === WEATHER_DEVICE_ID) {
+    const wm = WEATHER_METRICS_META.find((m) => m.code === dpCode);
+    if (wm) return { label: wm.label, scale: 0, unit: wm.unit, specType: 'integer' };
+  }
   const specs = [...(device?.dpSchema?.functions || []), ...(device?.dpSchema?.status || [])];
   const spec = specs.find((s) => s.code === dpCode);
   return {
@@ -82,6 +102,121 @@ function getDpMeta(device, dpCode) {
     unit: cleanUnit(spec?.parsedValues?.unit || ''),
     specType: String(spec?.type || '').toLowerCase(),
   };
+}
+
+/**
+ * Asegura la existencia del registro virtual 'weather_openmeteo' en devices
+ * para cumplir la clave foránea de telemetry_logs sin aparecer en la lista Tuya.
+ */
+async function ensureWeatherDeviceRow(weatherData = null) {
+  const locLabel = weatherData?.location?.label || 'Exterior';
+  const statusObj = {};
+  if (weatherData?.current) {
+    for (const m of WEATHER_METRICS_META) {
+      if (weatherData.current[m.field] !== null && weatherData.current[m.field] !== undefined) {
+        statusObj[m.code] = Number(weatherData.current[m.field]);
+      }
+    }
+  }
+
+  await query(
+    `INSERT INTO devices (id, name, category, product_name, room, is_online, last_online_at, last_status)
+     VALUES (?, 'Clima Exterior (Open-Meteo)', 'weather', 'Open-Meteo API', ?, 1, UTC_TIMESTAMP(), ?)
+     ON DUPLICATE KEY UPDATE
+       room = VALUES(room),
+       is_online = 1,
+       last_online_at = UTC_TIMESTAMP(),
+       last_status = IF(VALUES(last_status) = '{}', last_status, VALUES(last_status)),
+       updated_at = CURRENT_TIMESTAMP`,
+    [WEATHER_DEVICE_ID, locLabel, JSON.stringify(statusObj)]
+  );
+}
+
+/**
+ * Si aún no hay historial de clima en telemetry_logs, precarga las últimas 48h reales
+ * desde Open-Meteo (hourly + past_days=2) para que la curva esté disponible de inmediato.
+ */
+async function backfillInitialWeatherHistoryIfEmpty() {
+  const [cntRow] = await query(
+    'SELECT COUNT(*) AS cnt FROM telemetry_logs WHERE device_id = ?',
+    [WEATHER_DEVICE_ID]
+  );
+  if (Number(cntRow?.cnt || 0) > 0) return 0;
+
+  const loc = await weatherService.getLocationSettings();
+  const params = new URLSearchParams({
+    latitude: String(loc.latitude),
+    longitude: String(loc.longitude),
+    hourly: 'temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m,precipitation',
+    past_days: '2',
+    forecast_days: '1',
+    timezone: 'GMT',
+  });
+
+  const res = await fetch(`https://api.open-meteo.com/v1/forecast?${params.toString()}`);
+  if (!res.ok) return 0;
+  const data = await res.json();
+  const times = data?.hourly?.time || [];
+  const nowMs = Date.now();
+  const rows = [];
+
+  for (let i = 0; i < times.length; i++) {
+    const dt = new Date(`${times[i]}Z`);
+    if (Number.isNaN(dt.getTime()) || dt.getTime() > nowMs) continue;
+    for (const m of WEATHER_METRICS_META) {
+      const val = data.hourly?.[m.hourlyField]?.[i];
+      if (val === undefined || val === null || Number.isNaN(Number(val))) continue;
+      rows.push([WEATHER_DEVICE_ID, m.code, 'number', Number(val), null, dt]);
+    }
+  }
+
+  if (rows.length === 0) return 0;
+
+  const chunkSize = 400;
+  for (let i = 0; i < rows.length; i += chunkSize) {
+    const chunk = rows.slice(i, i + chunkSize);
+    const placeholders = chunk.map(() => '(?, ?, ?, ?, ?, ?)').join(', ');
+    await pool.execute(
+      `INSERT INTO telemetry_logs (device_id, dp_code, value_type, value_numeric, value_text, recorded_at)
+       VALUES ${placeholders}`,
+      chunk.flat()
+    );
+  }
+  logger.info(`Historial inicial de clima Open-Meteo precargado: ${rows.length} lecturas (48h)`);
+  return rows.length;
+}
+
+/**
+ * Captura y guarda en telemetry_logs la temperatura y variables de clima de Open-Meteo.
+ */
+export async function recordWeatherTelemetry() {
+  const weather = await weatherService.getWeather(false);
+  if (!weather?.current) return 0;
+
+  await ensureWeatherDeviceRow(weather);
+  await backfillInitialWeatherHistoryIfEmpty().catch((err) => {
+    logger.warn('No se pudo precargar historial de 48h de Open-Meteo', { error: err.message });
+  });
+
+  const placeholders = [];
+  const params = [];
+
+  for (const m of WEATHER_METRICS_META) {
+    const val = weather.current[m.field];
+    if (val === undefined || val === null || Number.isNaN(Number(val))) continue;
+    placeholders.push('(?, ?, ?, ?, ?, UTC_TIMESTAMP())');
+    params.push(WEATHER_DEVICE_ID, m.code, 'number', Number(val), null);
+  }
+
+  if (placeholders.length === 0) return 0;
+
+  await pool.execute(
+    `INSERT INTO telemetry_logs (device_id, dp_code, value_type, value_numeric, value_text, recorded_at)
+     VALUES ${placeholders.join(', ')}`,
+    params
+  );
+
+  return placeholders.length;
 }
 
 function normalizeForTelemetry(rawValue, meta) {
@@ -185,6 +320,14 @@ export async function captureAllDevicesTelemetry() {
 
   const devices = await tuyaService.getDevices(false);
   let totalInserted = 0;
+
+  // Capturar siempre las variables de clima exterior (Open-Meteo)
+  try {
+    totalInserted += await recordWeatherTelemetry();
+  } catch (err) {
+    logger.warn('Error guardando telemetría de clima Open-Meteo', { error: err.message });
+  }
+
   for (const dev of devices) {
     if (!dev.isOnline) continue;
     try {
@@ -249,7 +392,10 @@ export async function getTelemetryHistory({ series = [], fromDate, toDate, maxPo
     const { deviceId, dpCode } = item;
     if (!deviceId || !dpCode) continue;
 
-    const dev = deviceMap.get(deviceId);
+    const dev =
+      deviceId === WEATHER_DEVICE_ID
+        ? { id: WEATHER_DEVICE_ID, displayName: 'Clima Exterior (Open-Meteo)' }
+        : deviceMap.get(deviceId);
     const meta = getDpMeta(dev, dpCode);
 
     const rows = await query(
@@ -321,6 +467,31 @@ export async function getAvailableSeries() {
   const countMap = new Map(countRows.map((r) => [`${r.device_id}:${r.dp_code}`, Number(r.cnt || 0)]));
 
   const items = [];
+
+  // Incluir siempre Clima Exterior (Open-Meteo) al principio para graficar temperatura junto con cualquier equipo
+  let liveWeather = null;
+  try {
+    liveWeather = await weatherService.getWeather(false);
+  } catch {
+    liveWeather = null;
+  }
+
+  for (const m of WEATHER_METRICS_META) {
+    const curVal = liveWeather?.current?.[m.field];
+    items.push({
+      deviceId: WEATHER_DEVICE_ID,
+      deviceName: 'Clima Exterior (Open-Meteo)',
+      room: liveWeather?.location?.label || 'Exterior',
+      category: 'weather',
+      isOnline: true,
+      dpCode: m.code,
+      dpLabel: m.label,
+      unit: m.unit,
+      valueType: 'number',
+      currentValue: curVal !== undefined && curVal !== null ? Number(curVal) : null,
+      recordCount: countMap.get(`${WEATHER_DEVICE_ID}:${m.code}`) || 0,
+    });
+  }
 
   for (const dev of devices) {
     const seen = new Set();
@@ -446,8 +617,10 @@ export async function purgeOldTelemetry() {
 }
 
 export default {
+  WEATHER_DEVICE_ID,
   recordDeviceSnapshot,
   recordCommandsTelemetry,
+  recordWeatherTelemetry,
   captureAllDevicesTelemetry,
   getTelemetryHistory,
   getAvailableSeries,
