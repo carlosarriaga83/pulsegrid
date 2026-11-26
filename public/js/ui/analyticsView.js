@@ -886,6 +886,111 @@ export async function refreshAvailableSeries() {
   }
 }
 
+function escapeCsvCell(val) {
+  if (val === null || val === undefined) return '';
+  const str = String(val);
+  if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+    return `"${str.replace(/"/g, '""')}"`;
+  }
+  return str;
+}
+
+/**
+ * Genera el contenido CSV de las series graficadas actualmente (respetando el zoom activo si existe).
+ */
+function buildChartCsv() {
+  if (!Array.isArray(lastSeriesData) || lastSeriesData.length === 0) {
+    return { csv: '', rowCount: 0 };
+  }
+
+  const xScale = chartInstance?.scales?.x;
+  const viewMin = xScale?.min !== undefined ? Number(xScale.min) : -Infinity;
+  const viewMax = xScale?.max !== undefined ? Number(xScale.max) : Infinity;
+
+  const seriesMaps = [];
+  const timestampSet = new Set();
+
+  for (const s of lastSeriesData) {
+    const map = new Map();
+    for (const p of s.points || []) {
+      if (p.x >= viewMin && p.x <= viewMax) {
+        map.set(p.x, p.y);
+        timestampSet.add(p.x);
+      }
+    }
+    seriesMaps.push(map);
+  }
+
+  const timestamps = Array.from(timestampSet).sort((a, b) => a - b);
+  if (timestamps.length === 0) {
+    return { csv: '', rowCount: 0 };
+  }
+
+  const headers = [
+    'Fecha_Hora',
+    ...lastSeriesData.map((s) => {
+      const unit = translateUnit(s.unit || '');
+      const lbl = translateDpLabel(s.dpCode, s.dpLabel);
+      return `${s.deviceName} - ${lbl}${unit ? ` (${unit})` : ''}`;
+    }),
+  ];
+
+  const lines = [headers.map(escapeCsvCell).join(',')];
+
+  for (const ts of timestamps) {
+    const row = [formatDateTime(ts)];
+    for (const map of seriesMaps) {
+      const val = map.has(ts) ? map.get(ts) : '';
+      row.push(escapeCsvCell(val));
+    }
+    lines.push(row.join(','));
+  }
+
+  return { csv: lines.join('\r\n'), rowCount: timestamps.length };
+}
+
+function downloadChartCsv() {
+  const { csv, rowCount } = buildChartCsv();
+  if (!csv || rowCount === 0) {
+    showToast('No hay datos en la gráfica para exportar', 'warning');
+    return;
+  }
+
+  const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `pulsegrid_datos_${formatDate(new Date())}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  showToast(`CSV descargado (${formatNumber(rowCount, 0)} filas)`, 'success');
+}
+
+async function copyChartCsv() {
+  const { csv, rowCount } = buildChartCsv();
+  if (!csv || rowCount === 0) {
+    showToast('No hay datos en la gráfica para copiar', 'warning');
+    return;
+  }
+
+  try {
+    await navigator.clipboard.writeText(csv);
+    showToast(`CSV copiado al portapapeles (${formatNumber(rowCount, 0)} filas)`, 'success');
+  } catch {
+    const ta = document.createElement('textarea');
+    ta.value = csv;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    ta.remove();
+    showToast(`CSV copiado (${formatNumber(rowCount, 0)} filas)`, 'success');
+  }
+}
+
 export function initAnalyticsModule() {
   const tzBadge = document.getElementById('analytics-timezone-badge');
   if (tzBadge) {
@@ -1009,6 +1114,10 @@ export function initAnalyticsModule() {
       setResetButtonState(false);
     }
   });
+
+  // Exportar y copiar CSV
+  document.getElementById('btn-download-csv')?.addEventListener('click', downloadChartCsv);
+  document.getElementById('btn-copy-csv')?.addEventListener('click', copyChartCsv);
 
   // Capturar snapshot ahora
   document.getElementById('btn-capture-telemetry')?.addEventListener('click', async (e) => {
