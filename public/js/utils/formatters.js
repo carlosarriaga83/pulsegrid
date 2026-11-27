@@ -133,6 +133,11 @@ const DP_LABELS = {
   weather_wind_speed: 'Viento exterior',
   weather_precipitation: 'Precipitación',
   weather_is_day: 'Luz solar (Día / Noche)',
+  duty_cycle: 'Ciclo de potencia',
+  mysa_lock: 'Bloqueo de botones',
+  min_brightness: 'Brillo reposo',
+  max_brightness: 'Brillo activo',
+  corrected_temp: 'Temperatura actual',
 };
 
 export function hasChinese(str) {

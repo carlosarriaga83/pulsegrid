@@ -2,6 +2,7 @@ import cron from 'node-cron';
 import env from '../config/env.js';
 import { query } from '../config/db.js';
 import tuyaService from './tuyaService.js';
+import mysaService from './mysaService.js';
 import weatherService, { getSolarEventTime } from './weatherService.js';
 import telemetryService from './telemetryService.js';
 import emailService from './emailService.js';
@@ -712,9 +713,9 @@ export function startScheduler() {
     }
   });
 
-  // Polling periódico de Tuya Cloud si hay credenciales configuradas
+  // Polling periódico de Tuya Cloud y Mysa si hay credenciales configuradas
   pollingTask = cron.schedule('*/1 * * * *', async () => {
-    if (!tuyaService.isTuyaConfigured()) return;
+    if (!tuyaService.isTuyaConfigured() && !mysaService.isMysaConfigured()) return;
     try {
       const res = await tuyaService.syncDevices();
       emitTuyaError(null);

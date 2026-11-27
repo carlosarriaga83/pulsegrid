@@ -1,6 +1,7 @@
 import { TuyaContext } from '@tuya/tuya-connector-nodejs';
 import env from '../config/env.js';
 import { query } from '../config/db.js';
+import mysaService from './mysaService.js';
 import logger from '../utils/logger.js';
 
 let tuyaClient = null;
@@ -372,11 +373,21 @@ function formatDbDevice(row) {
  * Devuelve la lista actualizada y un array de cambios detectados para Socket.io / telemetría.
  */
 export async function syncDevices() {
+  let mysaResult = { synced: false, count: 0 };
+  if (mysaService.isMysaConfigured()) {
+    try {
+      mysaResult = await mysaService.syncMysaDevices();
+    } catch (err) {
+      logger.warn('Sincronización de Mysa reportó error', { error: err.message });
+    }
+  }
+
   if (!isTuyaConfigured()) {
     const dbDevices = await loadDevicesFromDb();
     return {
-      synced: false,
-      reason: 'Tuya Cloud API no configurada',
+      synced: mysaResult.synced,
+      reason: mysaResult.synced ? undefined : 'Ni Tuya Cloud ni Mysa están configurados',
+      mysa: mysaResult,
       devices: dbDevices,
       changes: [],
     };
@@ -581,6 +592,13 @@ export async function getDeviceById(deviceId, forceStatusRefresh = false) {
 export async function sendDeviceCommands(deviceId, commands) {
   if (!Array.isArray(commands) || commands.length === 0) {
     throw new Error('Debes proporcionar al menos un comando { code, value }');
+  }
+
+  // Enrutar comandos de termostatos Mysa hacia mysaService
+  if (mysaService.isMysaDeviceId(deviceId)) {
+    const res = await mysaService.sendMysaCommands(deviceId, commands);
+    deviceCache.set(deviceId, res.device);
+    return res;
   }
 
   const device = await getDeviceById(deviceId);

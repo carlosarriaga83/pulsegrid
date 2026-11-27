@@ -1,6 +1,7 @@
 import { query, pool } from '../config/db.js';
 import env from '../config/env.js';
 import tuyaService from './tuyaService.js';
+import mysaService from './mysaService.js';
 import weatherService from './weatherService.js';
 import logger from '../utils/logger.js';
 
@@ -332,7 +333,7 @@ export async function recordCommandsTelemetry(device, commands) {
  * Si Tuya está configurada, fuerza primero una sincronización fresca para no guardar estados obsoletos o vacíos.
  */
 export async function captureAllDevicesTelemetry() {
-  if (tuyaService.isTuyaConfigured()) {
+  if (tuyaService.isTuyaConfigured() || mysaService.isMysaConfigured()) {
     try {
       await tuyaService.syncDevices();
     } catch (err) {

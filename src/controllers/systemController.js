@@ -1,5 +1,6 @@
 import { testConnection } from '../config/db.js';
 import tuyaService from '../services/tuyaService.js';
+import mysaService from '../services/mysaService.js';
 import weatherService from '../services/weatherService.js';
 import { getConnectedClientsCount } from '../sockets/socketManager.js';
 import env from '../config/env.js';
@@ -35,6 +36,7 @@ export async function getHealth(_req, res) {
     timestamp: new Date().toISOString(),
     database: db,
     tuya,
+    mysa: mysaService.getMysaStatus(),
     weather,
     realtime: {
       socketio: true,

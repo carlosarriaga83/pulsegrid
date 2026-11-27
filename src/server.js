@@ -2,10 +2,12 @@ import http from 'node:http';
 import app from './app.js';
 import env from './config/env.js';
 import { testConnection, closePool } from './config/db.js';
-import { initSocket, closeSocket } from './sockets/socketManager.js';
 import tuyaService from './services/tuyaService.js';
+import mysaService from './services/mysaService.js';
 import automationEngine from './services/automationEngine.js';
 import emailService from './services/emailService.js';
+import telemetryService from './services/telemetryService.js';
+import { initSocket, closeSocket, emitDeviceUpdate } from './sockets/socketManager.js';
 import logger from './utils/logger.js';
 
 const server = http.createServer(app);
@@ -35,6 +37,18 @@ async function bootstrap() {
     logger.warn('Tuya Cloud API pendiente de credenciales en .env (TUYA_ACCESS_KEY / TUYA_SECRET_KEY)');
   }
 
+  if (mysaService.isMysaConfigured()) {
+    logger.info(`Mysa Smart Thermostats configurado (${env.mysa.username})`);
+    mysaService.registerRealtimeCallback((device) => {
+      emitDeviceUpdate(device);
+      telemetryService.recordDeviceSnapshot(device).catch(() => {});
+    });
+    mysaService
+      .syncMysaDevices()
+      .then(() => tuyaService.loadDevicesFromDb())
+      .catch((err) => logger.warn('Error en sincronización inicial de Mysa', { error: err.message }));
+  }
+
   server.listen(env.port, () => {
     logger.info(`PulseGrid escuchando en el puerto ${env.port} [${env.nodeEnv}]`);
     automationEngine.registerEmailDispatcher(emailService.sendAlert);
@@ -55,6 +69,7 @@ async function shutdown(signal) {
 
   try {
     automationEngine.stopScheduler();
+    await mysaService.stopMysaRealtime();
     await closeSocket();
     await new Promise((resolve) => server.close(resolve));
     await closePool();

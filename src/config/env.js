@@ -93,6 +93,12 @@ export const env = {
     userUid: process.env.TUYA_USER_UID || '',
   },
 
+  mysa: {
+    username: process.env.MYSA_USERNAME || '',
+    password: process.env.MYSA_PASSWORD || '',
+    realtimeEnabled: toBool(process.env.MYSA_REALTIME_ENABLED, true),
+  },
+
   polling: {
     intervalSeconds: toInt(process.env.POLLING_INTERVAL_SECONDS, 30),
     automationCron: process.env.AUTOMATION_CRON_SCHEDULE || '*/1 * * * *',

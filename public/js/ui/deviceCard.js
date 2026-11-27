@@ -323,7 +323,9 @@ export function createDeviceCard(device, { onSendCommand, onOpenSettings }) {
             ${
               String(device.id).startsWith('demo_')
                 ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">DEMO</span>`
-                : ''
+                : String(device.id).startsWith('mysa_')
+                  ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-300 border border-sky-500/30">MYSA</span>`
+                  : ''
             }
           </div>
           <h3 data-display-name class="text-base font-semibold text-slate-100 truncate flex items-center gap-1.5">
