@@ -402,6 +402,29 @@ function setupThemeToggle() {
 }
 
 let dashboardBooted = false;
+let devicesLiveFallbackTimer = null;
+
+function startDevicesLiveFallback() {
+  if (devicesLiveFallbackTimer) clearInterval(devicesLiveFallbackTimer);
+  devicesLiveFallbackTimer = setInterval(async () => {
+    if (document.visibilityState !== 'visible') return;
+    if (state.activeTab !== 'devices') return;
+    try {
+      const devRes = await api.getDevices(false);
+      applyDevicesSnapshot(devRes.data, devRes.tuyaConfigured);
+      if (devRes.tuyaError !== undefined) renderTuyaErrorBanner(devRes.tuyaError);
+    } catch {
+      // silencioso: Socket.io sigue activo
+    }
+  }, 10000);
+}
+
+function stopDevicesLiveFallback() {
+  if (devicesLiveFallbackTimer) {
+    clearInterval(devicesLiveFallbackTimer);
+    devicesLiveFallbackTimer = null;
+  }
+}
 
 function updateTopbarUser(sessionData) {
   const nameEl = document.getElementById('topbar-user-name');
@@ -484,6 +507,7 @@ async function bootAuthenticatedApp(sessionData) {
   }
 
   loadWeather(false);
+  startDevicesLiveFallback();
 }
 
 // --- Inicialización ---
@@ -499,6 +523,7 @@ async function init() {
     } catch {
       // ignore
     }
+    stopDevicesLiveFallback();
     disconnectSocket();
     showAuthScreen({ hasUsers: true });
     showToast('Sesión cerrada', 'info');
@@ -506,6 +531,7 @@ async function init() {
 
   // Redirigir a Login si la sesión expira en cualquier petición
   window.addEventListener('pg:unauthorized', () => {
+    stopDevicesLiveFallback();
     disconnectSocket();
     showAuthScreen({ hasUsers: true });
   });

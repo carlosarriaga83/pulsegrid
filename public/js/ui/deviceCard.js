@@ -29,17 +29,19 @@ const CATEGORY_META = {
 
 const PRIMARY_SWITCH_CODES = ['switch', 'switch_1', 'switch_led', 'power_go', 'switch_all'];
 
-// Mapa de bloqueos activos: key = `${deviceId}:${dpCode}`, value = { locked: boolean, timer: number }
+// Mapa de bloqueos activos por control y por dispositivo completo + cola de actualizaciones pendientes
 const interactionLocks = new Map();
+const deviceLocks = new Map(); // deviceId -> { timer, pendingDevice }
 
 export function lockControl(deviceId, dpCode) {
   const key = `${deviceId}:${dpCode}`;
   const existing = interactionLocks.get(key);
   if (existing?.timer) clearTimeout(existing.timer);
   interactionLocks.set(key, { locked: true, timer: null });
+  lockDevice(deviceId);
 }
 
-export function unlockControl(deviceId, dpCode, graceMs = 450) {
+export function unlockControl(deviceId, dpCode, graceMs = 900) {
   const key = `${deviceId}:${dpCode}`;
   const existing = interactionLocks.get(key);
   if (existing?.timer) clearTimeout(existing.timer);
@@ -47,10 +49,43 @@ export function unlockControl(deviceId, dpCode, graceMs = 450) {
     interactionLocks.delete(key);
   }, graceMs);
   interactionLocks.set(key, { locked: true, timer });
+  unlockDevice(deviceId, graceMs);
 }
 
 export function isControlLocked(deviceId, dpCode) {
   return interactionLocks.has(`${deviceId}:${dpCode}`);
+}
+
+export function lockDevice(deviceId) {
+  const existing = deviceLocks.get(deviceId);
+  if (existing?.timer) clearTimeout(existing.timer);
+  deviceLocks.set(deviceId, { timer: null, pendingDevice: existing?.pendingDevice || null });
+}
+
+export function unlockDevice(deviceId, graceMs = 900) {
+  const existing = deviceLocks.get(deviceId);
+  if (!existing) return;
+  if (existing.timer) clearTimeout(existing.timer);
+
+  existing.timer = setTimeout(() => {
+    const entry = deviceLocks.get(deviceId);
+    deviceLocks.delete(deviceId);
+    // Aplicar inmediatamente el último estado real recibido mientras el usuario manipulaba el control
+    if (entry?.pendingDevice) {
+      const card = document.querySelector(`article[data-device-id="${CSS.escape(deviceId)}"]`);
+      if (card) patchDeviceCard(card, entry.pendingDevice);
+    }
+  }, graceMs);
+}
+
+export function isDeviceLocked(deviceId) {
+  return deviceLocks.has(deviceId);
+}
+
+export function queueDeviceUpdateIfLocked(device) {
+  if (!device?.id || !deviceLocks.has(device.id)) return false;
+  deviceLocks.get(device.id).pendingDevice = device;
+  return true;
 }
 
 function escapeHtml(str) {
@@ -583,6 +618,9 @@ function bindCardEvents(card, deviceId, { onSendCommand, onOpenSettings }) {
 export function patchDeviceCard(card, device) {
   if (!card) return;
 
+  // Si el usuario está manipulando activamente este dispositivo, encolar la actualización y no interrumpir
+  if (queueDeviceUpdateIfLocked(device)) return;
+
   // 1. Nombre y habitación
   const nameSpan = card.querySelector('[data-display-name] span:last-child');
   if (nameSpan) nameSpan.textContent = device.displayName;
@@ -690,4 +728,4 @@ export function patchDeviceCard(card, device) {
   }
 }
 
-export default { createDeviceCard, patchDeviceCard };
+export default { createDeviceCard, patchDeviceCard, isDeviceLocked, queueDeviceUpdateIfLocked };
