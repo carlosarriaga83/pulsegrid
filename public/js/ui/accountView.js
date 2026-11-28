@@ -139,11 +139,59 @@ function renderInvitations(invitations = []) {
   });
 }
 
+function renderMysaCard(mysa) {
+  const card = document.getElementById('acc-mysa-card');
+  if (!card) return;
+  if (!mysa) {
+    card.classList.add('hidden');
+    return;
+  }
+
+  card.classList.remove('hidden');
+  document.getElementById('acc-mysa-username').value = mysa.username || '';
+  const passInput = document.getElementById('acc-mysa-password');
+  if (passInput) {
+    passInput.value = '';
+    passInput.placeholder = mysa.hasPassword ? '•••••••• (guardada)' : 'Contraseña Mysa';
+  }
+  document.getElementById('acc-mysa-realtime').checked = Boolean(mysa.realtimeEnabled);
+
+  const badge = document.getElementById('acc-mysa-status-badge');
+  const meta = document.getElementById('acc-mysa-meta');
+  const feedback = document.getElementById('acc-mysa-feedback');
+  const st = mysa.status || {};
+
+  if (!mysa.configured) {
+    badge.textContent = 'Pendiente de configurar';
+    badge.className = 'text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30';
+    meta.textContent = 'Sin credenciales guardadas (puedes definirlas aquí o en .env)';
+    feedback?.classList.add('hidden');
+  } else if (st.lastSyncError) {
+    badge.textContent = 'Error de conexión';
+    badge.className = 'text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-rose-500/15 text-rose-300 border border-rose-500/30';
+    meta.textContent = `Origen: ${mysa.source === 'database' ? 'Cuenta web' : '.env'} · Último error: ${formatDateTime(st.lastSyncError.at)}`;
+    if (feedback) {
+      feedback.textContent = st.lastSyncError.message;
+      feedback.className = 'rounded-xl bg-rose-500/15 border border-rose-500/35 text-rose-300 px-3.5 py-2.5 text-xs';
+    }
+  } else if (st.authenticated || st.lastSyncAt) {
+    badge.textContent = `Conectado (${st.deviceCount || 0} termostato${st.deviceCount === 1 ? '' : 's'})`;
+    badge.className = 'text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30';
+    meta.textContent = `Origen: ${mysa.source === 'database' ? 'Cuenta web' : '.env'} · MQTT activo: ${st.realtimeSubscriptions || 0} · Último sync: ${st.lastSyncAt ? formatDateTime(st.lastSyncAt) : '—'}`;
+    feedback?.classList.add('hidden');
+  } else {
+    badge.textContent = 'Configurado (sin verificar)';
+    badge.className = 'text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-sky-500/15 text-sky-300 border border-sky-500/30';
+    meta.textContent = `Origen: ${mysa.source === 'database' ? 'Cuenta web' : '.env'} · Haz clic en "Verificar conexión" para probar tus credenciales`;
+    feedback?.classList.add('hidden');
+  }
+}
+
 export async function loadAccountData() {
   try {
     const res = await api.getAccount();
     currentOverview = res.data;
-    const { user, account, role, members, invitations } = currentOverview;
+    const { user, account, role, members, invitations, mysa } = currentOverview;
     const canManage = role === 'owner' || role === 'admin';
 
     document.getElementById('acc-profile-name').value = user.name || '';
@@ -154,6 +202,7 @@ export async function loadAccountData() {
     document.getElementById('acc-details-card')?.classList.toggle('hidden', !canManage);
     document.getElementById('acc-invite-card')?.classList.toggle('hidden', !canManage);
     document.getElementById('acc-invitations-card')?.classList.toggle('hidden', !canManage);
+    renderMysaCard(canManage ? mysa : null);
 
     renderMembers(members, canManage, user.id);
     if (canManage) renderInvitations(invitations);
@@ -209,6 +258,50 @@ export function initAccountModule({ onProfileUpdated }) {
       if (onProfileUpdatedCb) onProfileUpdatedCb({ account: res.data });
     } catch (err) {
       showToast(err.message, 'error');
+    }
+  });
+
+  // Guardar credenciales Mysa
+  document.getElementById('acc-mysa-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      const res = await api.saveMysaConfig({
+        username: document.getElementById('acc-mysa-username').value,
+        password: document.getElementById('acc-mysa-password').value,
+        realtimeEnabled: document.getElementById('acc-mysa-realtime').checked,
+      });
+      renderMysaCard(res.data);
+      showToast('Credenciales Mysa guardadas. Ahora pulsa "Verificar conexión".', 'success');
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  });
+
+  // Verificar conexión con Mysa
+  document.getElementById('btn-verify-mysa')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    const feedback = document.getElementById('acc-mysa-feedback');
+    btn.disabled = true;
+    const prev = btn.textContent;
+    btn.textContent = 'Verificando...';
+    try {
+      const res = await api.verifyMysa();
+      if (res.config) renderMysaCard(res.config);
+      if (feedback) {
+        feedback.textContent = res.message || 'Conexión con Mysa verificada correctamente';
+        feedback.className = 'rounded-xl bg-emerald-500/15 border border-emerald-500/35 text-emerald-300 px-3.5 py-2.5 text-xs';
+      }
+      showToast(res.message || 'Conexión Mysa verificada', 'success');
+    } catch (err) {
+      await loadAccountData();
+      if (feedback) {
+        feedback.textContent = err.message || 'Credenciales incorrectas o error de conexión con Mysa';
+        feedback.className = 'rounded-xl bg-rose-500/15 border border-rose-500/35 text-rose-300 px-3.5 py-2.5 text-xs';
+      }
+      showToast(err.message, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = prev;
     }
   });
 

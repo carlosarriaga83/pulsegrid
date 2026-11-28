@@ -304,13 +304,15 @@ export function createDeviceCard(device, { onSendCommand, onOpenSettings }) {
       : '';
 
   const secondaryHtml = secondaryFunctions.map((fn) => renderControlHtml(device, fn)).join('');
+  const totalParamsCount = metrics.length + secondaryFunctions.length;
+  const headlineMetric = !primarySwitch && metrics.length > 0 ? metrics[0] : null;
 
   card.innerHTML = `
-    <div class="p-5 flex-1">
-      <!-- Header: Estado + Nombre + Control Principal -->
-      <div class="flex items-start justify-between gap-3 mb-4">
+    <div class="p-4">
+      <!-- Vista compacta (colapsada por defecto): Estado + Nombre + Switch Principal -->
+      <div class="flex items-center justify-between gap-3">
         <div class="min-w-0 flex-1">
-          <div class="flex items-center gap-2 flex-wrap mb-1">
+          <div class="flex items-center gap-1.5 flex-wrap mb-1">
             <span data-online-badge class="inline-flex items-center gap-1.5 text-[11px] font-medium px-2 py-0.5 rounded-full border ${onlineBadgeClass}">
               <span data-online-dot class="h-1.5 w-1.5 rounded-full ${onlineDotClass}"></span>
               <span data-online-text>${device.isOnline ? 'Online' : 'Offline'}</span>
@@ -328,16 +330,16 @@ export function createDeviceCard(device, { onSendCommand, onOpenSettings }) {
                   : ''
             }
           </div>
-          <h3 data-display-name class="text-base font-semibold text-slate-100 truncate flex items-center gap-1.5">
+          <h3 data-display-name class="text-sm font-semibold text-slate-100 truncate flex items-center gap-1.5">
             <span>${cat.icon}</span>
             <span class="truncate">${escapeHtml(device.displayName)}</span>
           </h3>
-          <p class="text-[11px] text-slate-400 mt-0.5">${escapeHtml(cat.label)}${device.productName ? ` · ${escapeHtml(device.productName)}` : ''}</p>
+          <p class="text-[11px] text-slate-400 mt-0.5 truncate">${escapeHtml(cat.label)}${device.productName ? ` · ${escapeHtml(device.productName)}` : ''}</p>
         </div>
 
         ${
           primarySwitch
-            ? `<div class="flex flex-col items-end gap-1">
+            ? `<div class="flex flex-col items-end gap-1 flex-shrink-0">
                 <button
                   type="button"
                   role="switch"
@@ -353,16 +355,13 @@ export function createDeviceCard(device, { onSendCommand, onOpenSettings }) {
                 </button>
                 <span data-primary-label class="text-[10px] font-medium ${isPrimaryOn ? 'text-emerald-400' : 'text-slate-500'}">${isPrimaryOn ? 'ENCENDIDO' : 'APAGADO'}</span>
               </div>`
-            : ''
+            : headlineMetric
+              ? `<div class="text-right flex-shrink-0" data-headline-metric="${escapeHtml(headlineMetric.code)}">
+                  <div class="text-base font-bold font-mono text-sky-400" data-headline-value>${escapeHtml(headlineMetric.formatted)}</div>
+                  <div class="text-[10px] text-slate-400">${escapeHtml(headlineMetric.label)}</div>
+                </div>`
+              : ''
         }
-      </div>
-
-      <!-- Lecturas clave (Sensores / Telemetría) -->
-      ${metricsHtml}
-
-      <!-- Controles dinámicos secundarios (Sliders, Enums, Toggles adicionales) -->
-      <div class="divide-y divide-slate-800/70" data-controls-container>
-        ${secondaryHtml}
       </div>
 
       <!-- Indicador sutil de envío en curso -->
@@ -372,32 +371,54 @@ export function createDeviceCard(device, { onSendCommand, onOpenSettings }) {
       </div>
     </div>
 
-    <!-- Divulgación progresiva: Acordeón colapsado por defecto + botón de ajustes -->
-    <div class="border-t border-slate-800/80 bg-slate-950/40 px-5 py-2.5">
-      <div class="flex items-center justify-between gap-2">
-        <details class="group flex-1 min-w-0">
-          <summary class="list-none cursor-pointer select-none flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200 transition">
+    <!-- Sección colapsable por defecto: Parámetros, controles y detalles técnicos -->
+    <div class="border-t border-slate-800/80 bg-slate-950/40 px-4 py-2">
+      <div class="flex items-start justify-between gap-2">
+        <details class="group flex-1 min-w-0" data-card-expander>
+          <summary class="list-none cursor-pointer select-none flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200 transition py-0.5">
             <svg class="w-3.5 h-3.5 transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
             </svg>
-            <span>Detalles técnicos y DPs</span>
+            <span>Parámetros${totalParamsCount > 0 ? ` (${totalParamsCount})` : ''}</span>
           </summary>
-          <div class="mt-3 pt-2 border-t border-slate-800/70 space-y-2">
-            <div class="flex items-center justify-between text-[11px]">
-              <span class="text-slate-500">ID Tuya</span>
-              <span class="font-mono text-slate-300 select-all">${escapeHtml(device.id)}</span>
-            </div>
-            <table class="w-full text-left">
-              <thead>
-                <tr class="text-[10px] uppercase tracking-wider text-slate-500">
-                  <th class="pb-1 font-medium">DP Code</th>
-                  <th class="pb-1 text-right font-medium">Valor</th>
-                </tr>
-              </thead>
-              <tbody data-dp-table-body>
-                ${renderDpTableRows(device)}
-              </tbody>
-            </table>
+
+          <div class="mt-3 pt-3 border-t border-slate-800/70 space-y-3">
+            <!-- Lecturas clave (Sensores / Telemetría) -->
+            ${metricsHtml}
+
+            <!-- Controles dinámicos secundarios (Sliders, Enums, Toggles adicionales) -->
+            ${
+              secondaryHtml
+                ? `<div class="divide-y divide-slate-800/70" data-controls-container>${secondaryHtml}</div>`
+                : ''
+            }
+
+            <!-- Detalles técnicos avanzados -->
+            <details class="group/tech pt-2 border-t border-slate-800/70">
+              <summary class="list-none cursor-pointer select-none flex items-center gap-1.5 text-[11px] text-slate-500 hover:text-slate-300 transition">
+                <svg class="w-3 h-3 transition-transform group-open/tech:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                </svg>
+                <span>ID y DPs técnicos</span>
+              </summary>
+              <div class="mt-2 space-y-2">
+                <div class="flex items-center justify-between text-[11px]">
+                  <span class="text-slate-500">ID</span>
+                  <span class="font-mono text-slate-300 select-all">${escapeHtml(device.id)}</span>
+                </div>
+                <table class="w-full text-left">
+                  <thead>
+                    <tr class="text-[10px] uppercase tracking-wider text-slate-500">
+                      <th class="pb-1 font-medium">DP Code</th>
+                      <th class="pb-1 text-right font-medium">Valor</th>
+                    </tr>
+                  </thead>
+                  <tbody data-dp-table-body>
+                    ${renderDpTableRows(device)}
+                  </tbody>
+                </table>
+              </div>
+            </details>
           </div>
         </details>
 
@@ -405,7 +426,7 @@ export function createDeviceCard(device, { onSendCommand, onOpenSettings }) {
           type="button"
           data-open-settings
           title="Configurar dispositivo"
-          class="p-1.5 rounded-lg text-slate-400 hover:text-slate-100 hover:bg-slate-800 transition flex-shrink-0 self-start"
+          class="p-1.5 rounded-lg text-slate-400 hover:text-slate-100 hover:bg-slate-800 transition flex-shrink-0"
         >
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
@@ -643,7 +664,16 @@ export function patchDeviceCard(card, device) {
     if (device.status?.[code] !== undefined) sel.value = String(device.status[code]);
   });
 
-  // 6. Métricas de solo lectura (sensores)
+  // 6. Métricas de solo lectura (sensores) y lectura principal en vista colapsada
+  const headlineWrap = card.querySelector('[data-headline-metric]');
+  if (headlineWrap) {
+    const code = headlineWrap.dataset.headlineMetric;
+    const valEl = headlineWrap.querySelector('[data-headline-value]');
+    if (valEl) {
+      valEl.textContent = formatScaledValue(device.status?.[code], getSchemaSpec(device, code));
+    }
+  }
+
   card.querySelectorAll('[data-metric-code]').forEach((wrap) => {
     const code = wrap.dataset.metricCode;
     const valEl = wrap.querySelector('[data-metric-value]');

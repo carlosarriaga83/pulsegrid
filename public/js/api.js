@@ -157,6 +157,9 @@ export const api = {
     request(`/api/account/members/${userId}`, { method: 'PATCH', body: JSON.stringify({ role }) }),
   removeMember: (userId) =>
     request(`/api/account/members/${userId}`, { method: 'DELETE' }),
+  saveMysaConfig: (payload) =>
+    request('/api/account/mysa', { method: 'PUT', body: JSON.stringify(payload) }),
+  verifyMysa: () => request('/api/account/mysa/verify', { method: 'POST' }),
 };
 
 export default api;

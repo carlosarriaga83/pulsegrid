@@ -17,8 +17,17 @@ const MYSA_MODE_ID_TO_STR = {
 let client = null;
 let lastSyncAt = 0;
 let lastSyncError = null;
+let lastDeviceCount = 0;
 let realtimeActiveIds = new Set();
 let onRealtimeDeviceUpdate = null;
+
+// Caché en memoria de credenciales (app_settings con fallback a .env)
+let cachedCreds = {
+  username: env.mysa.username || '',
+  password: env.mysa.password || '',
+  realtimeEnabled: env.mysa.realtimeEnabled,
+  source: env.mysa.username && env.mysa.password ? 'env' : 'none',
+};
 
 export function registerRealtimeCallback(fn) {
   onRealtimeDeviceUpdate = fn;
@@ -37,7 +46,121 @@ export function toPulsegridMysaId(rawId) {
 }
 
 export function isMysaConfigured() {
-  return Boolean(env.mysa.username && env.mysa.password);
+  return Boolean(cachedCreds.username && cachedCreds.password);
+}
+
+/**
+ * Carga credenciales Mysa desde app_settings (con fallback a .env) en caché de memoria.
+ */
+export async function loadMysaCredentials() {
+  try {
+    const rows = await query(
+      "SELECT setting_value FROM app_settings WHERE setting_key = 'mysa_credentials' LIMIT 1"
+    );
+    if (rows.length > 0) {
+      const dbCfg = parseJsonSafe(rows[0].setting_value) || {};
+      const username = dbCfg.username || env.mysa.username || '';
+      const password = dbCfg.password || env.mysa.password || '';
+      const realtimeEnabled =
+        dbCfg.realtimeEnabled !== undefined ? Boolean(dbCfg.realtimeEnabled) : env.mysa.realtimeEnabled;
+
+      cachedCreds = {
+        username,
+        password,
+        realtimeEnabled,
+        source: dbCfg.username ? 'database' : username && password ? 'env' : 'none',
+      };
+      return cachedCreds;
+    }
+  } catch (err) {
+    logger.debug('No se pudo leer mysa_credentials de app_settings', { error: err.message });
+  }
+
+  cachedCreds = {
+    username: env.mysa.username || '',
+    password: env.mysa.password || '',
+    realtimeEnabled: env.mysa.realtimeEnabled,
+    source: env.mysa.username && env.mysa.password ? 'env' : 'none',
+  };
+  return cachedCreds;
+}
+
+export async function getMysaConfigForUI() {
+  await loadMysaCredentials();
+  return {
+    username: cachedCreds.username,
+    hasPassword: Boolean(cachedCreds.password),
+    realtimeEnabled: Boolean(cachedCreds.realtimeEnabled),
+    source: cachedCreds.source,
+    configured: isMysaConfigured(),
+    status: getMysaStatus(),
+  };
+}
+
+export async function saveMysaCredentials({ username, password, realtimeEnabled }) {
+  await loadMysaCredentials();
+  const nextUsername = username !== undefined ? String(username).trim() : cachedCreds.username;
+  const nextPassword =
+    password !== undefined && String(password).trim() !== '' ? String(password) : cachedCreds.password;
+  const nextRealtime =
+    realtimeEnabled !== undefined ? Boolean(realtimeEnabled) : cachedCreds.realtimeEnabled;
+
+  await query(
+    `INSERT INTO app_settings (setting_key, setting_value, description)
+     VALUES ('mysa_credentials', ?, 'Credenciales de cuenta Mysa Smart Thermostats')
+     ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = CURRENT_TIMESTAMP`,
+    [JSON.stringify({ username: nextUsername, password: nextPassword, realtimeEnabled: nextRealtime })]
+  );
+
+  // Reiniciar cliente y sesión guardada para usar las nuevas credenciales
+  await stopMysaRealtime();
+  client = null;
+  lastSyncError = null;
+  await query("DELETE FROM app_settings WHERE setting_key = 'mysa_session'").catch(() => {});
+
+  cachedCreds = {
+    username: nextUsername,
+    password: nextPassword,
+    realtimeEnabled: nextRealtime,
+    source: nextUsername ? 'database' : 'none',
+  };
+
+  return getMysaConfigForUI();
+}
+
+/**
+ * Verifica las credenciales de Mysa intentando autenticar y listar dispositivos.
+ */
+export async function verifyMysaConnection() {
+  await loadMysaCredentials();
+  if (!isMysaConfigured()) {
+    return {
+      ok: false,
+      error: 'Ingresa tu correo y contraseña de Mysa antes de verificar.',
+      status: getMysaStatus(),
+    };
+  }
+
+  // Forzar login limpio para validar que las credenciales actuales son correctas
+  await stopMysaRealtime();
+  client = null;
+  await query("DELETE FROM app_settings WHERE setting_key = 'mysa_session'").catch(() => {});
+
+  try {
+    const syncRes = await syncMysaDevices();
+    return {
+      ok: true,
+      deviceCount: syncRes.count,
+      message: `Conexión verificada correctamente. Se encontraron ${syncRes.count} termostato(s) Mysa.`,
+      status: getMysaStatus(),
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err.message || 'No se pudo autenticar con Mysa',
+      status: getMysaStatus(),
+    };
+  }
 }
 
 function parseJsonSafe(val) {
@@ -59,7 +182,7 @@ async function loadSavedSession() {
     );
     if (rows.length > 0) {
       const parsed = parseJsonSafe(rows[0].setting_value);
-      if (parsed && parsed.username === env.mysa.username && parsed.refreshToken) {
+      if (parsed && parsed.username === cachedCreds.username && parsed.refreshToken) {
         return parsed;
       }
     }
@@ -254,7 +377,7 @@ async function getAuthenticatedClient() {
   }
 
   if (!client.isAuthenticated) {
-    await client.login(env.mysa.username, env.mysa.password);
+    await client.login(cachedCreds.username, cachedCreds.password);
   }
 
   return client;
@@ -316,7 +439,7 @@ export async function syncMysaDevices() {
         ]
       );
 
-      if (env.mysa.realtimeEnabled && !realtimeActiveIds.has(rawId)) {
+      if (cachedCreds.realtimeEnabled && !realtimeActiveIds.has(rawId)) {
         try {
           await apiClient.startRealtimeUpdates(rawId);
           realtimeActiveIds.add(rawId);
@@ -328,6 +451,7 @@ export async function syncMysaDevices() {
 
     lastSyncAt = Date.now();
     lastSyncError = null;
+    lastDeviceCount = rawIds.length;
     logger.info(`Mysa sincronizado: ${rawIds.length} termostato(s)`);
     return { synced: true, count: rawIds.length };
   } catch (err) {
@@ -430,6 +554,7 @@ export function getMysaStatus() {
   return {
     configured: isMysaConfigured(),
     authenticated: Boolean(client?.isAuthenticated),
+    deviceCount: lastDeviceCount,
     realtimeSubscriptions: realtimeActiveIds.size,
     lastSyncAt: lastSyncAt ? new Date(lastSyncAt).toISOString() : null,
     lastSyncError,
@@ -439,6 +564,10 @@ export function getMysaStatus() {
 export default {
   isMysaDeviceId,
   isMysaConfigured,
+  loadMysaCredentials,
+  getMysaConfigForUI,
+  saveMysaCredentials,
+  verifyMysaConnection,
   registerRealtimeCallback,
   syncMysaDevices,
   sendMysaCommands,

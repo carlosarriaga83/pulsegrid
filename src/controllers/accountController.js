@@ -1,4 +1,7 @@
 import authService from '../services/authService.js';
+import mysaService from '../services/mysaService.js';
+import tuyaService from '../services/tuyaService.js';
+import { emitDevicesSnapshot } from '../sockets/socketManager.js';
 
 function resolveBaseUrl(req) {
   const proto = req.headers['x-forwarded-proto'] || req.protocol || 'https';
@@ -9,10 +12,9 @@ function resolveBaseUrl(req) {
 export async function getOverview(req, res, next) {
   try {
     const members = await authService.listAccountMembers(req.account.id);
-    const invitations =
-      req.role === 'owner' || req.role === 'admin'
-        ? await authService.listInvitations(req.account.id)
-        : [];
+    const canManage = req.role === 'owner' || req.role === 'admin';
+    const invitations = canManage ? await authService.listInvitations(req.account.id) : [];
+    const mysa = canManage ? await mysaService.getMysaConfigForUI() : null;
 
     res.json({
       ok: true,
@@ -22,6 +24,7 @@ export async function getOverview(req, res, next) {
         role: req.role,
         members,
         invitations,
+        mysa,
       },
     });
   } catch (err) {
@@ -108,6 +111,38 @@ export async function removeMember(req, res, next) {
   }
 }
 
+export async function getMysaConfig(_req, res, next) {
+  try {
+    const data = await mysaService.getMysaConfigForUI();
+    res.json({ ok: true, data });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function saveMysaConfig(req, res, next) {
+  try {
+    const data = await mysaService.saveMysaCredentials(req.body || {});
+    res.json({ ok: true, data });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function verifyMysa(_req, res, next) {
+  try {
+    const result = await mysaService.verifyMysaConnection();
+    if (result.ok) {
+      const devices = await tuyaService.loadDevicesFromDb();
+      emitDevicesSnapshot(devices);
+    }
+    const config = await mysaService.getMysaConfigForUI();
+    res.status(result.ok ? 200 : 400).json({ ...result, config });
+  } catch (err) {
+    next(err);
+  }
+}
+
 export default {
   getOverview,
   updateProfile,
@@ -117,4 +152,7 @@ export default {
   revokeInvitation,
   updateMemberRole,
   removeMember,
+  getMysaConfig,
+  saveMysaConfig,
+  verifyMysa,
 };

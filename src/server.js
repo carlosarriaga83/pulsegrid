@@ -37,8 +37,10 @@ async function bootstrap() {
     logger.warn('Tuya Cloud API pendiente de credenciales en .env (TUYA_ACCESS_KEY / TUYA_SECRET_KEY)');
   }
 
+  await mysaService.loadMysaCredentials();
+
   if (mysaService.isMysaConfigured()) {
-    logger.info(`Mysa Smart Thermostats configurado (${env.mysa.username})`);
+    logger.info('Mysa Smart Thermostats configurado');
     mysaService.registerRealtimeCallback((device) => {
       emitDeviceUpdate(device);
       telemetryService.recordDeviceSnapshot(device).catch(() => {});

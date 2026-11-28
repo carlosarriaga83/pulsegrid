@@ -757,6 +757,52 @@
         </div>
       </div>
 
+      <!-- Integración Mysa Smart Thermostats (owner/admin) -->
+      <div id="acc-mysa-card" class="hidden rounded-2xl bg-slate-900/90 border border-slate-800 p-5 space-y-4">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 class="text-sm font-semibold text-slate-100">Integración · Mysa Smart Thermostats</h3>
+            <p class="text-xs text-slate-400 mt-0.5">Configura tu cuenta Mysa y verifica si la conexión y sincronización funcionan correctamente.</p>
+          </div>
+          <span id="acc-mysa-status-badge" class="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30">
+            Pendiente
+          </span>
+        </div>
+
+        <div id="acc-mysa-feedback" class="hidden rounded-xl px-3.5 py-2.5 text-xs"></div>
+
+        <form id="acc-mysa-form" class="space-y-3">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label class="block text-[11px] text-slate-400 mb-1">Correo de cuenta Mysa</label>
+              <input id="acc-mysa-username" type="email" placeholder="tu@correo-mysa.com" class="w-full rounded-xl bg-slate-950 border border-slate-800 px-3 py-2 text-xs text-slate-100" />
+            </div>
+            <div>
+              <label class="block text-[11px] text-slate-400 mb-1">Contraseña Mysa</label>
+              <input id="acc-mysa-password" type="password" placeholder="Contraseña Mysa" class="w-full rounded-xl bg-slate-950 border border-slate-800 px-3 py-2 text-xs text-slate-100" />
+            </div>
+          </div>
+
+          <div class="flex flex-wrap items-center justify-between gap-3 pt-1">
+            <div class="space-y-1">
+              <label class="inline-flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+                <input id="acc-mysa-realtime" type="checkbox" checked class="h-4 w-4 accent-sky-500" />
+                <span>Activar actualizaciones en tiempo real (MQTT)</span>
+              </label>
+              <p id="acc-mysa-meta" class="text-[11px] text-slate-500">—</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <button id="btn-verify-mysa" type="button" class="px-3.5 py-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/35 text-xs font-semibold transition">
+                Verificar conexión
+              </button>
+              <button type="submit" class="px-4 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 text-xs font-semibold transition">
+                Guardar credenciales
+              </button>
+            </div>
+          </div>
+        </form>
+      </div>
+
       <!-- Invitar usuarios a la cuenta (owner/admin) -->
       <div id="acc-invite-card" class="hidden rounded-2xl bg-slate-900/90 border border-slate-800 p-5 space-y-4">
         <div>

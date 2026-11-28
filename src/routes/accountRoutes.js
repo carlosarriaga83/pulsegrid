@@ -14,5 +14,8 @@ router.post('/invitations', requireRole('owner', 'admin'), accountController.inv
 router.delete('/invitations/:id', requireRole('owner', 'admin'), accountController.revokeInvitation);
 router.patch('/members/:userId', requireRole('owner', 'admin'), accountController.updateMemberRole);
 router.delete('/members/:userId', requireRole('owner', 'admin'), accountController.removeMember);
+router.get('/mysa', requireRole('owner', 'admin'), accountController.getMysaConfig);
+router.put('/mysa', requireRole('owner', 'admin'), accountController.saveMysaConfig);
+router.post('/mysa/verify', requireRole('owner', 'admin'), accountController.verifyMysa);
 
 export default router;
