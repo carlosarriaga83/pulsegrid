@@ -31,20 +31,24 @@ async function bootstrap() {
     });
   }
 
-  if (tuyaService.isTuyaConfigured()) {
-    logger.info(`Tuya Cloud API configurada (${env.tuya.baseUrl})`);
-  } else {
-    logger.warn('Tuya Cloud API pendiente de credenciales en .env (TUYA_ACCESS_KEY / TUYA_SECRET_KEY)');
-  }
-
+  await tuyaService.loadTuyaCredentials();
   await mysaService.loadMysaCredentials();
+
+  // Registrar callback en vivo de Mysa SIEMPRE (aunque las credenciales se agreguen luego desde la UI)
+  mysaService.registerRealtimeCallback((device) => {
+    tuyaService.upsertDeviceInCache(device);
+    emitDeviceUpdate(device);
+    telemetryService.recordDeviceSnapshot(device).catch(() => {});
+  });
+
+  if (tuyaService.isTuyaConfigured()) {
+    logger.info('Tuya Cloud API configurada');
+  } else {
+    logger.warn('Tuya Cloud API pendiente de credenciales (Cuenta o .env)');
+  }
 
   if (mysaService.isMysaConfigured()) {
     logger.info('Mysa Smart Thermostats configurado');
-    mysaService.registerRealtimeCallback((device) => {
-      emitDeviceUpdate(device);
-      telemetryService.recordDeviceSnapshot(device).catch(() => {});
-    });
     mysaService
       .syncMysaDevices()
       .then(() => tuyaService.loadDevicesFromDb())

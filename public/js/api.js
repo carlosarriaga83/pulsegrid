@@ -160,6 +160,9 @@ export const api = {
   saveMysaConfig: (payload) =>
     request('/api/account/mysa', { method: 'PUT', body: JSON.stringify(payload) }),
   verifyMysa: () => request('/api/account/mysa/verify', { method: 'POST' }),
+  saveTuyaConfig: (payload) =>
+    request('/api/account/tuya', { method: 'PUT', body: JSON.stringify(payload) }),
+  verifyTuya: () => request('/api/account/tuya/verify', { method: 'POST' }),
 };
 
 export default api;

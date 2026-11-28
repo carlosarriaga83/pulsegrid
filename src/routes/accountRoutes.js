@@ -17,5 +17,8 @@ router.delete('/members/:userId', requireRole('owner', 'admin'), accountControll
 router.get('/mysa', requireRole('owner', 'admin'), accountController.getMysaConfig);
 router.put('/mysa', requireRole('owner', 'admin'), accountController.saveMysaConfig);
 router.post('/mysa/verify', requireRole('owner', 'admin'), accountController.verifyMysa);
+router.get('/tuya', requireRole('owner', 'admin'), accountController.getTuyaConfig);
+router.put('/tuya', requireRole('owner', 'admin'), accountController.saveTuyaConfig);
+router.post('/tuya/verify', requireRole('owner', 'admin'), accountController.verifyTuya);
 
 export default router;

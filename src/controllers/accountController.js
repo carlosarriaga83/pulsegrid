@@ -15,6 +15,7 @@ export async function getOverview(req, res, next) {
     const canManage = req.role === 'owner' || req.role === 'admin';
     const invitations = canManage ? await authService.listInvitations(req.account.id) : [];
     const mysa = canManage ? await mysaService.getMysaConfigForUI() : null;
+    const tuya = canManage ? await tuyaService.getTuyaConfigForUI() : null;
 
     res.json({
       ok: true,
@@ -25,6 +26,7 @@ export async function getOverview(req, res, next) {
         members,
         invitations,
         mysa,
+        tuya,
       },
     });
   } catch (err) {
@@ -143,6 +145,38 @@ export async function verifyMysa(_req, res, next) {
   }
 }
 
+export async function getTuyaConfig(_req, res, next) {
+  try {
+    const data = await tuyaService.getTuyaConfigForUI();
+    res.json({ ok: true, data });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function saveTuyaConfig(req, res, next) {
+  try {
+    const data = await tuyaService.saveTuyaCredentials(req.body || {});
+    res.json({ ok: true, data });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function verifyTuya(_req, res, next) {
+  try {
+    const result = await tuyaService.verifyTuyaConnection();
+    if (result.ok) {
+      const devices = await tuyaService.loadDevicesFromDb();
+      emitDevicesSnapshot(devices);
+    }
+    const config = await tuyaService.getTuyaConfigForUI();
+    res.status(result.ok ? 200 : 400).json({ ...result, config });
+  } catch (err) {
+    next(err);
+  }
+}
+
 export default {
   getOverview,
   updateProfile,
@@ -155,4 +189,7 @@ export default {
   getMysaConfig,
   saveMysaConfig,
   verifyMysa,
+  getTuyaConfig,
+  saveTuyaConfig,
+  verifyTuya,
 };

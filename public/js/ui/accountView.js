@@ -139,6 +139,55 @@ function renderInvitations(invitations = []) {
   });
 }
 
+function renderTuyaCard(tuya) {
+  const card = document.getElementById('acc-tuya-card');
+  if (!card) return;
+  if (!tuya) {
+    card.classList.add('hidden');
+    return;
+  }
+
+  card.classList.remove('hidden');
+  document.getElementById('acc-tuya-baseurl').value = tuya.baseUrl || 'https://openapi.tuyaus.com';
+  document.getElementById('acc-tuya-key').value = tuya.accessKey || '';
+  document.getElementById('acc-tuya-uid').value = tuya.userUid || '';
+  const secretInput = document.getElementById('acc-tuya-secret');
+  if (secretInput) {
+    secretInput.value = '';
+    secretInput.placeholder = tuya.hasSecretKey ? '•••••••• (guardado)' : 'Tuya Access Secret';
+  }
+
+  const badge = document.getElementById('acc-tuya-status-badge');
+  const meta = document.getElementById('acc-tuya-meta');
+  const feedback = document.getElementById('acc-tuya-feedback');
+  const st = tuya.status || {};
+
+  if (!tuya.configured) {
+    badge.textContent = 'Pendiente de configurar';
+    badge.className = 'text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30';
+    meta.textContent = 'Sin credenciales guardadas (puedes definirlas aquí o en .env)';
+    feedback?.classList.add('hidden');
+  } else if (st.lastSyncError) {
+    badge.textContent = 'Error de conexión';
+    badge.className = 'text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-rose-500/15 text-rose-300 border border-rose-500/30';
+    meta.textContent = `Origen: ${tuya.source === 'database' ? 'Cuenta web' : '.env'} · Último error: ${formatDateTime(st.lastSyncError.at)}`;
+    if (feedback) {
+      feedback.textContent = st.lastSyncError.message;
+      feedback.className = 'rounded-xl bg-rose-500/15 border border-rose-500/35 text-rose-300 px-3.5 py-2.5 text-xs';
+    }
+  } else if (st.lastSyncAt) {
+    badge.textContent = `Conectado (${st.tuyaDeviceCount || st.cachedDevices || 0} equipos)`;
+    badge.className = 'text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30';
+    meta.textContent = `Origen: ${tuya.source === 'database' ? 'Cuenta web' : '.env'} · Último sync: ${formatDateTime(st.lastSyncAt)}`;
+    feedback?.classList.add('hidden');
+  } else {
+    badge.textContent = 'Configurado (sin verificar)';
+    badge.className = 'text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-sky-500/15 text-sky-300 border border-sky-500/30';
+    meta.textContent = `Origen: ${tuya.source === 'database' ? 'Cuenta web' : '.env'} · Haz clic en "Verificar conexión" para probar tus claves`;
+    feedback?.classList.add('hidden');
+  }
+}
+
 function renderMysaCard(mysa) {
   const card = document.getElementById('acc-mysa-card');
   if (!card) return;
@@ -191,7 +240,7 @@ export async function loadAccountData() {
   try {
     const res = await api.getAccount();
     currentOverview = res.data;
-    const { user, account, role, members, invitations, mysa } = currentOverview;
+    const { user, account, role, members, invitations, mysa, tuya } = currentOverview;
     const canManage = role === 'owner' || role === 'admin';
 
     document.getElementById('acc-profile-name').value = user.name || '';
@@ -202,6 +251,7 @@ export async function loadAccountData() {
     document.getElementById('acc-details-card')?.classList.toggle('hidden', !canManage);
     document.getElementById('acc-invite-card')?.classList.toggle('hidden', !canManage);
     document.getElementById('acc-invitations-card')?.classList.toggle('hidden', !canManage);
+    renderTuyaCard(canManage ? tuya : null);
     renderMysaCard(canManage ? mysa : null);
 
     renderMembers(members, canManage, user.id);
@@ -258,6 +308,51 @@ export function initAccountModule({ onProfileUpdated }) {
       if (onProfileUpdatedCb) onProfileUpdatedCb({ account: res.data });
     } catch (err) {
       showToast(err.message, 'error');
+    }
+  });
+
+  // Guardar credenciales Tuya
+  document.getElementById('acc-tuya-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      const res = await api.saveTuyaConfig({
+        baseUrl: document.getElementById('acc-tuya-baseurl').value,
+        accessKey: document.getElementById('acc-tuya-key').value,
+        secretKey: document.getElementById('acc-tuya-secret').value,
+        userUid: document.getElementById('acc-tuya-uid').value,
+      });
+      renderTuyaCard(res.data);
+      showToast('Credenciales Tuya guardadas. Ahora pulsa "Verificar conexión".', 'success');
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  });
+
+  // Verificar conexión con Tuya
+  document.getElementById('btn-verify-tuya')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    const feedback = document.getElementById('acc-tuya-feedback');
+    btn.disabled = true;
+    const prev = btn.textContent;
+    btn.textContent = 'Verificando...';
+    try {
+      const res = await api.verifyTuya();
+      if (res.config) renderTuyaCard(res.config);
+      if (feedback) {
+        feedback.textContent = res.message || 'Conexión con Tuya verificada correctamente';
+        feedback.className = 'rounded-xl bg-emerald-500/15 border border-emerald-500/35 text-emerald-300 px-3.5 py-2.5 text-xs';
+      }
+      showToast(res.message || 'Conexión Tuya verificada', 'success');
+    } catch (err) {
+      await loadAccountData();
+      if (feedback) {
+        feedback.textContent = err.message || 'Credenciales incorrectas o error de conexión con Tuya';
+        feedback.className = 'rounded-xl bg-rose-500/15 border border-rose-500/35 text-rose-300 px-3.5 py-2.5 text-xs';
+      }
+      showToast(err.message, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = prev;
     }
   });
 

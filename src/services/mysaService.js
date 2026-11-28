@@ -402,6 +402,7 @@ export async function syncMysaDevices() {
     const devicesObj = devicesRes?.DevicesObj || {};
     const statesObj = statesRes?.DeviceStatesObj || {};
     const rawIds = Object.keys(devicesObj);
+    const changes = [];
 
     for (const rawId of rawIds) {
       const dev = devicesObj[rawId];
@@ -409,8 +410,10 @@ export async function syncMysaDevices() {
       const pgId = toPulsegridMysaId(rawId);
       const schema = buildMysaSchema(dev);
 
-      const existingRows = await query('SELECT last_status FROM devices WHERE id = ? LIMIT 1', [pgId]);
-      const prevStatus = existingRows.length > 0 ? parseJsonSafe(existingRows[0].last_status) || {} : {};
+      const existingRows = await query('SELECT * FROM devices WHERE id = ? LIMIT 1', [pgId]);
+      const existingRow = existingRows[0] || null;
+      const prevStatus = existingRow ? parseJsonSafe(existingRow.last_status) || {} : {};
+      const prevOnline = existingRow ? Boolean(existingRow.is_online) : null;
       const statusMap = mapMysaStateToStatus(state, prevStatus);
       const isOnline = state.Connected?.v !== undefined ? Boolean(state.Connected.v) : true;
       const name = dev.Name || `Mysa ${dev.Model || rawId.slice(-4)}`;
@@ -439,6 +442,35 @@ export async function syncMysaDevices() {
         ]
       );
 
+      const formattedDevice = {
+        id: pgId,
+        name,
+        customName: existingRow?.custom_name || null,
+        displayName: existingRow?.custom_name || name,
+        category: 'wk',
+        productId: dev.Model || 'mysa',
+        productName: `Mysa ${dev.Model || 'Thermostat'}`,
+        iconUrl: existingRow?.icon_url || null,
+        room: existingRow?.room || dev.Zone || null,
+        isOnline,
+        lastOnlineAt: isOnline ? new Date().toISOString() : existingRow?.last_online_at || null,
+        dpSchema: schema,
+        status: statusMap,
+        notifyOnOffline: Boolean(existingRow?.notify_on_offline),
+        offlineCooldownMinutes: existingRow?.offline_cooldown_minutes || 60,
+        updatedAt: new Date().toISOString(),
+      };
+
+      const statusChanged = !existingRow || JSON.stringify(prevStatus) !== JSON.stringify(statusMap);
+      const onlineChanged = prevOnline !== null && prevOnline !== isOnline;
+
+      if (statusChanged || onlineChanged) {
+        changes.push({ device: formattedDevice, statusChanged, onlineChanged, wentOffline: Boolean(onlineChanged && !isOnline) });
+        if (typeof onRealtimeDeviceUpdate === 'function') {
+          onRealtimeDeviceUpdate(formattedDevice);
+        }
+      }
+
       if (cachedCreds.realtimeEnabled && !realtimeActiveIds.has(rawId)) {
         try {
           await apiClient.startRealtimeUpdates(rawId);
@@ -453,7 +485,7 @@ export async function syncMysaDevices() {
     lastSyncError = null;
     lastDeviceCount = rawIds.length;
     logger.info(`Mysa sincronizado: ${rawIds.length} termostato(s)`);
-    return { synced: true, count: rawIds.length };
+    return { synced: true, count: rawIds.length, changes };
   } catch (err) {
     lastSyncError = { message: err.message, at: new Date().toISOString() };
     logger.error('Error sincronizando termostatos Mysa', err);

@@ -11,6 +11,16 @@ const deviceCache = new Map();
 const specCache = new Map();
 let lastSyncAt = 0;
 let lastSyncError = null;
+let lastTuyaDeviceCount = 0;
+
+// Credenciales Tuya (app_settings con fallback a .env)
+let cachedTuyaCreds = {
+  baseUrl: env.tuya.baseUrl || 'https://openapi.tuyaus.com',
+  accessKey: env.tuya.accessKey || '',
+  secretKey: env.tuya.secretKey || '',
+  userUid: env.tuya.userUid || '',
+  source: env.tuya.accessKey && env.tuya.secretKey ? 'env' : 'none',
+};
 
 function parseJsonSafe(val) {
   if (val === null || val === undefined) return null;
@@ -25,18 +35,134 @@ function parseJsonSafe(val) {
 }
 
 export function isTuyaConfigured() {
-  return Boolean(env.tuya.baseUrl && env.tuya.accessKey && env.tuya.secretKey);
+  return Boolean(cachedTuyaCreds.baseUrl && cachedTuyaCreds.accessKey && cachedTuyaCreds.secretKey);
+}
+
+export async function loadTuyaCredentials() {
+  try {
+    const rows = await query(
+      "SELECT setting_value FROM app_settings WHERE setting_key = 'tuya_credentials' LIMIT 1"
+    );
+    if (rows.length > 0) {
+      const dbCfg = parseJsonSafe(rows[0].setting_value) || {};
+      const baseUrl = dbCfg.baseUrl || env.tuya.baseUrl || 'https://openapi.tuyaus.com';
+      const accessKey = dbCfg.accessKey || env.tuya.accessKey || '';
+      const secretKey = dbCfg.secretKey || env.tuya.secretKey || '';
+      const userUid = dbCfg.userUid !== undefined && dbCfg.userUid !== '' ? dbCfg.userUid : env.tuya.userUid || '';
+      cachedTuyaCreds = {
+        baseUrl,
+        accessKey,
+        secretKey,
+        userUid,
+        source: dbCfg.accessKey ? 'database' : accessKey && secretKey ? 'env' : 'none',
+      };
+      return cachedTuyaCreds;
+    }
+  } catch (err) {
+    logger.debug('No se pudo leer tuya_credentials de app_settings', { error: err.message });
+  }
+
+  cachedTuyaCreds = {
+    baseUrl: env.tuya.baseUrl || 'https://openapi.tuyaus.com',
+    accessKey: env.tuya.accessKey || '',
+    secretKey: env.tuya.secretKey || '',
+    userUid: env.tuya.userUid || '',
+    source: env.tuya.accessKey && env.tuya.secretKey ? 'env' : 'none',
+  };
+  return cachedTuyaCreds;
+}
+
+export async function getTuyaConfigForUI() {
+  await loadTuyaCredentials();
+  return {
+    baseUrl: cachedTuyaCreds.baseUrl,
+    accessKey: cachedTuyaCreds.accessKey,
+    hasSecretKey: Boolean(cachedTuyaCreds.secretKey),
+    userUid: cachedTuyaCreds.userUid,
+    source: cachedTuyaCreds.source,
+    configured: isTuyaConfigured(),
+    status: getCacheStats(),
+  };
+}
+
+export async function saveTuyaCredentials({ baseUrl, accessKey, secretKey, userUid }) {
+  await loadTuyaCredentials();
+  const next = {
+    baseUrl: baseUrl !== undefined && String(baseUrl).trim() !== '' ? String(baseUrl).trim() : cachedTuyaCreds.baseUrl,
+    accessKey: accessKey !== undefined ? String(accessKey).trim() : cachedTuyaCreds.accessKey,
+    secretKey: secretKey !== undefined && String(secretKey).trim() !== '' ? String(secretKey).trim() : cachedTuyaCreds.secretKey,
+    userUid: userUid !== undefined ? String(userUid).trim() : cachedTuyaCreds.userUid,
+  };
+
+  await query(
+    `INSERT INTO app_settings (setting_key, setting_value, description)
+     VALUES ('tuya_credentials', ?, 'Credenciales de Tuya Cloud OpenAPI')
+     ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = CURRENT_TIMESTAMP`,
+    [JSON.stringify(next)]
+  );
+
+  tuyaClient = null;
+  lastSyncError = null;
+  cachedTuyaCreds = {
+    ...next,
+    source: next.accessKey ? 'database' : 'none',
+  };
+
+  return getTuyaConfigForUI();
+}
+
+export async function verifyTuyaConnection() {
+  await loadTuyaCredentials();
+  if (!isTuyaConfigured()) {
+    return {
+      ok: false,
+      error: 'Ingresa Base URL, Access ID y Access Secret de Tuya antes de verificar.',
+      status: getCacheStats(),
+    };
+  }
+
+  tuyaClient = null;
+  try {
+    const tuyaDevices = await fetchDevicesFromTuya();
+    lastSyncError = null;
+    lastTuyaDeviceCount = tuyaDevices.length;
+    await syncDevices().catch(() => {});
+    return {
+      ok: true,
+      deviceCount: tuyaDevices.length,
+      message: `Conexión con Tuya Cloud verificada. Se encontraron ${tuyaDevices.length} dispositivo(s).`,
+      status: getCacheStats(),
+    };
+  } catch (err) {
+    const codeMatch = String(err.message || '').match(/\((\d+)\)/);
+    lastSyncError = {
+      message: err.message,
+      code: codeMatch ? codeMatch[1] : null,
+      at: new Date().toISOString(),
+    };
+    return {
+      ok: false,
+      error: err.message,
+      status: getCacheStats(),
+    };
+  }
+}
+
+export function upsertDeviceInCache(device) {
+  if (!device?.id) return;
+  deviceCache.set(device.id, device);
+  if (device.dpSchema) specCache.set(device.id, device.dpSchema);
 }
 
 function getClient() {
   if (!isTuyaConfigured()) {
-    throw new Error('Tuya Cloud API no está configurada. Define TUYA_ACCESS_KEY y TUYA_SECRET_KEY en .env');
+    throw new Error('Tuya Cloud API no está configurada. Define TUYA_ACCESS_KEY y TUYA_SECRET_KEY en Cuenta o .env');
   }
   if (!tuyaClient) {
     tuyaClient = new TuyaContext({
-      baseUrl: env.tuya.baseUrl,
-      accessKey: env.tuya.accessKey,
-      secretKey: env.tuya.secretKey,
+      baseUrl: cachedTuyaCreds.baseUrl,
+      accessKey: cachedTuyaCreds.accessKey,
+      secretKey: cachedTuyaCreds.secretKey,
     });
   }
   return tuyaClient;
@@ -302,9 +428,9 @@ async function fetchDevicesFromTuya() {
   const client = getClient();
 
   // Ruta principal cuando se provee el UID del usuario de la app Smart Life / Tuya Smart
-  if (env.tuya.userUid) {
+  if (cachedTuyaCreds.userUid) {
     const res = await client.request({
-      path: `/v1.0/users/${env.tuya.userUid}/devices`,
+      path: `/v1.0/users/${cachedTuyaCreds.userUid}/devices`,
       method: 'GET',
     });
     if (res.success && Array.isArray(res.result)) {
@@ -382,6 +508,10 @@ export async function syncDevices() {
     }
   }
 
+  if (mysaResult.synced) {
+    await loadDevicesFromDb();
+  }
+
   if (!isTuyaConfigured()) {
     const dbDevices = await loadDevicesFromDb();
     return {
@@ -389,7 +519,7 @@ export async function syncDevices() {
       reason: mysaResult.synced ? undefined : 'Ni Tuya Cloud ni Mysa están configurados',
       mysa: mysaResult,
       devices: dbDevices,
-      changes: [],
+      changes: mysaResult.changes || [],
     };
   }
 
@@ -397,6 +527,7 @@ export async function syncDevices() {
   try {
     tuyaDevices = await fetchDevicesFromTuya();
     lastSyncError = null;
+    lastTuyaDeviceCount = tuyaDevices.length;
   } catch (err) {
     const codeMatch = String(err.message || '').match(/\((\d+)\)/);
     lastSyncError = {
@@ -715,6 +846,7 @@ export function getCacheStats() {
   return {
     configured: isTuyaConfigured(),
     cachedDevices: deviceCache.size,
+    tuyaDeviceCount: lastTuyaDeviceCount,
     cachedSpecs: specCache.size,
     lastSyncAt: lastSyncAt ? new Date(lastSyncAt).toISOString() : null,
     lastSyncError,
@@ -855,6 +987,11 @@ export async function clearDemoDevices() {
 
 export default {
   isTuyaConfigured,
+  loadTuyaCredentials,
+  getTuyaConfigForUI,
+  saveTuyaCredentials,
+  verifyTuyaConnection,
+  upsertDeviceInCache,
   getDevices,
   getDeviceById,
   getDeviceSpecification,

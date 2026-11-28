@@ -757,6 +757,64 @@
         </div>
       </div>
 
+      <!-- Integración Tuya Cloud OpenAPI (owner/admin) -->
+      <div id="acc-tuya-card" class="hidden rounded-2xl bg-slate-900/90 border border-slate-800 p-5 space-y-4">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 class="text-sm font-semibold text-slate-100">Integración · Tuya Cloud OpenAPI</h3>
+            <p class="text-xs text-slate-400 mt-0.5">Configura tus claves de Tuya IoT Platform y verifica que la suscripción y credenciales respondan correctamente.</p>
+          </div>
+          <span id="acc-tuya-status-badge" class="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30">
+            Pendiente
+          </span>
+        </div>
+
+        <div id="acc-tuya-feedback" class="hidden rounded-xl px-3.5 py-2.5 text-xs"></div>
+
+        <form id="acc-tuya-form" class="space-y-3">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label class="block text-[11px] text-slate-400 mb-1">Región / Base URL</label>
+              <select id="acc-tuya-baseurl" class="w-full rounded-xl bg-slate-950 border border-slate-800 px-3 py-2 text-xs text-slate-100">
+                <option value="https://openapi.tuyaus.com">Western America (openapi.tuyaus.com)</option>
+                <option value="https://openapi-ueaz.tuyaus.com">Eastern America (openapi-ueaz.tuyaus.com)</option>
+                <option value="https://openapi.tuyaeu.com">Central Europe (openapi.tuyaeu.com)</option>
+                <option value="https://openapi-weaz.tuyaeu.com">Western Europe (openapi-weaz.tuyaeu.com)</option>
+                <option value="https://openapi.tuyacn.com">China (openapi.tuyacn.com)</option>
+                <option value="https://openapi.tuyain.com">India (openapi.tuyain.com)</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-[11px] text-slate-400 mb-1">User UID (Smart Life / Tuya Smart)</label>
+              <input id="acc-tuya-uid" type="text" placeholder="Ej. az16..." class="w-full rounded-xl bg-slate-950 border border-slate-800 px-3 py-2 text-xs text-slate-100 font-mono" />
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label class="block text-[11px] text-slate-400 mb-1">Access ID (Key)</label>
+              <input id="acc-tuya-key" type="text" placeholder="Tuya Access ID" class="w-full rounded-xl bg-slate-950 border border-slate-800 px-3 py-2 text-xs text-slate-100 font-mono" />
+            </div>
+            <div>
+              <label class="block text-[11px] text-slate-400 mb-1">Access Secret</label>
+              <input id="acc-tuya-secret" type="password" placeholder="Tuya Access Secret" class="w-full rounded-xl bg-slate-950 border border-slate-800 px-3 py-2 text-xs text-slate-100 font-mono" />
+            </div>
+          </div>
+
+          <div class="flex flex-wrap items-center justify-between gap-3 pt-1">
+            <p id="acc-tuya-meta" class="text-[11px] text-slate-500">—</p>
+            <div class="flex items-center gap-2">
+              <button id="btn-verify-tuya" type="button" class="px-3.5 py-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/35 text-xs font-semibold transition">
+                Verificar conexión
+              </button>
+              <button type="submit" class="px-4 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 text-xs font-semibold transition">
+                Guardar credenciales
+              </button>
+            </div>
+          </div>
+        </form>
+      </div>
+
       <!-- Integración Mysa Smart Thermostats (owner/admin) -->
       <div id="acc-mysa-card" class="hidden rounded-2xl bg-slate-900/90 border border-slate-800 p-5 space-y-4">
         <div class="flex flex-wrap items-center justify-between gap-2">
